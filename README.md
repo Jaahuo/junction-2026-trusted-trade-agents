@@ -6,6 +6,10 @@
 
 Install mise, Docker with Compose, Git and GitHub CLI. Run `mise install`, then `bun install --frozen-lockfile` and `bun run setup` to initialize this worktree's local PostgreSQL runtime. Keep secrets in ignored `.env`; see `.env.example` and [runtime guidance](docs/runtime.md).
 
+## Product specification
+
+The [living product specification](docs/product-specification.md) defines the intended scope, ordering flow, rules, decisions and open questions. Update it as the product evolves; it is not a statement of implemented features.
+
 ## Challenge data
 
 Read the [challenge brief](docs/challenge.md) for requirements, scope and judging criteria. It replaces the original PDF.

@@ -30,4 +30,4 @@ The four dataset files remain byte-for-byte unchanged. Formatting excludes `data
 - `bun run ship`: open or merge a PR following the workflow.
 - `bun run runtime:status`: inspect the worktree runtime.
 
-See [agent rules](AGENTS.md), [design](DESIGN.md), [sponsor guidance](docs/sponsors.md) and [license](LICENSE).
+See [agent rules](AGENTS.md), [writing skills](docs/agent-skills.md), [design](DESIGN.md), [sponsor guidance](docs/sponsors.md) and [license](LICENSE).

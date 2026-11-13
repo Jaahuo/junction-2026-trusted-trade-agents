@@ -25,7 +25,12 @@ const boundary = (files: string, patterns: Pattern[]) => ({
 export default defineConfig({
   staged: { "*": "vp check --fix" },
   fmt: {
-    ignorePatterns: ["contexts/*/migrations/**", ".agents/skills/elysiajs/**", "skills-lock.json"],
+    ignorePatterns: [
+      "contexts/*/migrations/**",
+      ".agents/skills/elysiajs/**",
+      "skills-lock.json",
+      "data/**",
+    ],
   },
   lint: {
     ignorePatterns: ["contexts/*/migrations/**"],

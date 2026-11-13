@@ -1,12 +1,47 @@
-# Trusted Trade Agents: product specification
+# Trusted Trade Agents: product requirements document
 
-Nov 14, 2026 · @Jaakko Huomo
+Owner: Jaakko Huomo · Created: November 14, 2026 · Status: living draft
 
-This living document defines the intended product, not the current implementation status. Update it as decisions change. Keep decided choices, proposals and open questions distinct.
+This PRD is the single source of product requirements. It describes intended behavior, not implementation status. Existing Decided choices remain the baseline; Proposed choices and open questions are not approved requirements.
 
 References: [challenge brief](challenge.md), [supplied mock API specification](../data/open_api.json) and [datasets](../README.md#challenge-data). The supplied mock API is not the product's planned REST contract.
 
 We build an open ordering contract that lets any buyer's agent search, receive a signed offer and place an order with a wholesaler. The buyer signs the limits, and the wholesaler's server enforces them on every order. Valio Aimo's mock backend is the first implementation.
+
+## Problem and goal
+
+Food-service buyers need agents to find and order suitable products without giving them unrestricted purchasing authority. Wholesalers need to enforce their own rules without exposing their internal systems.
+
+The product lets a buyer's agent complete a structured lookup-to-order flow. The server enforces the buyer's mandate and the wholesaler's guardrails. A human decides exceptions, and the audit record explains each outcome.
+
+## Document boundaries and change rules
+
+Keep product documentation in at most three working files. Start with this PRD alone.
+
+- `docs/prd.md`: owns scope, user-visible behavior, acceptance criteria and unresolved product questions. Keep the detailed contract examples here until a spec needs to own them.
+- `docs/specs.md`: create only when an implementation needs detail that the PRD cannot express clearly. Use numbered sections such as `SPEC-001`, not a file per feature. Each section links to its PRD requirement heading and defines the contract, failure paths and verification. Move the detail here; do not copy it.
+- `docs/adrs.md`: create only for a consequential architecture choice with credible alternatives, such as a trust boundary, persistent data model or external contract. Use numbered entries such as `ADR-001`, not a file per decision. Record status, context, decision, alternatives and consequences. Link to the affected PRD or spec section.
+
+These boundaries apply to product planning. Existing runtime, workflow and source-reference documents keep their separate purpose.
+
+1. Before changing scope or behavior, identify the affected PRD heading. Resolve any proposal, contradiction or open question that blocks that change with the product owner. Do not silently treat a draft as decided.
+2. Update the affected PRD text, any existing spec and the implementation in the same PR. A planning-only PR may change intended behavior first, but must state that implementation is pending.
+3. Add or update an ADR only when its decision threshold applies. Preserve accepted decision reasoning; record a replacement entry and mark the previous entry superseded when the decision changes.
+4. Keep one owner for each fact. The PRD owns what and why; specs own implementation detail; ADRs own decision rationale. Link instead of repeating. An implementation detail cannot override a product requirement.
+5. Each behavior-changing PR states the changed requirement, observable acceptance result and actual verification evidence. A code-only refactor needs no document edit if the contract and architecture decision remain unchanged.
+6. Before merge, check that affected requirements, contracts, decisions and tests agree. Resolve conflicts rather than choosing a convenient source. Keep section IDs stable; use Git and PR history instead of a separate change log.
+
+## Acceptance and evidence
+
+The [demo scenarios](#scenarios) define the observable end-to-end outcomes. Completion requires recorded results, not just completion of the [build order](#build-order).
+
+- Demonstrate automatic placement, human approval and the partial-stock/substitution flow against the mock backend.
+- Exercise the [role boundaries](#roles-and-access): an agent cannot approve an order or change a mandate.
+- Verify the rejection and forced-approval paths in [rules and decisions](#rules-and-decisions), including invalid offers and fixed guardrails that human approval cannot bypass.
+- Verify the [order exceptions](#order-states-and-exceptions), including expiry, changed offers and limits applied to the whole order.
+- Verify that REST and MCP expose the same contract and that structured results work without MCP Apps. Record actual host support rather than assuming it.
+
+An unresolved product choice blocks acceptance of the affected behavior, not unrelated work. Issues and PRs track delivery and evidence; this PRD does not track task status.
 
 ## Scope
 

@@ -6,9 +6,9 @@
 
 Install mise, Docker with Compose, Git and GitHub CLI. Run `mise install`, then `bun install --frozen-lockfile` and `bun run setup` to initialize this worktree's local PostgreSQL runtime. Keep secrets in ignored `.env`; see `.env.example` and [runtime guidance](docs/runtime.md).
 
-## Product specification
+## Product requirements
 
-The [living product specification](docs/product-specification.md) defines the intended scope, ordering flow, rules, decisions and open questions. Update it as the product evolves; it is not a statement of implemented features.
+The [living PRD](docs/prd.md) owns product scope, behavior, acceptance criteria and open questions. Its [change rules](docs/prd.md#document-boundaries-and-change-rules) keep requirements and implementation consistent. Add consolidated specs and ADRs only when needed; do not create a document per change.
 
 ## Challenge data
 

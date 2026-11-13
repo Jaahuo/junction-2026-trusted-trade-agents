@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreUnresolved": ["scripts/.+\\.ts", "apps/api/src/main\\.ts"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.ts", ".omp/hooks/*/*.ts"]
+    },
+    "apps/api": {
+      "entry": ["src/main.ts!", "src/server.ts!", "src/reset.ts"]
+    },
+    "contexts/*": {
+      "ignoreDependencies": ["react"]
+    }
+  },
+  "ignoreBinaries": ["gitleaks"]
+}

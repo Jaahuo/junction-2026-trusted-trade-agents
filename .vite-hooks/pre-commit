@@ -1,0 +1,5 @@
+set -eu
+mise exec -- gitleaks git --pre-commit --staged --redact --no-banner
+mise exec -- bun check
+mise exec -- bunx vp staged
+mise exec -- bun scripts/changed-tests.ts

@@ -1,0 +1,58 @@
+{
+  "name": "junction-2026-trusted-trade-agents",
+  "private": true,
+  "license": "MIT",
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "contexts/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "@elysia/eden": "2.0.0-rc.1",
+      "@tanstack/react-query": "^5.0.0",
+      "drizzle-orm": "^0.45.0",
+      "elysia": "2.0.0-rc.3",
+      "react": "^19.2.0",
+      "react-dom": "^19.2.0"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "production": "bun scripts/production.ts",
+    "lint": "vp check",
+    "fix": "vp check --fix",
+    "test": "bun test",
+    "gate": "bun scripts/gate.ts",
+    "setup": "bun scripts/runtime.ts setup",
+    "runtime": "bun scripts/runtime.ts",
+    "runtime:setup": "bun scripts/runtime.ts setup",
+    "runtime:status": "bun scripts/runtime.ts status",
+    "runtime:drop": "bun scripts/runtime.ts drop",
+    "task": "bun scripts/task.ts",
+    "build": "bun scripts/production.ts --build-only",
+    "ship": "bun scripts/ship.ts",
+    "new:context": "bun scripts/new-context.ts",
+    "db:generate": "bun scripts/db-generate.ts",
+    "db:reset": "bun apps/api/src/reset.ts",
+    "prepare": "vp config --no-agent"
+  },
+  "devDependencies": {
+    "@shadcn/lint": "^0.2.5",
+    "@tsconfig/strictest": "^2.0.5",
+    "@types/bun": "^1.3.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "drizzle-kit": "^0.31.0",
+    "jscpd": "^5.4.3",
+    "knip": "^6.45.1",
+    "typescript": "7.0.2",
+    "vite-plus": "1.6.0"
+  },
+  "overrides": {
+    "exact-mirror": "1.2.7",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0"
+  },
+  "packageManager": "bun@1.4.3"
+}

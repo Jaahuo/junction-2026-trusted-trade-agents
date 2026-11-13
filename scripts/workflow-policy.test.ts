@@ -1,0 +1,108 @@
+import { describe, expect, test } from "bun:test";
+import {
+  agentReviewComment,
+  agentReviewMarker,
+  parseAgentReview,
+  parseRisk,
+  requireMergeEvidence,
+  type Review,
+} from "./workflow-policy.ts";
+
+const approval: Review = {
+  user: { login: "reviewer", type: "User" },
+  state: "APPROVED",
+  commit_id: "head",
+};
+const ready = () => ({
+  risk: "ordinary" as const,
+  head: "head",
+  localHead: "head",
+  base: "main",
+  currentMain: "main",
+  baseIsAncestor: true,
+  author: "author",
+  reviews: [] as Review[],
+  checks: [{ name: "gate", status: "completed", conclusion: "success" as string | null }],
+});
+
+describe("PR merge policy", () => {
+  test("requires one known risk declaration", () => {
+    expect(parseRisk("Details\nRisk: impact")).toBe("impact");
+    expect(() => parseRisk("")).toThrow();
+    expect(() => parseRisk("Risk: unknown")).toThrow();
+    expect(() => parseRisk("Risk: ordinary\nRisk: impact")).toThrow();
+  });
+  test("ordinary changes require only current head, base and green gate", () => {
+    expect(() => requireMergeEvidence(ready())).not.toThrow();
+    expect(() => requireMergeEvidence({ ...ready(), localHead: "old" })).toThrow();
+    expect(() => requireMergeEvidence({ ...ready(), currentMain: "new" })).toThrow();
+    expect(() => requireMergeEvidence({ ...ready(), baseIsAncestor: false })).toThrow();
+    expect(() => requireMergeEvidence({ ...ready(), checks: [] })).toThrow();
+    expect(() =>
+      requireMergeEvidence({
+        ...ready(),
+        checks: [{ name: "gate", status: "completed", conclusion: "failure" }],
+      }),
+    ).toThrow();
+  });
+  test("impact needs independent current-head approval", () => {
+    const impact = { ...ready(), risk: "impact" as const };
+    expect(() => requireMergeEvidence(impact)).toThrow();
+    expect(() =>
+      requireMergeEvidence({ ...impact, reviews: [{ ...approval, commit_id: "old" }] }),
+    ).toThrow();
+    expect(() =>
+      requireMergeEvidence({
+        ...impact,
+        reviews: [{ ...approval, user: { login: "author", type: "User" } }],
+      }),
+    ).toThrow();
+    expect(() =>
+      requireMergeEvidence({
+        ...impact,
+        reviews: [approval, { ...approval, state: "CHANGES_REQUESTED" }],
+      }),
+    ).toThrow();
+    expect(() => requireMergeEvidence({ ...impact, reviews: [approval] })).not.toThrow();
+  });
+  test("agent review evidence is independent, complete and bound to the exact head", () => {
+    const head = "a".repeat(40);
+    const data = {
+      head,
+      taskOwnerAgent: "owner-agent",
+      reviewerAgent: "review-agent",
+      method: "independent review of the diff",
+      findings: "No unresolved findings; checked concurrency and contracts.",
+      verdict: "approved",
+    };
+    const report = agentReviewComment(`${agentReviewMarker}\n${JSON.stringify(data)}`);
+    expect(report).toBeDefined();
+    if (!report) throw new Error("valid report was not decoded");
+    const impact = {
+      ...ready(),
+      risk: "impact" as const,
+      head,
+      localHead: head,
+      agentReviews: [report],
+    };
+    expect(() => requireMergeEvidence(impact)).not.toThrow();
+    expect(() =>
+      requireMergeEvidence({ ...impact, head: "b".repeat(40), localHead: "b".repeat(40) }),
+    ).toThrow();
+    expect(() => requireMergeEvidence({ ...impact, risk: "lock-in" })).toThrow();
+    expect(() => parseAgentReview({ ...data, reviewerAgent: "owner-agent" })).toThrow();
+    expect(() => parseAgentReview({ ...data, findings: "" })).toThrow();
+    expect(() => parseAgentReview({ ...data, method: "" })).toThrow();
+    expect(agentReviewComment(`${agentReviewMarker}\n{}`)).toBeUndefined();
+  });
+  test("lock-in additionally needs a human account", () => {
+    const lockIn = { ...ready(), risk: "lock-in" as const };
+    expect(() =>
+      requireMergeEvidence({
+        ...lockIn,
+        reviews: [{ ...approval, user: { login: "bot", type: "Bot" } }],
+      }),
+    ).toThrow();
+    expect(() => requireMergeEvidence({ ...lockIn, reviews: [approval] })).not.toThrow();
+  });
+});

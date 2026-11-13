@@ -1,0 +1,10 @@
+{
+  "name": "@app/api",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@app/server-kit": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "elysia": "catalog:"
+  }
+}

@@ -1,0 +1,20 @@
+@theme {
+  --color-background: oklch(0.985 0.002 250);
+  --color-surface: oklch(1 0 0);
+  --color-foreground: oklch(0.21 0.02 260);
+  --color-muted: oklch(0.52 0.02 260);
+  --color-border: oklch(0.91 0.01 260);
+  --color-primary: oklch(0.5 0.2 265);
+  --color-primary-hover: oklch(0.44 0.2 265);
+  --color-primary-foreground: oklch(0.99 0 0);
+  --color-danger: oklch(0.55 0.21 27);
+  --color-success: oklch(0.55 0.14 155);
+  --color-warning: oklch(0.7 0.15 75);
+  --radius-md: 0.5rem;
+  --radius-xl: 0.75rem;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}

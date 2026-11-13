@@ -1,0 +1,2 @@
+# Project hooks require Worktrunk approval. Install before initializing this worktree.
+pre-start = "bun install && bun scripts/runtime.ts setup"

@@ -1,0 +1,29 @@
+[tools]
+bun = "1.4.3"
+node = "24.22.2"
+gitleaks = "8.30.1"
+worktrunk = "0.81.0"
+
+[tasks.setup]
+description = "Install dependencies and initialize this worktree"
+run = "bun install --frozen-lockfile && bun run setup"
+
+[tasks.dev]
+description = "Run the isolated API and web app"
+run = "bun run dev"
+
+[tasks.wt]
+description = "Run the pinned Worktrunk CLI"
+run = "wt"
+
+[tasks.task]
+description = "Manage assigned GitHub tasks and handoffs"
+run = "bun run task"
+
+[tasks.ship]
+description = "Open a risk-classified PR or explicitly merge it"
+run = "bun run ship"
+
+[tasks.gate]
+description = "Run all repository checks"
+run = "bun run gate"

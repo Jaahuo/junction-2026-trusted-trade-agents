@@ -1,0 +1,20 @@
+{
+  "id": "4a411404-524b-4bd1-a4b1-14a7ed08432e",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.notes_notes": {
+      "name": "notes_notes",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true },
+        "text": { "name": "text", "type": "text", "primaryKey": false, "notNull": true },
+        "createdAt": { "name": "createdAt", "type": "bigint", "primaryKey": false, "notNull": true }
+      },
+      "indexes": {}, "foreignKeys": {}, "compositePrimaryKeys": {}, "uniqueConstraints": {}, "policies": {}, "checkConstraints": {}, "isRLSEnabled": false
+    }
+  },
+  "enums": {}, "schemas": {}, "sequences": {}, "roles": {}, "policies": {}, "views": {},
+  "_meta": { "schemas": {}, "tables": {}, "columns": {} }
+}

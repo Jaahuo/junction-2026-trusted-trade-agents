@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: hackathon
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?run runtime setup}
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:${PG_PORT:?run runtime setup}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:

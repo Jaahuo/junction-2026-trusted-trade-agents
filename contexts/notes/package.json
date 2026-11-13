@@ -1,0 +1,21 @@
+{
+  "name": "@ctx/notes",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api/index.ts",
+    "./ui": "./src/ui/index.tsx"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "@app/kernel": "workspace:*",
+    "@app/server-kit": "workspace:*",
+    "@app/ui": "workspace:*",
+    "@app/web-kit": "workspace:*",
+    "@elysia/eden": "catalog:",
+    "@tanstack/react-query": "catalog:",
+    "drizzle-orm": "catalog:",
+    "elysia": "catalog:",
+    "react": "catalog:"
+  }
+}

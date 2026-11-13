@@ -1,0 +1,5 @@
+set -eu
+mise exec -- bun scripts/pre-push.ts
+mise exec -- bun check
+mise exec -- bunx vp check
+mise exec -- bun test

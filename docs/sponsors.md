@@ -1,0 +1,21 @@
+# Sponsor integrations
+
+Start with a product problem and a demonstrable user benefit, not a sponsor count. The [Junction prize listing](https://www.mlh.com/events/junction-40/prizes) names the categories; check current event rules, challenge requirements, deadlines and submission terms. A listing or an integration does not guarantee eligibility, credit or a prize. Keep evidence of what was actually built and exercised, with links to the relevant PR, demo and configuration. Never put credentials or private user data in that evidence.
+
+| Sponsor    | Useful product direction                                                                        | Boundary and first reference                                                                                                                                 |
+| ---------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Entire     | Explain how a specific coding decision evolved, if the team wants that record.                  | Explicit person-requested pilot only. See the privacy steps below.                                                                                           |
+| Vultr      | Host a selected app when local hosting is no longer sufficient.                                 | Check [partner credit eligibility and terms](https://www.mlh.com/partners/vultr). A person approves each plan, cost and cleanup before provisioning.         |
+| Tiger Data | Managed PostgreSQL when a selected product needs it; time-series features only for a real need. | Evaluate [Tiger Cloud quickstart](https://www.tigerdata.com/docs/get-started/quickstart/quickstart-5-minutes); no hosted database is provisioned by default. |
+| Solana     | A product feature that genuinely requires a chain transaction.                                  | Start with [Devnet](https://solana.com/docs/intro/quick-start) and explicit signing. No wallet, funding or real-money action by default.                     |
+| ElevenLabs | Speech output, for example with a library voice, when it improves the experience.               | Follow the [API quickstart](https://elevenlabs.io/docs/eleven-api/quickstart). No recording, cloning or conversational agent by default.                     |
+
+Install provider SDKs only for the selected feature. Use application ports and infrastructure adapters, test with fakes, and keep secrets out of Git. A person approves each cloud plan, including access, spending, data location and teardown. Do not provision cloud resources or shared credentials without approval.
+
+## Entire pilot and privacy
+
+Entire checkpoints can place agent session transcripts and related metadata in Git-backed storage or make them available through configured integrations. Treat prompts, tool output, files and generated checkpoints as potentially sensitive. Redaction is not a guarantee. Read [Entire security](https://docs.entire.com/security.md) and the [quickstart](https://docs.entire.com/quickstart) before any capture.
+
+Do not install, enable hooks, capture, upload, create mirrors or share memory automatically. Only a person can request a pilot. Before capture, inspect the actual local and remote destinations, Git visibility, secrets and retention; decide what data may leave the machine. Check hook coexistence with this repo and worktree behavior. Claude has built-in support; the [official OMP external agent](https://github.com/entireio/external-agents/tree/main/agents/entire-agent-omp) documents validation against OMP 17.1.1 only. Verify the current OMP client and adapter in a deliberately isolated pilot before relying on them. Runtime compatibility, hooks and destination behavior have not been verified by this template guidance.
+
+Keep any optional Sessions/Graph and repo-scoped Brain isolated to the candidate. Do not establish global or cross-candidate memory. Review the actual checkpoint content and destinations before allowing any shared upload; stop if privacy or secret exposure cannot be controlled.

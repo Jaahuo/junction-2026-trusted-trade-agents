@@ -1,0 +1,10 @@
+node_modules
+dist
+*.db
+*.db-*
+.vite-hooks/_
+report
+.production
+.env*
+!.env.example
+.local/

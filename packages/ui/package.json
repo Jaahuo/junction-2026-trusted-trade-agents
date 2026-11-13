@@ -1,0 +1,15 @@
+{
+  "name": "@app/ui",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./theme.css": "./src/theme.css"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "react": "catalog:",
+    "sonner": "^2.0.0",
+    "tailwind-merge": "^3.3.0"
+  }
+}

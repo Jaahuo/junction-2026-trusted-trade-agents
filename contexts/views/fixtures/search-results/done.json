@@ -1,0 +1,42 @@
+{
+  "candidates": [
+    {
+      "productId": "prod_test_oat_drink",
+      "gtin": "0000000000017",
+      "name": "Test oat drink 1 l",
+      "category": "test_dairy_alternatives",
+      "match": {
+        "lactose": "confirmed"
+      },
+      "orderQuantity": {
+        "value": 4,
+        "unit": "CT"
+      },
+      "equals": {
+        "value": 48,
+        "unit": "LTR"
+      },
+      "deliveryReliability": 0.97,
+      "co2PerKg": 0.4,
+      "substitutes": ["prod_test_soy_drink"]
+    }
+  ],
+  "constraints": {
+    "hard": [
+      {
+        "attribute": "lactose",
+        "is": "free_from"
+      }
+    ],
+    "soft": [
+      {
+        "attribute": "countryOfOrigin",
+        "prefer": "fi"
+      }
+    ]
+  },
+  "mandate": {
+    "id": "mnd_test_1",
+    "version": 1
+  }
+}

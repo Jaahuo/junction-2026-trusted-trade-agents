@@ -137,7 +137,8 @@ const approve = async (
           actor: "server",
           event: "check_failed",
           reason: "MANDATE_INVALID",
-          detail: REASON_TEXT.MANDATE_INVALID,
+          rule: "Current mandate",
+          detail: `${REASON_TEXT.MANDATE_INVALID} No current mandate is available; previous mandate ${order.mandateId ?? "unknown"}, version ${order.mandateVersion ?? "unknown"}.`,
         },
         { at, actor: "server", event: "rejected", reason: "MANDATE_INVALID" },
       ],
@@ -420,35 +421,47 @@ const samePack = (previous: OfferClaims, current: OfferClaims): boolean => {
  * The products whose re-quoted price is above the one the approver saw: a higher net unit price
  * with deposits, or a different pack size, which changes what one unit buys.
  */
-const pricedUp = (pairs: Pair[]): string[] =>
-  pairs.flatMap(({ previous, current }) =>
-    previous !== null &&
-    (unitCost(current.claims) > unitCost(previous.claims) ||
-      !samePack(previous.claims, current.claims))
-      ? [current.claims.productId]
-      : [],
+const pricedUp = (pairs: Pair[]): Pair[] =>
+  pairs.filter(
+    ({ previous, current }) =>
+      previous !== null &&
+      (unitCost(current.claims) > unitCost(previous.claims) ||
+        !samePack(previous.claims, current.claims)),
   );
+
+const pack = (claim: OfferClaims) =>
+  claim.product.perSalesUnit === null
+    ? "unknown"
+    : `${claim.product.perSalesUnit.value} ${claim.product.perSalesUnit.unit}`;
 
 /**
  * A higher price than the approver saw adds PRICE_CHANGED, as SPEC-011 does for a re-quote at
  * approval, so the order waits for them instead of being placed at a price nobody approved.
  */
-const withPriceChanged = ({ evaluation, byProduct }: Evaluated, products: string[]): Evaluated => {
-  if (products.length === 0) return { evaluation, byProduct };
+const withPriceChanged = ({ evaluation, evidence }: Evaluated, pairs: Pair[]): Evaluated => {
+  if (pairs.length === 0) return { evaluation, evidence };
   const reasons: ReasonCode[] = evaluation.reasons.includes("PRICE_CHANGED")
     ? evaluation.reasons
     : [...evaluation.reasons, "PRICE_CHANGED"];
-  const marked = new Map(byProduct);
-  for (const productId of products) {
-    const current = marked.get(productId) ?? [];
-    if (!current.includes("PRICE_CHANGED")) marked.set(productId, [...current, "PRICE_CHANGED"]);
-  }
+  const priceEvidence: Evaluated["evidence"] = pairs.flatMap(({ previous, current }) => {
+    if (previous === null) return [];
+    const before = previous.claims;
+    const after = current.claims;
+    return [
+      {
+        reason: "PRICE_CHANGED",
+        rule: "Requoted unit cost and pack",
+        productId: after.productId,
+        detail: `Previous net ${before.unitPrice.net} EUR, deposit per sales unit ${before.deposits / before.quantity.value} EUR, net plus deposit ${unitCost(before)} EUR, pack ${pack(before)}; current net ${after.unitPrice.net} EUR, deposit per sales unit ${after.deposits / after.quantity.value} EUR, net plus deposit ${unitCost(after)} EUR, pack ${pack(after)}. Policy: approval required for a higher cost or changed pack.`,
+      },
+    ];
+  });
   return {
     evaluation: {
       decision: evaluation.decision === "rejected" ? "rejected" : "needs_approval",
       reasons,
     },
-    byProduct: marked,
+    evidence: [...evidence, ...priceEvidence],
   };
 };
 
@@ -489,7 +502,7 @@ const revision = (input: {
   now: Date;
 }): { order: StoredOrder; events: AuditEvent[] } => {
   const { principal, order, request, pairs, lines, mandate, evaluated, now } = input;
-  const { evaluation, byProduct } = evaluated;
+  const { evaluation, evidence } = evaluated;
   const at = now.toISOString();
   const requotes: Requote[] = pairs.flatMap(({ previous, current }) =>
     previous === null
@@ -516,7 +529,7 @@ const revision = (input: {
             detail: `${dropped} alternative${dropped === 1 ? "" : "s"} dropped: expired or made under another mandate`,
           },
         ];
-  const checks = auditOf(evaluation, byProduct, { lines, mandate }, at).filter(
+  const checks = auditOf(evaluation, evidence, { lines, mandate }, at).filter(
     (event) => event.event !== "order_requested",
   );
   const claims = lines.map((line) => line.claims);

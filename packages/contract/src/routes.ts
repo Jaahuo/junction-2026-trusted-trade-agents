@@ -22,11 +22,13 @@ import {
   ValidateResultSchema,
 } from "./offers.ts";
 import {
+  OrderListSchema,
   OrderRefSchema,
   OrderSchema,
   PendingListSchema,
   PlaceOrderRequestSchema,
   PrecheckRequestSchema,
+  RefusalListSchema,
 } from "./orders.ts";
 import {
   FactsRequestSchema,
@@ -138,6 +140,24 @@ export const ROUTES = [
     context: "catalog",
     input: FactsRequestSchema,
     output: FactsResultSchema,
+  },
+  {
+    key: "orders",
+    tool: null,
+    method: "GET",
+    path: "/api/orders",
+    context: "orders",
+    input: EmptySchema,
+    output: OrderListSchema,
+  },
+  {
+    key: "refusals",
+    tool: null,
+    method: "GET",
+    path: "/api/orders/refusals",
+    context: "orders",
+    input: EmptySchema,
+    output: RefusalListSchema,
   },
   {
     key: "precheck",

@@ -73,6 +73,58 @@ test("reset twice keeps a same-owner table with a colliding prefix and restores 
   });
 });
 
+test("every seed can call mounted context routes in process, and orders sees the seeded mandate", async () => {
+  await withDatabase(async (db) => {
+    const contexts = await discoverContexts();
+    const first = contexts[0];
+    const orders = contexts.find((context) => context.name === "orders");
+    if (first === undefined || orders === undefined || first.name === "orders")
+      throw new Error("Expected a context before orders and the orders context");
+    let earlyCalled = false;
+    let ordersCalled = false;
+    const wrapped = contexts.map((context) => {
+      if (context === first)
+        return Object.assign({}, context, {
+          seed: async (seedDb: Db, inputs?: Parameters<NonNullable<typeof context.seed>>[1]) => {
+            if (inputs?.fetcher === undefined) throw new Error("Missing in-process fetcher");
+            const response = await inputs.fetcher(
+              new Request("http://localhost/api/mandates/current"),
+            );
+            expect(response.status).toBe(404);
+            expect(await response.json()).toMatchObject({
+              error: { code: "NOT_FOUND", message: "No current mandate." },
+            });
+            earlyCalled = true;
+            await context.seed?.(seedDb, inputs);
+          },
+        });
+      if (context === orders)
+        return Object.assign({}, context, {
+          seed: async (seedDb: Db, inputs?: Parameters<NonNullable<typeof context.seed>>[1]) => {
+            if (inputs?.fetcher === undefined) throw new Error("Missing in-process fetcher");
+            const response = await inputs.fetcher(
+              new URL("http://localhost/api/mandates/current"),
+              {
+                method: "GET",
+              },
+            );
+            expect(response.status).toBe(200);
+            expect(await response.json()).toMatchObject({
+              status: "active",
+              mandate: { version: 1 },
+            });
+            ordersCalled = true;
+            await context.seed?.(seedDb, inputs);
+          },
+        });
+      return context;
+    });
+    await resetContexts(db, wrapped);
+    expect(earlyCalled).toBe(true);
+    expect(ordersCalled).toBe(true);
+  });
+});
+
 test("a foreign view on one of our tables aborts the reset before anything is dropped", async () => {
   await withDatabase(async (db) => {
     const contexts = await discoverContexts();
@@ -142,6 +194,7 @@ test("repeated demo resets preserve every catalogue row and its migration ledger
         expect(seeded.map((row) => row.productId)).toEqual([
           ...Array.from({ length: 3 }, () => demo.s1.productId),
           ...Array.from({ length: 3 }, () => demo.s2.productId),
+          "prod_demo_activity_placed",
         ]);
       }
     } finally {

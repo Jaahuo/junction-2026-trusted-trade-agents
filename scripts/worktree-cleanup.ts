@@ -192,6 +192,27 @@ export function linuxProcessesInWorktree(root: string, proc: ProcReader = procRe
         if (missing(statError)) continue;
         throw statError;
       }
+      // Recheck zero-thread records because reaping and exec leader replacement can race this read.
+      const firstEnd = stat.lastIndexOf(")");
+      const firstFields =
+        firstEnd < 0
+          ? []
+          : stat
+              .slice(firstEnd + 1)
+              .trim()
+              .split(/\s+/);
+      if (
+        stat.startsWith(`${entry} (`) &&
+        (firstFields[0] === "Z" || firstFields[0] === "X") &&
+        firstFields[17] === "0"
+      ) {
+        try {
+          stat = proc.readFile(`/proc/${entry}/stat`);
+        } catch (statError) {
+          if (missing(statError)) continue;
+          throw statError;
+        }
+      }
       // comm is parenthesized and may contain spaces or closing parentheses.
       const end = stat.lastIndexOf(")");
       const fields =
@@ -215,8 +236,16 @@ export function linuxProcessesInWorktree(root: string, proc: ProcReader = procRe
       const flags = Number(flagsField);
       if (!Number.isSafeInteger(flags))
         throw new Error(`Invalid /proc/${entry}/stat`, { cause: error });
-      if ((flags & 0x00200000) !== 0 || (fields[0] === "Z" && threadsField === "1")) continue;
-      throw new Error(`Cannot determine cwd of process ${pid}`, { cause: error });
+      // A dead leader can retain live workers; only a single-thread group is safe.
+      if (
+        (flags & 0x00200000) !== 0 ||
+        ((fields[0] === "Z" || fields[0] === "X") && threadsField === "1")
+      )
+        continue;
+      throw new Error(
+        `Cannot determine cwd of process ${pid} (state ${fields[0]}, threads ${threadsField})`,
+        { cause: error },
+      );
     }
     if (!isAbsolute(cwd) || cwd.endsWith(" (deleted)"))
       throw new Error(`Cannot determine cwd of process ${pid}`);
@@ -277,22 +306,31 @@ export async function stopWorktreeProcesses(worktreePath: string): Promise<numbe
   const initial = await discoverProcesses(root);
   if (initial.some((pid) => protectedPids.has(pid)))
     throw new Error("a caller or its ancestor is running inside the worktree");
+  const current = await discoverProcesses(root);
+  if (current.some((pid) => protectedPids.has(pid)))
+    throw new Error("a caller or its ancestor is running inside the worktree");
+  const initialPids = new Set(initial);
+  for (const pid of current) {
+    if (!initialPids.has(pid))
+      throw new Error(`new worktree process ${pid} appeared during cleanup`);
+  }
   const stopped = new Set<number>();
-  for (const pid of initial) {
-    if (!(await discoverProcesses(root)).includes(pid)) continue;
+  // Signal each fresh snapshot synchronously so exiting peers settle before rediscovery.
+  for (const pid of current) {
     if (signalProcess(pid, "SIGTERM")) {
       stopped.add(pid);
       console.log(`Sent SIGTERM to worktree process ${pid}.`);
     }
   }
-  if (initial.length === 0) return [];
+  if (current.length === 0) return [];
   await Bun.sleep(500);
   const survivors = await discoverProcesses(root);
   if (survivors.some((pid) => protectedPids.has(pid)))
     throw new Error("a caller or its ancestor is running inside the worktree");
   for (const pid of survivors) {
     if (!stopped.has(pid)) throw new Error(`new worktree process ${pid} appeared during cleanup`);
-    if (!(await discoverProcesses(root)).includes(pid)) continue;
+  }
+  for (const pid of survivors) {
     if (signalProcess(pid, "SIGKILL")) console.log(`Sent SIGKILL to worktree process ${pid}.`);
   }
   if (survivors.length) {

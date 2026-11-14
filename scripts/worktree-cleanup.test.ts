@@ -11,6 +11,9 @@ import {
 const spawn = (cwd: string, script: string) =>
   Bun.spawn([process.execPath, "-e", script], { cwd, stdout: "pipe", stderr: "pipe" });
 
+const makeStat = (state: string, threads: number, flags = 0) =>
+  `42 (name with ) parenthesis) ${state} 1 1 1 0 0 ${flags} 0 0 0 0 0 0 0 0 0 0 ${threads}`;
+
 describe("worktree process cleanup", () => {
   test("discovers Linux cwd without scanning unrelated Docker mounts and fails closed", () => {
     const missing = Object.assign(new Error("missing"), { code: "ENOENT" });
@@ -114,6 +117,82 @@ describe("worktree process cleanup", () => {
     cwd.delete("16");
     mountinfo = "1 0 0:1 / /proc rw - proc proc rw,hidepid=2\n";
     expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("complete /proc visibility");
+  });
+
+  test("classifies missing Linux cwd conservatively across process states and thread counts", () => {
+    const missing = Object.assign(new Error("missing"), { code: "ENOENT" });
+    const denied = Object.assign(new Error("denied"), { code: "EACCES" });
+    const uid = process.geteuid?.();
+    if (uid === undefined) throw new Error("Cannot determine effective user ID");
+    let stat: string | Error = missing;
+    let nextStat: string | Error | undefined;
+    let cwdError = missing;
+    const proc = {
+      readdir: () => ["42"],
+      readlink: (path: string) => {
+        if (path === "/proc/self") return String(process.pid);
+        if (path === "/proc/self/ns/mnt") return "mnt:[1]";
+        throw cwdError;
+      },
+      readFile: (path: string) => {
+        if (path === "/proc/self/mountinfo") return "1 0 0:1 / /proc rw - proc proc rw";
+        if (path.endsWith("/status")) return `Uid:\t${uid}\t${uid}\t${uid}\t${uid}\n`;
+        if (nextStat !== undefined) {
+          const first = stat;
+          stat = nextStat;
+          nextStat = undefined;
+          if (first instanceof Error) throw first;
+          return first;
+        }
+        if (stat instanceof Error) throw stat;
+        return stat;
+      },
+    };
+    for (const state of ["Z", "X", "R", "S"]) {
+      for (const threads of [0, 1, 2]) {
+        stat = makeStat(state, threads);
+        if ((state === "Z" || state === "X") && threads === 1) {
+          expect(linuxProcessesInWorktree("/tmp/task", proc)).toEqual([]);
+        } else {
+          expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow(
+            `Cannot determine cwd of process 42 (state ${state}, threads ${threads})`,
+          );
+        }
+      }
+    }
+    stat = makeStat("Z", 0);
+    nextStat = missing;
+    expect(linuxProcessesInWorktree("/tmp/task", proc)).toEqual([]);
+    stat = makeStat("X", 0);
+    nextStat = makeStat("S", 2);
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow(
+      "Cannot determine cwd of process 42 (state S, threads 2)",
+    );
+    stat = makeStat("Z", 0);
+    nextStat = makeStat("Z", 1);
+    expect(linuxProcessesInWorktree("/tmp/task", proc)).toEqual([]);
+    stat = makeStat("X", 0);
+    nextStat = makeStat("X", 0);
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow(
+      "Cannot determine cwd of process 42 (state X, threads 0)",
+    );
+    stat = makeStat("Z", 0);
+    nextStat = denied;
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("denied");
+    stat = makeStat("Z", 0);
+    nextStat = "invalid";
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("Invalid /proc/42/stat");
+    stat = makeStat("S", 1, 0x00200000);
+    expect(linuxProcessesInWorktree("/tmp/task", proc)).toEqual([]);
+    stat = missing;
+    expect(linuxProcessesInWorktree("/tmp/task", proc)).toEqual([]);
+    stat = denied;
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("denied");
+    cwdError = denied;
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("denied");
+    cwdError = missing;
+    stat = "invalid";
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("Invalid /proc/42/stat");
   });
 
   test("selects only numeric PIDs with cwd inside the directory boundary", () => {

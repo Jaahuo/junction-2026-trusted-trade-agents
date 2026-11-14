@@ -28,7 +28,7 @@ independent agent report: JSON with head, taskOwnerAgent, reviewerAgent, method,
 findings and verdict ("approved"). The head must be the full current commit SHA.
 --merge explicitly requests a squash merge after the gate and risk checks; it
 waits for a running gate. An ordinary PR may be behind main when GitHub reports
-no conflicts; the gate on main is the backstop. Impact and lock-in PRs must
+no conflicts; main has no gate of its own. Impact and lock-in PRs must
 include current main: ship merges origin/main into the branch (no rebase, no
 force-push), waits for the new gate and retries. A review of an earlier head
 still counts when the PR's own change is identical (same git patch-id).

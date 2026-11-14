@@ -9,7 +9,7 @@ import {
   tokenCopy,
   type OrderState,
   type Trace,
-} from "./host-check.ts";
+} from "./chat-check.ts";
 
 // The shape of a stored Open WebUI 0.13.3 chat, from a recorded run; ids and tokens are invented.
 // Built from parts so that it has the shape of a signed token without being one.

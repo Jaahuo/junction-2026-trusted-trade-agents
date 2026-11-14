@@ -1,15 +1,15 @@
 ---
-name: host-check
+name: chat-check
 description: Run chat sentences in the Open WebUI host and read what the agent did with the tools. Use after a change to the MCP tools, the skill, the buyer prompt, the views or the host setup, and before a demo rehearsal.
 ---
 
 # Check the chat host
 
-`bun scripts/demo-smoke.ts` proves the REST routes. It does not show what a model does with the tools. `bun scripts/host-check.ts` sends sentences to the Buyer agent in Open WebUI through a real browser and reports each tool call, the stored order and the reply.
+`bun scripts/demo-smoke.ts` proves the REST routes. It does not show what a model does with the tools. `bun scripts/chat-check.ts` sends sentences to the Buyer agent in Open WebUI through a real browser and reports each tool call, the stored order and the reply.
 
 1. Start the server under test in this worktree with `bun run production`. Views render only from a build.
 2. Start the host with `bun scripts/openwebui.ts up`. It must point at this worktree's API: empty `OPENWEBUI_MCP_URL` in `hosts/openwebui/.env`, or set it to this worktree's port, then run `bun scripts/openwebui.ts setup`.
-3. Run `bun scripts/host-check.ts`. Use `--only <name>` for one scenario and `--headed` to watch the browser. A scenario takes one to three minutes on a local model.
+3. Run `bun scripts/chat-check.ts`. Use `--only <name>` for one scenario and `--headed` to watch the browser. A scenario takes one to three minutes on a local model.
 4. Read the output. Each scenario lists, per sentence, the seconds, the tool calls in order and the reply, then `ok` or `FAIL` for each expectation. The command exits 1 when an expectation fails.
 5. Report the output lines as they are. A `FAIL` with `(known: #n)` is a defect that the issue tracks; say so, and do not call the run green.
 
@@ -25,7 +25,7 @@ The check stops before the first sentence, with the cause, when the server, its 
 | `… ERROR NO_RESULT, …`                                | The chat stores no result for the call. The host dropped it.                                                                                |
 | `unasked dialog cancelled: …`                         | A view asked for a tool call on its own. The check cancels it so the next step can run.                                                     |
 | `no finished reply within … s`                        | The model did not finish. Check the model endpoint before you run again.                                                                    |
-| `no "…" button in a view`, `no dialog to …`           | A step could not run, so the scenario fails. The view did not render or has no such button. Look at the screenshot in `.local/host-check/`. |
+| `no "…" button in a view`, `no dialog to …`           | A step could not run, so the scenario fails. The view did not render or has no such button. Look at the screenshot in `.local/chat-check/`. |
 
 ## Add a scenario
 

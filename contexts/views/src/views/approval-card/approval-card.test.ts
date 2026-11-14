@@ -478,6 +478,29 @@ test("reduce to fit says so when even one of each is over the limit, and changes
   expect(sent[0]?.type).toBe("tt-decide");
 });
 
+test("over the limit in a chat, each reduce chip asks the agent; under it or outside a chat, none show", () => {
+  const { card, sent } = cardFor(pending);
+  const order = OrderSchema.parse(pending);
+  const text = pick(CARD);
+  card.orderLimit = 1700;
+  expect(visible(card)).toContain(text.orTellIt);
+  const chips = handlers(card.render(), 'class="chip"', "@click=");
+  expect(chips.length).toBe(text.reduceChips.length);
+  chips.forEach((chip) => chip());
+  expect(sent).toEqual(
+    text.reduceChips.map((chip) => ({
+      type: "tt-ask-agent",
+      detail: `${text.reducePrompt(order.orderId)} ${chip}.`,
+    })),
+  );
+
+  card.canAsk = false;
+  expect(visible(card)).not.toContain(text.reduceChips[0]);
+  card.canAsk = true;
+  click(card, 'part="reduce"');
+  expect(visible(card)).not.toContain(text.reduceChips[0]);
+});
+
 test("without a known order limit there is nothing to reduce to", () => {
   const { card } = cardFor(pending);
   card.orderLimit = null;

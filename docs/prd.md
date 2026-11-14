@@ -1,6 +1,6 @@
 # Trusted Trade Agents: product requirements document
 
-Owner: Jaakko Huomo · Created: November 14, 2026 · Status: living draft
+Owner: the whole team · Created: November 14, 2026 · Status: living draft
 
 This PRD is the single source of product requirements. It describes intended behavior, not implementation status. Existing Decided choices remain the baseline; Proposed choices and open questions are not approved requirements.
 
@@ -24,7 +24,7 @@ Keep product documentation in at most three working files. Start with this PRD a
 
 These boundaries apply to product planning. Existing runtime, workflow and source-reference documents keep their separate purpose.
 
-1. Before changing scope or behavior, identify the affected PRD heading. Resolve any proposal, contradiction or open question that blocks that change with the product owner. Do not silently treat a draft as decided.
+1. Before changing scope or behavior, identify the affected PRD heading. Resolve any proposal, contradiction or open question that blocks that change with the team. Do not silently treat a draft as decided.
 2. Update the affected PRD text, any existing spec and the implementation in the same PR. A planning-only PR may change intended behavior first, but must state that implementation is pending.
 3. Add or update an ADR only when its decision threshold applies. Preserve accepted decision reasoning; record a replacement entry and mark the previous entry superseded when the decision changes.
 4. Keep one owner for each fact. The PRD owns what and why; specs own implementation detail; ADRs own decision rationale. Link instead of repeating. An implementation detail cannot override a product requirement.
@@ -454,6 +454,7 @@ The contract is vendor-neutral and each wholesaler hosts its own endpoint, with 
 
 - Delivery reliability and CO2 come from two CSV files, joined on product ID.
 - All calls send the API key in the `X-API-Key` header.
+- Assumption: Valio Aimo's production API authenticates clients with OAuth2. We do not build that flow because it is out of scope and not relevant to the demo; a production adapter would replace the API key with an OAuth2 access token.
 - Never query all products. Filter on static data first, then send the shortlist in one call. Rate limits are undisclosed, so cache results within their validity.
 - Products shipped from a supplier's warehouse always report an amount of 999999, which means the stock is unconfirmed.
 - The mock ignores the customer number. Customer-specific limits and terms are simulated in our layer, and the README says so.

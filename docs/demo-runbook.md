@@ -1,0 +1,148 @@
+# Demo runbook
+
+This how-to guide gets the demo server onto a public quick tunnel, connects the test host to it, and proves scenarios 1 and 2 before each rehearsal and recording.
+The scenarios are in the PRD section [Demo and build order](prd.md#demo-and-build-order).
+The REST routes are in [SPEC-003](specs.md#spec-003-tools-routes-and-errors), and the MCP endpoint is in SPEC-012.
+
+You need a worktree that `bun scripts/runtime.ts setup` has prepared, and Docker running.
+`bun run runtime:status` shows this worktree's API port; this guide calls it `<port>`.
+
+## 1. Keys
+
+1. Create the signing keys once and keep them:
+
+   ```sh
+   bun scripts/generate-keys.ts >> .env
+   ```
+
+   This appends `OFFER_SIGNING_JWK`, `OFFER_SIGNING_KID` and `BUYER_SIGNING_JWK` into the ignored `.env`.
+   Offers are signed with these keys.
+   Keep the same `.env` for the whole demo day, so offers issued before a server or tunnel restart stay valid after it.
+   Without them a non-production server makes a new key per process, and a restart invalidates every open offer.
+
+2. Add `VALIO_AIMO_API_KEY` (and `VALIO_AIMO_PORTAL_PASSWORD` if you use the portal) to `.env`, and set `WHOLESALER_LIVE=mock`.
+   Offers read live price and availability only with both set (SPEC-005, #100); any other value omits every line `NO_PRICE` and signs no offer.
+   Get the values from the organizers or a teammate.
+   Never put a key anywhere other than `.env`.
+
+3. Leave `.env.local` alone: `bun scripts/runtime.ts setup` regenerates it with this worktree's ports and database.
+
+## 2. Build and start
+
+```sh
+bun run production
+```
+
+This builds the web app, the MCP Apps views and the server, and serves all of them on `<port>`.
+Views render in a host only after a build: `bun run dev` does not build them.
+If you run `bun run dev` instead, run `bun run build` first and again after each change to `contexts/views`.
+
+## 3. Quick tunnel
+
+1. In a second terminal, open a quick tunnel to the server:
+
+   ```sh
+   npx -y cloudflared tunnel --no-autoupdate --url http://localhost:<port>
+   ```
+
+   It prints a `https://<random>.trycloudflare.com` URL.
+   A quick tunnel needs no Cloudflare account, and it gets a new URL on every start.
+
+2. Set the tunnel URL in `.env`:
+
+   ```sh
+   PUBLIC_BASE_URL=https://<random>.trycloudflare.com
+   ```
+
+3. Stop and restart `bun run production`, so tool texts and approval links carry the public URL.
+
+4. Check the public health route:
+
+   ```sh
+   curl -s $PUBLIC_BASE_URL/api/health
+   ```
+
+   It prints `{"ok":true}`.
+
+When the team moves to a hosted server, use its URL as `PUBLIC_BASE_URL` and skip the tunnel.
+
+## 4. MCP view tools
+
+Set `MCP_VIEW_TOOLS` in `.env`:
+
+- `off` until the host spike (#9) records that the first test host renders MCP Apps views.
+  The model then gets the order tools only, and the approver approves on the `/approvals` page through the `approvalUrl` in the tool text.
+- The value that #9 records in [host support](host-support.md), once it has a result.
+  `app` (the default) exposes the view-only tools to the approval card.
+
+Restart the server after a change.
+
+## 5. Connect the host
+
+1. In the host's connector or MCP settings, add a server with the URL `<PUBLIC_BASE_URL>/mcp`.
+2. Choose no authentication.
+   The first build has no accounts; every request acts as the demo account (SPEC-002).
+3. Start a new chat and check that the host lists the tools, for example `search_products`.
+
+After every tunnel restart the URL changes.
+Then update `PUBLIC_BASE_URL`, restart the server, and in the host remove the connector and add it again with the new `/mcp` URL (or edit its URL and reconnect).
+A host keeps the old URL until you do.
+
+Open WebUI 0.13.3 also works as a host against `/mcp` (voice spike #45).
+
+## 6. Before each rehearsal and recording
+
+Run these from the worktree that serves the demo, in order:
+
+1. Reset the database to the demo state:
+
+   ```sh
+   bun run db:reset
+   ```
+
+   It resets only this worktree's database, so run it in the worktree whose server the host reaches.
+
+2. Before a recording, check that the demo products still fit the live data.
+   Use the `requestedDate` of `data/demo-products.json`, or the deliver-by date that the demo sentence names:
+
+   ```sh
+   bun scripts/check-demo-data.ts --date <YYYY-MM-DD>
+   ```
+
+   It ends with `S1 ok` and `S2 ok`.
+   If a line says `not ok`, pick new products before you record.
+
+3. Prove both scenarios end to end:
+
+   ```sh
+   bun scripts/demo-smoke.ts --scenario 1
+   bun scripts/demo-smoke.ts --scenario 2
+   ```
+
+   Each run starts with `bun run db:reset`, so repeated runs never use up the credit limit.
+   Each step prints `ok <step>`; a failure prints `FAIL step <step>` with the HTTP status and error code, and exits 1.
+   The run leaves a placed order, so run `bun run db:reset` once more before you record.
+
+### Smoke script options
+
+| Option             | Effect                                                                                                                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--scenario 1\|2`  | Scenario 1: search, offers, place (`placed`, no reasons), audit record. Scenario 2: place (`pending_approval`, `SPEND_OVER_LIMIT`), pending list, approve, `placed`. |
+| `--base-url <url>` | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                      |
+| `--no-reset`       | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                              |
+
+The server, not the script, reads `WHOLESALER_LIVE`; start it with `WHOLESALER_LIVE=mock`.
+If `offers` fails with `omitted: NO_PRICE`, the server has no live price source: check `WHOLESALER_LIVE` and `VALIO_AIMO_API_KEY`.
+
+## Restart check
+
+Do this once per demo day, to prove that the team can restart in minutes without losing open offers:
+
+1. Get offers in the host, or call `POST $PUBLIC_BASE_URL/api/offers`, and keep the offer token from the result.
+2. Stop the server and the tunnel.
+3. Start both again with the same `.env` keys.
+4. Set the new tunnel URL as `PUBLIC_BASE_URL`, restart the server, and reconnect the host.
+5. Place the kept offer with `POST $PUBLIC_BASE_URL/api/orders`.
+   It answers 201.
+
+Offer verification does not compare the token issuer with the current public URL (SPEC-006), so a new tunnel URL keeps the old offers valid.

@@ -114,22 +114,29 @@ Sign in with the admin account and choose the model "Buyer agent".
 Keep the chat secrets in a fourth operator file, `~/.config/trusted-trade/env.chat`:
 
 ```sh
-VERDA_INFERENCE_KEY=       # the Verda inference key
-OPENWEBUI_SECRET_KEY=      # openssl rand -hex 32; keep it stable, or sessions end at the next deploy
-OPENWEBUI_ADMIN_EMAIL=     # the one chat login
-OPENWEBUI_ADMIN_PASSWORD=  # openssl rand -base64 18
+# The Verda inference key.
+VERDA_INFERENCE_KEY=
+# openssl rand -hex 32. Keep it stable, or sessions end at the next deploy.
+OPENWEBUI_SECRET_KEY=
+# The one chat login.
+OPENWEBUI_ADMIN_EMAIL=
+# openssl rand -base64 18
+OPENWEBUI_ADMIN_PASSWORD=
 ```
+
+Keep comments on their own lines: the loop below stores everything after `=` as the secret.
 
 Open WebUI creates the admin account only at its first start, so a later password change in the file does not change the login.
 For a manual `push`, load the file first with `set -a && . ~/.config/trusted-trade/env.chat && set +a`.
 For CI, set each line as a secret of the `production` environment:
 
 ```sh
-while IFS='=' read -r name value; do printf '%s' "$value" | gh secret set "$name" --env production; done < ~/.config/trusted-trade/env.chat
+grep -E '^[A-Z_]+=' ~/.config/trusted-trade/env.chat | while IFS='=' read -r name value; do printf '%s' "$value" | gh secret set "$name" --env production; done
 ```
 
 With `TF_VAR_domain`, add a DNS A record for `chat.<domain>` as well. The `sslip.io` name resolves without one.
 The chat data lives in the Docker volume `trusted-trade-chat` on the VM; `journalctl -u trusted-trade-chat` shows its log.
+To turn the chat host off, delete the four secrets, deploy, and run `systemctl disable --now trusted-trade-chat && rm /etc/trusted-trade-chat.env` on the VM, because a deploy without the key leaves the chat unit as it is.
 
 ## Update, inspect and remove
 

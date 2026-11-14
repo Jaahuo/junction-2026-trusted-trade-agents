@@ -157,6 +157,10 @@ export async function configure(host: ChatHost): Promise<void> {
   }
   async function must(step: string, path: string, body?: Json): Promise<unknown> {
     const { status, data } = await call(path, body);
+    if (status !== 200 && path === "/api/v1/auths/signin")
+      throw new Error(
+        `sign in: HTTP ${status}. Open WebUI keeps the admin password of its first start, so a changed password secret does not apply.`,
+      );
     if (status !== 200) throw new Error(`${step}: HTTP ${status} from ${path}`);
     return data;
   }
@@ -166,7 +170,9 @@ export async function configure(host: ChatHost): Promise<void> {
     password: host.password,
   });
   if (!isObject(session) || typeof session["token"] !== "string")
-    throw new Error("sign in: no token. Check the admin login, or WEBUI_AUTH=False on the laptop.");
+    throw new Error(
+      "sign in: no token. On the VM, Open WebUI keeps the admin password of its first start; on the laptop, WEBUI_AUTH must be False.",
+    );
   token = session["token"];
 
   const current = await must("read tool servers", "/api/v1/configs/tool_servers");

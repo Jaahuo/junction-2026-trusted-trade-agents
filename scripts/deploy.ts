@@ -307,17 +307,19 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   if (!digest) throw new Error("Pulled image has no trusted repository digest");
   const remoteShell = `ssh ${SSH.join(" ")}`;
   if (existsSync("data")) await transferData("data/", host, outputs.app_dir, remoteShell);
+  // Everything slow or network-bound for the chat host happens before the app stops.
+  if (chat) {
+    await $`ssh ${SSH} ${host} docker pull --quiet ${CHAT_IMAGE}`;
+    await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat.env < ${new Response(renderEnvFile(chatEnv(outputs, chat)))}`;
+    await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade-chat.service < ${new Response(CHAT_SERVICE)}`;
+  }
   await $`ssh ${SSH} ${host} systemctl stop trusted-trade`;
   await $`ssh ${SSH} ${host} ${`chown -R 1000:1000 ${dir}/data && chmod -R u+rX ${dir}/data`}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${digest}"\n`)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade.service < ${new Response(unit)}`;
-  if (chat) {
-    await $`ssh ${SSH} ${host} docker pull --quiet ${CHAT_IMAGE}`;
-    await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat.env < ${new Response(renderEnvFile(chatEnv(outputs, chat)))}`;
-    await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade-chat.service < ${new Response(CHAT_SERVICE)}`;
+  if (chat)
     await $`ssh ${SSH} ${host} ${"systemctl daemon-reload && systemctl enable trusted-trade-chat && systemctl restart trusted-trade-chat"}`;
-  }
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs, chat !== undefined))}`;
   // The Vultr Ubuntu image enables ufw with only SSH open.
   await $`ssh ${SSH} ${host} ${"ufw allow 80/tcp && ufw allow 443/tcp && systemctl daemon-reload && systemctl enable --now trusted-trade && systemctl reload caddy"}`;

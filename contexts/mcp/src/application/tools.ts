@@ -18,6 +18,7 @@ import {
   pendingSummary,
   searchSummary,
 } from "../domain/summary.ts";
+import { placeOrderInput } from "./place-order-input.ts";
 
 type ToolInput<T extends ToolName> = z.infer<(typeof TOOL_INPUT)[T]>;
 type ToolOutput<T extends ToolName> = z.infer<(typeof TOOL_OUTPUT)[T]>;
@@ -93,7 +94,7 @@ const TOOLS: { [T in ToolName]: Tool<T> } = {
     text: offersSummary,
   },
   place_order: {
-    input: TOOL_INPUT.place_order,
+    input: placeOrderInput,
     call: (rest, input) => rest.place(input),
     text: orderSummary,
   },

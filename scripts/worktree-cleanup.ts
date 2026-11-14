@@ -35,7 +35,7 @@ export async function cleanMergedWorktree(branch: string, mergedHead: string): P
       return console.log(`Kept worktree ${worktree.path}: its database drop failed.`);
   }
   // Squash merges leave the branch unmerged by ancestry, so -D is needed; the HEAD check above guards it.
-  if (!(await run(["wt", "remove", branch, "--foreground", "--reap", "-D"], mainPath)))
+  if (!(await run(["wt", "remove", branch, "--foreground", "-D"], mainPath)))
     return console.log(`Could not remove worktree ${worktree.path}; remove it with wt remove.`);
   console.log(`Removed worktree ${worktree.path} and branch ${branch}.`);
 }

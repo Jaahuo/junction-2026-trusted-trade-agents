@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   deployEnv,
   type Outputs,
@@ -9,6 +12,7 @@ import {
   renderEnvFile,
   renderService,
   resetEnv,
+  transferData,
 } from "./deploy.ts";
 
 const outputs: Outputs = {
@@ -148,6 +152,32 @@ test("push rejects untrusted image references before loading secrets or touching
   expect(await failure(push(outputs, { DEPLOY_IMAGE: `${repo}:${"a".repeat(40)}` }))).toMatch(
     /DEPLOY_REGISTRY_USER/,
   );
+});
+
+test("data transfer sends files to the literal remote data directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "deploy-rsync-"));
+  try {
+    const source = join(root, "source");
+    const appDir = join(root, "app");
+    const destination = join(appDir, "data");
+    const remoteShell = join(root, "local-remote-shell");
+    await mkdir(source);
+    await mkdir(destination, { recursive: true });
+    await writeFile(join(source, "catalog.json"), '{"catalog":"transferred"}\n');
+    await writeFile(join(destination, "retained.json"), '{"retained":true}\n');
+    // rsync invokes the remote shell with a host followed by a shell command, as ssh does.
+    await writeFile(remoteShell, '#!/bin/sh\nshift\nexec /bin/sh -c "$*"\n');
+    await chmod(remoteShell, 0o755);
+
+    await transferData(`${source}/`, "local", appDir, remoteShell);
+
+    expect(await readFile(join(destination, "catalog.json"), "utf8")).toBe(
+      '{"catalog":"transferred"}\n',
+    );
+    expect(await readFile(join(destination, "retained.json"), "utf8")).toBe('{"retained":true}\n');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("the service runs the persisted digest on loopback with read-only host data", () => {

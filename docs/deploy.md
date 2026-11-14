@@ -1,6 +1,6 @@
 # Hosted deploy
 
-The demo runs on one Vultr instance and one Tiger Data PostgreSQL service. OpenTofu in `infra/` creates both. Caddy provides automatic TLS and proxies to the container. `scripts/deploy.ts` deploys a private GHCR image. Decision: #37; task: #84.
+The demo runs on one Vultr instance and one Tiger Data PostgreSQL service. OpenTofu in `infra/` creates both. Caddy provides automatic TLS and proxies to the container. `scripts/deploy.ts` deploys a private GHCR image. Decision: #37; tasks: #84 and #106.
 
 ## Prerequisites
 
@@ -82,7 +82,7 @@ bun scripts/deploy.ts push
 
 `push` requires the fixed repository and full SHA tag before it changes the host. It does not build an image or copy the checkout. It waits for cloud-init, installs and starts Docker, and pulls the image before stopping the service. It uses a temporary Docker configuration for registry access. It resolves the image to a digest and stores it as `TRUSTED_TRADE_IMAGE` in `/etc/trusted-trade-image.env`, separate from the app environment. The service starts that digest without pulling, so restarts do not need registry credentials.
 
-`push` copies only `data/`, without `--delete`, to the host. The container mounts that directory read-only at `/app/data`. It writes `/etc/trusted-trade.env` and the Caddyfile, starts the service, and waits for `/api/health`. The server runs `bun apps/api/src/main.ts` from `/app` and migrates on start. An existing VM moves to the container service on `push`; it does not need another `tofu apply` or replacement.
+`push` copies only `data/`, without `--delete`, to the host. It makes transferred and retained files readable by container UID 1000 without adding group or public access. The container mounts that directory read-only at `/app/data`. It writes `/etc/trusted-trade.env` and the Caddyfile, starts the service, and waits for `/api/health`. The server runs `bun apps/api/src/main.ts` from `/app` and migrates on start. An existing VM moves to the container service on `push`; it does not need another `tofu apply` or replacement.
 
 `reset --yes` replaces the hosted demo data. It drops only the tables and types that each context's migrations create, and their migration records, because the TimescaleDB extension lives in the hosted `public` schema. It uses no CASCADE and runs in one transaction, so a foreign object that depends on ours aborts the reset before anything is dropped. Then it migrates and seeds like `bun run db:reset`, with the keys from `env.deploy`, so the seeded mandate verifies on the host.
 

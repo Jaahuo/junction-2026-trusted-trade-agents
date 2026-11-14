@@ -184,6 +184,15 @@ WantedBy=multi-user.target
 `;
 };
 
+export const transferData = async (
+  source: string,
+  host: string,
+  appDir: string,
+  remoteShell: string,
+): Promise<void> => {
+  await $`rsync -az -e ${remoteShell} ${source} ${`${host}:${appDir}/data/`}`;
+};
+
 export const push = async (
   outputs: Outputs,
   settings: Readonly<Record<string, string | undefined>> = process.env,
@@ -219,9 +228,9 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
     );
   if (!digest) throw new Error("Pulled image has no trusted repository digest");
   const remoteShell = `ssh ${SSH.join(" ")}`;
-  if (existsSync("data"))
-    await $`rsync -az -e ${remoteShell} data/ ${`${host}:${shellQuote(`${outputs.app_dir}/data/`)}`}`;
+  if (existsSync("data")) await transferData("data/", host, outputs.app_dir, remoteShell);
   await $`ssh ${SSH} ${host} systemctl stop trusted-trade`;
+  await $`ssh ${SSH} ${host} ${`chown -R 1000:1000 ${dir}/data && chmod -R u+rX ${dir}/data`}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${digest}"\n`)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade.service < ${new Response(unit)}`;

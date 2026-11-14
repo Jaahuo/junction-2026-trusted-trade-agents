@@ -1,6 +1,7 @@
 import type { WholesalerLive } from "@app/contract";
 import { env, publicBaseUrl } from "@app/server-kit";
 import type { OffersDeps } from "../application/ports.ts";
+import { createIssuedOffers, rememberingSigner } from "../application/issued-offers.ts";
 import { createQuoteCache } from "../application/quote-cache.ts";
 import { envOfferSigner } from "../infra/offer-signer.ts";
 import { peerAdapters } from "../infra/peers.ts";
@@ -28,15 +29,22 @@ export const selectLive = (
 let memo: OffersDeps | undefined;
 
 /** The process-wide adapters. Building them reads env but calls no peer and loads no key. */
-export const defaultOffersDeps = (): OffersDeps =>
-  (memo ??= {
+const now = () => new Date();
+
+const buildDeps = (): OffersDeps => {
+  const issued = createIssuedOffers();
+  return {
     live: selectLive(env("WHOLESALER_LIVE"), mockWholesalerFromEnv(), (message) =>
       console.error(message),
     ),
     ...peerAdapters(),
-    signer: envOfferSigner(),
+    signer: rememberingSigner(envOfferSigner(), issued, now),
     cache: createQuoteCache(),
+    issued,
     issuer: publicBaseUrl,
-    now: () => new Date(),
+    now,
     newOfferId: () => `off_${crypto.randomUUID()}`,
-  });
+  };
+};
+
+export const defaultOffersDeps = (): OffersDeps => (memo ??= buildDeps());

@@ -160,6 +160,7 @@ export const TOOL_INPUT = {
 | facts    | —                      | POST /api/catalog/facts              | catalog   | —                                                                     | FactsRequest → FactsResult                                 |
 | precheck | —                      | POST /api/orders/precheck            | orders    | —                                                                     | PrecheckRequest → Precheck                                 |
 | requote  | —                      | POST /api/offers/requote             | offers    | —                                                                     | RequoteRequest → OffersResult                              |
+| issued   | —                      | POST /api/offers/issued              | offers    | —                                                                     | IssuedOffersRequest → IssuedOffers                         |
 | validate | —                      | POST /api/offers/validate            | offers    | —                                                                     | ValidateRequest → ValidateResult                           |
 | account  | —                      | GET /api/accounts/current            | accounts  | —                                                                     | → Account                                                  |
 | openapi  | —                      | GET /api/discovery/openapi.json      | discovery | —                                                                     | → OpenAPI 3.1                                              |
@@ -383,6 +384,7 @@ Steps of `get_offers`:
 - Totals: gross = (net × (1 + vatRate/100) + deposit) × quantity value, rounded to cents. `depositsIncluded: false` when the price quote has `depositKnown: false`: the total then leaves deposits out.
 - `pricePerStandardUnit`: gross price (VAT, no deposit) per `LTR` or `KGM`, rounded to cents. The wholesaler's comparison price wins; without it, the unit price divided by `product.perSalesUnit` when that is in litres or kilograms; otherwise `null`.
 - Keys: `OFFER_SIGNING_JWK` (private ES256 JWK) and `OFFER_SIGNING_KID`. With both set, a restart keeps every issued offer valid. When they are unset and `NODE_ENV` is not `production`, `offerSigningKeyFromEnv` generates a key for the process and logs one warning; in `production` it throws and the server does not start. `GET /.well-known/jwks.json` publishes the public key only.
+- `issued`: the offers service keeps every token it signs (by `get_offers` or `requote`) in process memory until the token's `exp`. `POST /api/offers/issued` with `{ offerIds }` (1 to 40) returns `{ offers: { offerId, token }[] }` for the IDs it issued to the principal's customer and agent and that have not expired; another ID is left out. A restart forgets the IDs; the agent then sends the token or requests new offers. This lets an agent name an offer by its short `offerId`, so a model never has to copy a token (#162). The store is per process, so the demo runs one API instance. Internal calls carry no principal, so orders also checks the owner in the verified token (SPEC-009 R3).
 - `requote`: re-issues offers for the same product, quantity and date (or the given changes) of the given tokens, under the current mandate of the token's `agentId`.
 - `validate`: re-reads live availability of the tokens' products with a fresh availability request (SPEC-005) and reports a sales block, a lost date or a passed cut-off. It also reports the live confirmed amount per product in `products[].liveAmount`, `null` when stock is unconfirmed.
 - Live-amount rule: when the live amount of a product is lower than the summed order quantity of that product (SPEC-009), the offers are stale. At `place_order` the request is refused with `409 STALE_OFFER` and the agent requests new offers (SPEC-009 R6). At approval the order goes through the re-quote path (SPEC-011).
@@ -457,9 +459,10 @@ export type Evaluate = (input: { claims: OfferClaims[]; mandate: Mandate | null;
 
 Precedence for `place_order` (one list; the first matching step R1-R7 ends the request):
 
-- R1. The body fails its schema, or holds 0 or more than 20 tokens → `400 BAD_REQUEST`. No record.
-- R2. The idempotency key is known: same tokens → `200` with the stored order; other tokens → `409 CONFLICT`.
-- R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
+- Each entry of `offers` and `alternatives` (and of the `precheck` body) names an offer by its `offerId` (`off_` followed by letters, digits, `_` or `-`) or by its full token. The server replaces each `offerId` with its token through `issued` (SPEC-006) before R3; the stored order keeps the tokens. The rules below say "token" for the offer after this step.
+- R1. The body fails its schema, or holds 0 or more than 20 offers, or more than 20 alternatives → `400 BAD_REQUEST`. No record.
+- R2. The idempotency key is known: the same `offers` and `alternatives` as sent (IDs and tokens compared as text) → `200` with the stored order; others → `409 CONFLICT`.
+- R3. An `offerId` that `issued` does not return (unknown or expired), or whose verified token names another customer or agent, a token that fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
 - R4. Tokens differ in `customer` or `paymentTerms`, a token's `paymentTerms` is not the account's (alternatives included), or the customer is not the principal's → `400 BAD_REQUEST`.
 - R5. A current mandate exists and a token's `agentId`, `mandateId` or `mandateVersion` differs from it → `409 STALE_OFFER` ("request new offers").
 - R6. `validate` reports a live amount below the summed quantity of a product → `409 STALE_OFFER` (live-amount rule, SPEC-006).
@@ -596,7 +599,7 @@ export interface PrecheckRequest {
 }
 ```
 
-- `place_order` takes signed offer tokens only. `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
+- `place_order` takes signed offers only, each named by its `offerId` or its token (SPEC-009). `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
 - Idempotency: unique (customer, idempotencyKey). See SPEC-009 R2.
 - Replacement: when the buyer changes a pending proposal, `supersedes` identifies that exact order and proposal version. The server requires the same customer, account and agent, pending status and matching version under the customer lock; otherwise `409 CONFLICT`. Only an accepted replacement (`pending_approval`, `placed` or `awaiting_payment`) closes the predecessor as `declined`, with `decision.next: "stop"` and server identity. Rejected or failed replacements leave it open. Both audits identify the other order. The transaction preserves unrelated orders and rolls back both writes on failure. Idempotency includes the replacement reference; changing or omitting it with the same key gives `409 CONFLICT`. Replacement is not a human approval and never places the predecessor.
 - `standingOffer` is set only on the approve response, never stored: policy `ask`, the order has `SUBSTITUTION`, a substitute line has no rule yet, and the customer has approved that pair 3 or more times, this order included. The approval card then offers to save an `auto` rule; after a rejection it offers a `never` rule. The view saves either with `register_mandate`.

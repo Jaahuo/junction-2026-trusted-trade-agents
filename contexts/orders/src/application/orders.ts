@@ -22,6 +22,7 @@ import {
 } from "../domain/evaluate.ts";
 import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import type {
+  IssuedOfferPort,
   MandatePort,
   OfferVerifier,
   OrderStore,
@@ -34,6 +35,7 @@ import type {
 export interface OrderDeps {
   store: OrderStore;
   verifyOffer: OfferVerifier;
+  issuedOffers: IssuedOfferPort;
   mandates: MandatePort;
   payment: PaymentPort;
   signReceipt: ReceiptSigner;
@@ -59,18 +61,64 @@ interface Checked {
   mandate: Mandate | null;
 }
 
-const verifyAll = async (
-  verifyOffer: OfferVerifier,
-  tokens: string[],
+/** An offer reference is an offer ID (`off_…`); anything else is treated as a token. */
+const isOfferId = (ref: string): boolean => /^off_[\w-]+$/.test(ref);
+
+/** An offer named by ID, with the token issued for it, or an offer named by its token. */
+interface Resolved {
+  token: string;
+  byId: boolean;
+}
+
+const unknownOffer = (ref: string): Refusal =>
+  refusal("OFFER_INVALID", `Offer ${ref} is unknown or expired; request new offers.`);
+
+/**
+ * Replaces each offer ID with the token issued for it (SPEC-009 R3). An ID the offers service does
+ * not return, including an expired offer, is OFFER_INVALID.
+ */
+const resolveRefs = async (
+  issuedOffers: IssuedOfferPort,
+  refs: string[],
+): Promise<Result<Resolved[], Refusal>> => {
+  const ids = refs.filter(isOfferId);
+  if (ids.length === 0) return ok(refs.map((token) => ({ token, byId: false })));
+  const issued = await issuedOffers.issued([...new Set(ids)]);
+  if (!issued.ok) return err(refusal("UPSTREAM_FAILED", "The offers could not be looked up."));
+  const resolved: Resolved[] = [];
+  for (const ref of refs) {
+    if (!isOfferId(ref)) {
+      resolved.push({ token: ref, byId: false });
+      continue;
+    }
+    const token = issued.value.get(ref);
+    if (token === undefined) return err(unknownOffer(ref));
+    resolved.push({ token, byId: true });
+  }
+  return ok(resolved);
+};
+
+/**
+ * Verifies each offer. An offer named by ID must also be this principal's: the lookup goes through an
+ * internal call that does not carry the caller, so orders checks the owner itself (SPEC-009 R3).
+ */
+const verifyRefs = async (
+  deps: OrderDeps,
+  principal: Principal,
+  refs: string[],
   now: Date,
 ): Promise<Result<OrderLine[], Refusal>> => {
+  const resolved = await resolveRefs(deps.issuedOffers, refs);
+  if (!resolved.ok) return resolved;
   const lines: OrderLine[] = [];
-  for (const token of tokens) {
-    const verified = await verifyOffer(token, now);
+  for (const [index, { token, byId }] of resolved.value.entries()) {
+    const verified = await deps.verifyOffer(token, now);
     let claims: OfferClaims;
     if (verified.ok) claims = verified.value;
     else if (verified.error.code === "OFFER_EXPIRED") claims = verified.error.claims;
     else return err(refusal("OFFER_INVALID", "An offer token failed verification."));
+    if (byId && (claims.customer !== principal.customer || claims.agentId !== principal.agentId))
+      return err(unknownOffer(refs[index] ?? claims.offerId));
     lines.push({ offerId: claims.offerId, token, claims });
   }
   return ok(lines);
@@ -86,10 +134,10 @@ const checkTokens = async (
 ): Promise<Result<Checked, Refusal>> => {
   const all = [...offers, ...alternatives];
   if (new Set(all).size !== all.length)
-    return err(refusal("OFFER_INVALID", "The request repeats an offer token."));
-  const lines = await verifyAll(deps.verifyOffer, offers, now);
+    return err(refusal("OFFER_INVALID", "The request repeats an offer."));
+  const lines = await verifyRefs(deps, principal, offers, now);
   if (!lines.ok) return lines;
-  const alternativeLines = await verifyAll(deps.verifyOffer, alternatives, now);
+  const alternativeLines = await verifyRefs(deps, principal, alternatives, now);
   if (!alternativeLines.ok) return alternativeLines;
 
   const claims = [...lines.value, ...alternativeLines.value].map((line) => line.claims);

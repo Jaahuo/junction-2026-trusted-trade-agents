@@ -166,11 +166,15 @@ export type OrderReceiptClaims = z.infer<typeof OrderReceiptClaimsSchema>;
 export const PendingListSchema = z.strictObject({ orders: z.array(OrderSchema) });
 export type PendingList = z.infer<typeof PendingListSchema>;
 
-const OfferTokensSchema = z.array(z.string()).min(1).max(20);
+/** An offer is named by its `offerId` (`off_…`) or by its full token (SPEC-009 R3). */
+const OfferRefSchema = z
+  .string()
+  .describe("The offerId of an offer from get_offers or quote_offers, or its full token.");
+const OfferRefsSchema = z.array(OfferRefSchema).min(1).max(20);
 
 export const PlaceOrderRequestSchema = z.strictObject({
-  offers: OfferTokensSchema,
-  alternatives: z.array(z.string()).optional(),
+  offers: OfferRefsSchema,
+  alternatives: z.array(OfferRefSchema).max(20).optional(),
   originalRequest: z.string().optional(),
   supersedes: z
     .strictObject({ orderId: z.string().min(1), proposalVersion: z.number().int().positive() })
@@ -179,7 +183,7 @@ export const PlaceOrderRequestSchema = z.strictObject({
 });
 export type PlaceOrderRequest = z.infer<typeof PlaceOrderRequestSchema>;
 
-export const PrecheckRequestSchema = z.strictObject({ offers: OfferTokensSchema });
+export const PrecheckRequestSchema = z.strictObject({ offers: OfferRefsSchema });
 export type PrecheckRequest = z.infer<typeof PrecheckRequestSchema>;
 
 export const OrderRefSchema = z.strictObject({ orderId: z.string() });

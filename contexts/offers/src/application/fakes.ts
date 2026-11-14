@@ -12,6 +12,7 @@ import {
   type WholesalerLive,
 } from "@app/contract";
 import type { CatalogFacts, CurrentMandate, OfferSigner, OffersDeps, Prechecker } from "./ports.ts";
+import { createIssuedOffers, rememberingSigner } from "./issued-offers.ts";
 import { createQuoteCache } from "./quote-cache.ts";
 
 // Invented products only (team rules R-23).
@@ -242,6 +243,7 @@ export function fakeOffersDeps(
   const mandates = fakeMandates(options.mandate ?? null);
   const orders = fakePrechecker();
   const signer = fakeSigner(clock.now);
+  const issued = createIssuedOffers();
   let sequence = 0;
   return {
     deps: {
@@ -249,8 +251,9 @@ export function fakeOffersDeps(
       catalog,
       mandates,
       orders,
-      signer,
+      signer: rememberingSigner(signer, issued, clock.now),
       cache: createQuoteCache(),
+      issued,
       issuer: () => FAKE_ISSUER,
       now: clock.now,
       newOfferId: () => {

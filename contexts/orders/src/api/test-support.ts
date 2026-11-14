@@ -13,6 +13,7 @@ import {
   signOfferToken,
   signOrderReceipt,
 } from "@app/contract/server";
+import { ok } from "@app/kernel";
 import { type Db, mountContext } from "@app/server-kit";
 import { context as mandatesContext, createApi as createMandatesApi } from "@ctx/mandates/api";
 import type { AnyElysia } from "elysia";
@@ -51,9 +52,22 @@ export const mount = async (db: Db) => {
   const publicBase = { url: "https://orders.test" };
   // The orders clock; a test moves it to act later on stored orders.
   const clock = { now };
+  // Stands in for the offers service's issued tokens (SPEC-006 `issued`): offer ID → token.
+  const issued = new Map<string, string>();
   const appWith = (changes: Partial<ApiDeps> = {}) =>
     createApi(db, {
       verifyOffer: offerVerifier(async () => keys),
+      issuedOffers: {
+        issued: async (offerIds) =>
+          ok(
+            new Map(
+              offerIds.flatMap((id) => {
+                const token = issued.get(id);
+                return token === undefined ? [] : [[id, token] as const];
+              }),
+            ),
+          ),
+      },
       signReceipt: ({ idempotencyKey: _key, requested: _requested, ...order }) =>
         signOrderReceipt({ ...order, approvalUrl: null }, key, publicBase.url),
       mandates: mandateClient(mandates),
@@ -87,7 +101,20 @@ export const mount = async (db: Db) => {
       exp,
     );
   };
-  return { app, appWith, clock, mandates, mandate, register, sign, publicBase, key, keys, jwks };
+  return {
+    app,
+    appWith,
+    clock,
+    issued,
+    mandates,
+    mandate,
+    register,
+    sign,
+    publicBase,
+    key,
+    keys,
+    jwks,
+  };
 };
 
 export const call = (app: AnyElysia, method: string, path: string, body?: object) =>

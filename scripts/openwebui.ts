@@ -12,7 +12,7 @@ const COMPOSE = ["docker", "compose", "--env-file", ENV_FILE, "-f", `${HOST_DIR}
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-async function settings(): Promise<Record<string, string>> {
+export async function settings(): Promise<Record<string, string>> {
   const child = Bun.spawn([...COMPOSE, "config", "--format", "json"], {
     stdout: "pipe",
     stderr: "inherit",

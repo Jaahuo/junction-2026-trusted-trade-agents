@@ -97,3 +97,10 @@ Branding uses the upstream custom stylesheet hook. Open WebUI identity and licen
 Photograph credits are served at `/static/acme/credits.html`.
 
 See [prompt checks](buyer-agent-prompt.md#test-sentences) and [hosted deployment](deploy.md#hosted-chat).
+
+## Chat checks
+
+`bun scripts/chat-check.ts` uses the same Compose-resolved operator credentials as setup.
+It signs in through the browser and selects Acme Kitchens.
+Use `--no-reset` for a read-only scenario that must preserve the worktree database.
+The default scenarios can create orders and reset the local database.

@@ -34,6 +34,15 @@ export const AuditEventSchema = z.strictObject({
   rule: z.string().optional(),
   reason: ReasonCodeSchema.optional(),
   detail: z.string().optional(),
+  hash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  previousHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable()
+    .optional(),
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
@@ -90,8 +99,32 @@ export const OrderSchema = z.strictObject({
   nextDeliveryDate: DateSchema.nullable(),
   audit: z.array(AuditEventSchema),
   createdAt: TimeSchema,
+  receipt: z.string().optional(),
+  auditAnchor: z
+    .strictObject({ hash: z.string().regex(/^[0-9a-f]{64}$/), count: z.number().int().positive() })
+    .optional(),
 });
 export type Order = z.infer<typeof OrderSchema>;
+
+export const OrderReceiptClaimsSchema = z.strictObject({
+  iss: z.string(),
+  orderId: OrderSchema.shape.orderId,
+  customer: OrderSchema.shape.customer,
+  agentId: OrderSchema.shape.agentId,
+  accountId: OrderSchema.shape.accountId,
+  offerIds: OrderSchema.shape.offerIds,
+  lines: OrderSchema.shape.lines,
+  mandateId: OrderSchema.shape.mandateId,
+  mandateVersion: OrderSchema.shape.mandateVersion,
+  paymentTerms: OrderSchema.shape.paymentTerms,
+  total: OrderSchema.shape.total,
+  decision: OrderSchema.shape.decision,
+  createdAt: OrderSchema.shape.createdAt,
+  placedAt: TimeSchema,
+  auditAnchor: OrderSchema.shape.auditAnchor.unwrap(),
+  status: z.literal("placed"),
+});
+export type OrderReceiptClaims = z.infer<typeof OrderReceiptClaimsSchema>;
 
 export const PendingListSchema = z.strictObject({ orders: z.array(OrderSchema) });
 export type PendingList = z.infer<typeof PendingListSchema>;

@@ -1,4 +1,6 @@
 import type { Db } from "@app/server-kit";
+import { appendAudit } from "@app/contract/server";
+import { err, ok } from "@app/kernel";
 import { and, asc, eq, inArray, or, sql, sum } from "drizzle-orm";
 import type { OrderStore, OrderTx, StoredOrder } from "../application/ports.ts";
 import { history, orders, refusals } from "./schema.ts";
@@ -28,6 +30,8 @@ const toStored = (row: Row): StoredOrder => ({
   requotes: row.requotes,
   nextDeliveryDate: row.nextDeliveryDate,
   audit: row.audit,
+  ...(row.receipt === null ? {} : { receipt: row.receipt }),
+  ...(row.auditAnchor === null ? {} : { auditAnchor: row.auditAnchor }),
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -53,6 +57,8 @@ const toRow = (order: StoredOrder): Row => ({
   requotes: order.requotes,
   nextDeliveryDate: order.nextDeliveryDate,
   audit: order.audit,
+  receipt: order.receipt ?? null,
+  auditAnchor: order.auditAnchor ?? null,
   createdAt: new Date(order.createdAt),
 });
 
@@ -152,7 +158,26 @@ export const postgresOrderStore = (db: Db): OrderStore => ({
           .from(history)
           .where(and(eq(history.customer, customer), inArray(history.productId, productIds))),
   refuse: async (customer, event) => {
-    await db.insert(refusals).values({ customer, event });
+    return db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`orders:${customer}`}, 0))`,
+      );
+      const rows = await tx
+        .select({ event: refusals.event })
+        .from(refusals)
+        .where(eq(refusals.customer, customer))
+        .orderBy(asc(refusals.id));
+      const chained = await appendAudit(
+        `refusals:${customer}`,
+        rows.map((row) => row.event),
+        [event],
+      );
+      if (!chained.ok) return err("AUDIT_INVALID" as const);
+      const appended = chained.value[chained.value.length - 1];
+      if (appended === undefined) return err("AUDIT_INVALID" as const);
+      await tx.insert(refusals).values({ customer, event: appended });
+      return ok(undefined);
+    });
   },
   withCustomerLock: (customer, work) =>
     db.transaction(async (tx) => {

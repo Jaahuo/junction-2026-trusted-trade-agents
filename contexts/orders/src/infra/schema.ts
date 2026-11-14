@@ -39,6 +39,8 @@ export const orders = pgTable(
     requotes: jsonb().$type<Order["requotes"]>().notNull(),
     nextDeliveryDate: text(),
     audit: jsonb().$type<AuditEvent[]>().notNull(),
+    receipt: text(),
+    auditAnchor: jsonb().$type<NonNullable<Order["auditAnchor"]>>(),
     createdAt: timestamp({ withTimezone: true }).notNull(),
   },
   (table) => [

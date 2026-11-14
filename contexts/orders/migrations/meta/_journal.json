@@ -15,6 +15,13 @@
       "when": 1794666315925,
       "tag": "0001_shallow_lockjaw",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794668804737,
+      "tag": "0002_ambiguous_hannibal_king",
+      "breakpoints": true
     }
   ]
 }

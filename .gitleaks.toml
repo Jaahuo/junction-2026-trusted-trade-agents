@@ -7,3 +7,9 @@ condition = "AND"
 paths = ['''^packages/contract/src/fixtures\.ts$''']
 regexTarget = "secret"
 regexes = ['''^eyJhbGciOiJFUzI1NiJ9\.test-offer\.signature$''']
+
+# The 87 MB challenge dataset holds no credentials and makes the scan slow.
+# Remove this entry when taking the challenge data out of the repository (#38) lands.
+[[allowlists]]
+description = "Challenge product dataset, no credentials"
+paths = ['''^data/valio_aimo_junction26_product_data\.json$''']

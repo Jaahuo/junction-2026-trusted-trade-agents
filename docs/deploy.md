@@ -9,6 +9,7 @@ The demo runs on one Vultr instance and one Tiger Data PostgreSQL service. OpenT
 - An SSH key at `~/.ssh/id_ed25519.pub`, or set `TF_VAR_ssh_public_key_path`.
 - The challenge data files in `data/`.
 - Docker with Buildx, and access to the private `ghcr.io/jaahuo/junction-2026-trusted-trade-agents` package.
+- Python 3 on the machine that runs `push`, for hosted chat provisioning.
 
 ## Operator files
 
@@ -115,7 +116,23 @@ The current private repository plan does not support branch protection. At inspe
 Without that key it skips the chat host and changes nothing else.
 The chat host uses the OpenAI-compatible Verda endpoint `https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1` with the base model `nemotron-3.5-super-vl`, and connects to `<url>/mcp` of the same deployment.
 Login is on and sign-up is off, because the inference key pays for every chat.
-Sign in with the admin account and choose the model "Buyer agent".
+Sign in with the admin account. Choose Acme Kitchens or Acme Bakery; Acme Kitchens is the default.
+
+The managed presets use the shared [purchasing prompt](../hosts/openwebui/agent/purchasing.md).
+They combine concise ordering replies with structured recipe planning.
+The main project's ordering skill and reason-code reference are embedded in both system prompts.
+Valio Aimo recipe reads are off by default pending permission.
+For an authorized manual deployment, set `VALIO_AIMO_RECIPE_PERMISSION=True` in the deployment process environment.
+The deploy forwards that flag to provisioning and the chat container.
+The MCP connection supplies purchasing tools; the server controls approval and buying authority.
+The presets do not create a buyer account or grant purchasing rights.
+
+For the chat host, `push` copies only `hosts/openwebui/agent`, `branding` and `scripts` to `/opt/trusted-trade-chat`.
+It excludes environment files and Python caches.
+The service mounts the branding files read-only and keeps chat data in its existing volume.
+After the service starts, the deploy runs the local Python provisioner against the hosted URL.
+It embeds the local ordering skill and configures the inference endpoint, MCP connection and managed presets.
+Title, follow-up and tag generation are disabled; voice remains available.
 
 Keep the chat secrets in a fourth operator file, `~/.config/trusted-trade/env.chat`:
 

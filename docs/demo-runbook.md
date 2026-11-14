@@ -138,14 +138,14 @@ If `offers` fails with `omitted: NO_PRICE`, the server has no live price source:
 
 The smoke script proves the REST routes.
 It does not show what the model does with the tools: a model can pick another product, change an offer token while it copies it, or stop before it places the order.
-The host check sends the demo sentences to the Buyer agent in Open WebUI through a real browser and reports the tool calls, the stored order and the reply.
+The chat check sends the demo sentences to the Buyer agent in Open WebUI through a real browser and reports the tool calls, the stored order and the reply.
 
 1. Start the server and Open WebUI as [the buyer agent prompt page](buyer-agent-prompt.md#start-open-webui-with-the-prompt) says.
    Open WebUI must point at this worktree's API.
 2. Run the check:
 
    ```sh
-   bun scripts/host-check.ts
+   bun scripts/chat-check.ts
    ```
 
    Each scenario prints, per sentence, the seconds, the tool calls and the reply, then `ok` or `FAIL` for each expectation; the command exits 1 when one fails.
@@ -164,7 +164,7 @@ The host check sends the demo sentences to the Buyer agent in Open WebUI through
 
 The check needs Google Chrome.
 It stops before the first sentence when the server, its MCP endpoint, the host or the model endpoint is down, or when Open WebUI is connected to another server.
-The [`host-check` skill](../.agents/skills/host-check/SKILL.md) explains each failure line and how to add a scenario.
+The [`chat-check` skill](../.agents/skills/chat-check/SKILL.md) explains each failure line and how to add a scenario.
 
 ## Restart check
 

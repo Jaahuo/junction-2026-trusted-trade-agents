@@ -7,14 +7,14 @@ import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 // the formatters. Figma: Junction 2026 › Screens › "Approval request — v8".
 
 const UNIT: Record<string, string> = {
-  LTR: "L",
+  LTR: "l",
   KGM: "kg",
   GRM: "g",
   CT: "packs",
   PCE: "pcs",
   ST: "pcs",
 };
-export const unit = (code: string) => UNIT[code] ?? code;
+const unit = (code: string) => UNIT[code] ?? code;
 
 const euro = (digits: number) =>
   new Intl.NumberFormat("en-GB", {
@@ -25,10 +25,12 @@ const euro = (digits: number) =>
   });
 /** Totals: "€1,428", or "€57.60" when there are cents. */
 export const money = (value: number) => euro(value % 1 === 0 ? 0 : 2).format(value);
-/** Line prices: always "€1,428.00". */
-export const price = (value: number) => euro(2).format(value);
 export const number = (value: number) => new Intl.NumberFormat("en-GB").format(value);
-export const amount = (q: { value: number; unit: string }) => `${number(q.value)} ${unit(q.unit)}`;
+/** "1,008 l", "120 kg"; below one kilogram or litre in grams or millilitres ("500 g"). */
+export const amount = (q: { value: number; unit: string }) =>
+  q.value > 0 && q.value < 1 && (q.unit === "KGM" || q.unit === "LTR")
+    ? `${number(Math.round(q.value * 1000))} ${q.unit === "KGM" ? "g" : "ml"}`
+    : `${number(q.value)} ${unit(q.unit)}`;
 /** The line in standard units (litres, kilograms), or sales units when the pack size is unknown. */
 export const stdUnits = (c: OfferClaims) =>
   c.product.perSalesUnit === null

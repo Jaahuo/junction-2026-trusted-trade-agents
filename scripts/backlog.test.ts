@@ -197,6 +197,11 @@ describe("unreadable ownership", () => {
     const excepted =
       "## Owns\n\nOwned paths: contexts/offers/** (except package.json) and scripts/backlog.ts\n";
     expect(ownedPaths(excepted)).toEqual(["contexts/offers", "scripts/backlog.ts"]);
+    expect(
+      ownedPaths(
+        "## Owns\n\nOwned paths: contexts/offers/** (except package.json and tsconfig.json and README.md)\n",
+      ),
+    ).toEqual(["contexts/offers"]);
     const mine = issue(1, { body: `${excepted}\n## Acceptance\n\n1. gate.\n` });
     const active = issue(2, { assignees: ["someone"], body: body("`scripts/backlog.ts`") });
     expect(blockers(mine, board([mine, active]))).toEqual(["owned paths overlap active #2"]);

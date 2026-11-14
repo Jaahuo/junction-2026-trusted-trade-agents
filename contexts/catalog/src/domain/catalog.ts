@@ -54,13 +54,19 @@ const SOFT_VALUES = new Map<string, (product: CatalogProduct) => string | null>(
 export const isSupportedSoftAttribute = (attribute: string): boolean => SOFT_VALUES.has(attribute);
 
 const milkWords = new Set(["milk", "maito"]);
+// Plant-based products are named "gurt" or "Plantgurt", and a buyer asks for yogurt.
+const yogurtWords = new Set(["yogurt", "yoghurt", "jogurtti", "gurt", "plantgurt"]);
+const sameWord = (token: string, word: string): boolean =>
+  token === word ||
+  (milkWords.has(word) && milkWords.has(token)) ||
+  (yogurtWords.has(word) && yogurtWords.has(token));
 
 // A word counts if at least one occurrence is not part of "milk-free" or "free from milk".
 const matchesTerm = (line: readonly string[], words: readonly string[]): boolean =>
   words.every((word, wordIndex) =>
     line.some(
       (token, index) =>
-        (token === word || (milkWords.has(word) && milkWords.has(token))) &&
+        sameWord(token, word) &&
         (line[index + 1] !== "free" || words[wordIndex + 1] === "free") &&
         !(line[index - 2] === "free" && line[index - 1] === "from"),
     ),

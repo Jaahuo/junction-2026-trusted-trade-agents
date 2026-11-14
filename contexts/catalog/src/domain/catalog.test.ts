@@ -69,6 +69,21 @@ describe("search ranking", () => {
     expect(ids(products, request({ terms: ["organic maito"] }))).toEqual([]);
   });
 
+  test("yogurt finds plant-based gurt names, and not a compound that only contains the word", () => {
+    const products = [
+      product("plantgurt", { searchText: "brand plantgurt fermented soya product plain 750g" }),
+      product("gurt", { searchText: "brand oat based gurt 1 kg natural" }),
+      product("dairy", { searchText: "natural yoghurt 5kg" }),
+      product("compound", { searchText: "yogurtdressing 1 l" }),
+    ];
+    expect(ids(products, request({ terms: ["yogurt"] })).toSorted()).toEqual([
+      "dairy",
+      "gurt",
+      "plantgurt",
+    ]);
+    expect(ids(products, request({ terms: ["plain yogurt"] }))).toEqual(["plantgurt"]);
+  });
+
   test("a hyphenated term matches names that write the words apart", () => {
     const products = [
       product("apart", { searchText: "test milk 1 l lactose free uht" }),

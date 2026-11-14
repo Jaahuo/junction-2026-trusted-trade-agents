@@ -127,8 +127,8 @@
             "unit": "LTR"
           },
           "countryOfOrigin": "fi",
-          "deliveryReliability": 0.92,
-          "co2PerKg": 0.3,
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
           "match": {
             "lactose": "confirmed"
           }
@@ -141,7 +141,7 @@
   "mandateId": "mnd_test_1",
   "mandateVersion": 1,
   "status": "pending_approval",
-  "reasons": ["SPEND_OVER_LIMIT", "NEW_PRODUCT"],
+  "reasons": ["SPEND_OVER_LIMIT"],
   "proposalVersion": 1,
   "approvalUrl": "http://127.0.0.1:3000/approvals/ord_test_1",
   "paymentTerms": "invoice",
@@ -162,8 +162,12 @@
     {
       "at": "2026-11-14T10:05:00+00:00",
       "actor": "server",
-      "event": "sent_to_approval",
-      "reason": "NEW_PRODUCT"
+      "event": "offer_verified"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "sent_to_approval"
     }
   ],
   "createdAt": "2026-11-14T10:05:00+00:00"

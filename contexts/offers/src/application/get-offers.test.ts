@@ -714,6 +714,33 @@ describe("getOffers", () => {
     ]);
   });
 
+  test("a cached price that expires while availability is read is read again", async () => {
+    const live = quoted(OAT);
+    const setup = fakeOffersDeps({ products: [fakeProduct(OAT)], live });
+    valueOf(await getOffers(setup.deps, principal, request()));
+
+    const next = live[OAT];
+    if (next === undefined) throw new Error("expected live data");
+    next.prices = { "*": fakePrice(OAT, { unitPrice: { net: 20, vatRate: 14, currency: "EUR" } }) };
+    setup.clock.set("2026-11-14T10:04:59Z");
+    const slow: WholesalerLive = {
+      getPrices: (query) => setup.live.getPrices(query),
+      getAvailability: async (query) => {
+        setup.clock.set("2026-11-14T10:05:01Z");
+        return setup.live.getAvailability(query);
+      },
+    };
+    const second = valueOf(await getOffers({ ...setup.deps, live: slow }, principal, request()));
+
+    expect(setup.live.calls.map((call) => call.kind)).toEqual([
+      "availability",
+      "prices",
+      "availability",
+      "prices",
+    ]);
+    expect(second.offers[0]?.claims.unitPrice.net).toBe(20);
+  });
+
   test("a price is not served from the cache after validTo", async () => {
     const setup = fakeOffersDeps({
       products: [fakeProduct(OAT)],

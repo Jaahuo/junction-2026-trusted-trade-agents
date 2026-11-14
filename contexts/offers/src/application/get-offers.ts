@@ -229,7 +229,8 @@ export async function getOffers(
     for (const { product, deliveryDate } of lines) {
       if (priceRead.has(product.productId)) continue;
       priceRead.add(product.productId);
-      const hit = deps.cache.get(priceKey(product.productId, deliveryDate), lookedUpAt);
+      // Check the cache age now: availability reads before this can take time.
+      const hit = deps.cache.get(priceKey(product.productId, deliveryDate), deps.now());
       if (hit !== undefined) {
         prices.set(product.productId, hit);
         priceCached.add(product.productId);

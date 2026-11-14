@@ -1,6 +1,8 @@
 import {
+  DraftMandateRequestSchema,
   EmptySchema,
   ErrorEnvelopeSchema,
+  MandateDraftSchema,
   MandateRefSchema,
   type Principal,
   RegisterMandateRequestSchema,
@@ -11,6 +13,7 @@ import { badRequestEnvelope, type ContextModule, type Db } from "@app/server-kit
 import { Elysia } from "elysia";
 import {
   currentMandate,
+  draftMandate,
   type MandateSigner,
   type MandateStore,
   registerMandate,
@@ -29,6 +32,10 @@ const principalFrom = async (request: Request): Promise<Principal> => {
 const notFound = (message: string) => ({ error: { code: "NOT_FOUND" as const, message } });
 
 const found = { 200: StoredMandateSchema, 404: ErrorEnvelopeSchema };
+
+const expired = {
+  error: { code: "BAD_REQUEST" as const, message: "Mandate expiry must be in the future." },
+};
 
 export const createApi = (
   db: Db,
@@ -55,16 +62,20 @@ export const createApi = (
           body,
           now(),
         );
-        if (!result.ok) {
-          return status(400, {
-            error: {
-              code: "BAD_REQUEST" as const,
-              message: "Mandate expiry must be in the future.",
-            },
-          });
-        }
+        if (!result.ok) return status(400, expired);
         const { stored, replayed } = result.value;
         return replayed ? stored : status(201, stored);
+      },
+    )
+    .post(
+      "/drafts",
+      {
+        body: DraftMandateRequestSchema,
+        response: { 200: MandateDraftSchema, 400: ErrorEnvelopeSchema },
+      },
+      async ({ body, request, status }) => {
+        const result = await draftMandate(store, await principalFrom(request), body, now());
+        return result.ok ? result.value : status(400, expired);
       },
     )
     .post(

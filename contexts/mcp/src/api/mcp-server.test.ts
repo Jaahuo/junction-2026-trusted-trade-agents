@@ -41,6 +41,7 @@ const fakeRest = (failure?: ErrorEnvelope) => {
     place: reply("place", fixtures.order),
     status: reply("status", placed),
     mandate: reply("mandate", fixtures.storedMandate),
+    draft: reply("draft", fixtures.mandateDraft),
     pending: reply("pending", fixtures.pendingList),
     decide: reply("decide", placed),
     register: reply("register", fixtures.storedMandate),
@@ -60,6 +61,7 @@ const inputs: { [T in ToolName]: z.input<(typeof TOOL_INPUT)[T]> } = {
   place_order: fixtures.placeOrderRequest,
   get_order_status: { orderId: fixtures.order.orderId },
   get_mandate: {},
+  draft_mandate: fixtures.draftMandateRequest,
   list_pending_approvals: {},
   decide_approval: fixtures.decideApprovalInput,
   register_mandate: fixtures.registerMandateRequest,
@@ -114,7 +116,7 @@ const mcp = (overrides: Partial<McpDeps> = {}) => {
 };
 
 describe("tools/list", () => {
-  test("MCP_VIEW_TOOLS=app lists the six model tools and the three view tools as app-only", async () => {
+  test("MCP_VIEW_TOOLS=app lists the seven model tools and the three view tools as app-only", async () => {
     const tools = await mcp().listTools();
     expect(tools.map((tool) => tool.name).toSorted()).toEqual(
       [...MODEL_TOOLS, ...VIEW_TOOLS].toSorted(),
@@ -201,6 +203,31 @@ describe("tools/call", () => {
     const result = await callTool("search_products", { ...fixtures.searchRequest, language: "fi" });
     expect(result.isError).toBeUndefined();
     expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
+  });
+
+  test("draft_mandate is model-visible, shows the mandate view and sends the draft without language", async () => {
+    const { callTool, calls, listTools } = mcp();
+    const tool = (await listTools()).find((entry) => entry.name === "draft_mandate");
+    expect(tool === undefined ? undefined : uiOf(tool)).toEqual({
+      resourceUri: "ui://trusted-trade/mandate-settings",
+    });
+    expect(MODEL_TOOLS).toContain("draft_mandate");
+    expect(VIEW_TOOLS).toEqual(["decide_approval", "register_mandate", "revoke_mandate"]);
+    const result = await callTool("draft_mandate", {
+      ...fixtures.draftMandateRequest,
+      language: "fi",
+    });
+    expect(result.structuredContent).toEqual(fixtures.mandateDraft);
+    expect(result.content[0]?.text).toContain("not registered");
+    expect(calls).toEqual([{ route: "draft", args: [fixtures.draftMandateRequest] }]);
+  });
+
+  test("draft_mandate with an operationId gives isError BAD_REQUEST without a REST call", async () => {
+    const { callTool, calls } = mcp();
+    const result = await callTool("draft_mandate", fixtures.registerMandateRequest);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/^BAD_REQUEST: .*operationId/);
+    expect(calls).toEqual([]);
   });
 
   test("a pending place_order text contains the approvalUrl", async () => {

@@ -39,6 +39,8 @@ export const orders = pgTable(
     requotes: jsonb().$type<Order["requotes"]>().notNull(),
     nextDeliveryDate: text(),
     audit: jsonb().$type<AuditEvent[]>().notNull(),
+    receipt: text(),
+    auditAnchor: jsonb().$type<NonNullable<Order["auditAnchor"]>>(),
     createdAt: timestamp({ withTimezone: true }).notNull(),
   },
   (table) => [
@@ -55,6 +57,12 @@ export const refusals = pgTable("orders_refusals", {
   id: serial().primaryKey(),
   customer: text().notNull(),
   event: jsonb().$type<AuditEvent>().notNull(),
+});
+
+export const refusalAnchors = pgTable("orders_refusal_anchors", {
+  customer: text().primaryKey(),
+  hash: text().notNull(),
+  count: integer().notNull(),
 });
 
 /**

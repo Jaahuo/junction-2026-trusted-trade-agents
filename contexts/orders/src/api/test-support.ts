@@ -7,7 +7,12 @@ import {
   OrderSchema,
   StoredMandateSchema,
 } from "@app/contract";
-import { localOfferKeys, type OfferSigningKey, signOfferToken } from "@app/contract/server";
+import {
+  localOfferKeys,
+  type OfferSigningKey,
+  signOfferToken,
+  signOrderReceipt,
+} from "@app/contract/server";
 import { type Db, mountContext } from "@app/server-kit";
 import { context as mandatesContext, createApi as createMandatesApi } from "@ctx/mandates/api";
 import type { AnyElysia } from "elysia";
@@ -40,7 +45,8 @@ export const mount = async (db: Db) => {
   await mountContext(db, context);
   const mandates = createMandatesApi(db, () => now);
   const key = await testKey();
-  const keys = localOfferKeys({ keys: [key.publicJwk] });
+  const jwks = { keys: [key.publicJwk] };
+  const keys = localOfferKeys(jwks);
   // Stands in for PUBLIC_BASE_URL, which the server reads on every response.
   const publicBase = { url: "https://orders.test" };
   // The orders clock; a test moves it to act later on stored orders.
@@ -48,6 +54,8 @@ export const mount = async (db: Db) => {
   const appWith = (changes: Partial<ApiDeps> = {}) =>
     createApi(db, {
       verifyOffer: offerVerifier(async () => keys),
+      signReceipt: ({ idempotencyKey: _key, requested: _requested, ...order }) =>
+        signOrderReceipt({ ...order, approvalUrl: null }, key, publicBase.url),
       mandates: mandateClient(mandates),
       now: () => clock.now,
       publicBaseUrl: () => publicBase.url,
@@ -79,7 +87,7 @@ export const mount = async (db: Db) => {
       exp,
     );
   };
-  return { app, appWith, clock, mandates, mandate, register, sign, publicBase };
+  return { app, appWith, clock, mandates, mandate, register, sign, publicBase, key, keys, jwks };
 };
 
 export const call = (app: AnyElysia, method: string, path: string, body?: object) =>

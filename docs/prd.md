@@ -1,6 +1,6 @@
 # Trusted Trade Agents: product requirements document
 
-Owner: Jaakko Huomo · Created: November 14, 2026 · Status: living draft
+Owner: the whole team · Created: November 14, 2026 · Status: living draft
 
 This PRD is the single source of product requirements. It describes intended behavior, not implementation status. Existing Decided choices remain the baseline; Proposed choices and open questions are not approved requirements.
 
@@ -24,7 +24,7 @@ Keep product documentation in at most three working files. Start with this PRD a
 
 These boundaries apply to product planning. Existing runtime, workflow and source-reference documents keep their separate purpose.
 
-1. Before changing scope or behavior, identify the affected PRD heading. Resolve any proposal, contradiction or open question that blocks that change with the product owner. Do not silently treat a draft as decided.
+1. Before changing scope or behavior, identify the affected PRD heading. Resolve any proposal, contradiction or open question that blocks that change with the team. Do not silently treat a draft as decided.
 2. Update the affected PRD text, any existing spec and the implementation in the same PR. A planning-only PR may change intended behavior first, but must state that implementation is pending.
 3. Add or update an ADR only when its decision threshold applies. Preserve accepted decision reasoning; record a replacement entry and mark the previous entry superseded when the decision changes.
 4. Keep one owner for each fact. The PRD owns what and why; specs own implementation detail; ADRs own decision rationale. Link instead of repeating. An implementation detail cannot override a product requirement.

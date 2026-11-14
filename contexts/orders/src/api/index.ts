@@ -19,16 +19,17 @@ import {
   selfBaseUrl,
 } from "@app/server-kit";
 import { Elysia } from "elysia";
-import { type DecisionError, decide, listPending } from "../application/approvals.ts";
 import {
-  findOrder,
-  type OrderDeps,
-  placeOrder,
-  precheck,
-  type Refusal,
-} from "../application/orders.ts";
+  type ApprovalDeps,
+  type DecisionError,
+  decide,
+  listPending,
+} from "../application/approvals.ts";
+import { isCutoffDue, runCutoffJob } from "../application/cutoff.ts";
+import { findOrder, placeOrder, precheck, type Refusal } from "../application/orders.ts";
 import type { StoredOrder } from "../application/ports.ts";
 import { mandateClient } from "../infra/mandate-client.ts";
+import { offersClient } from "../infra/offers-client.ts";
 import { processOfferVerifier } from "../infra/offer-verifier.ts";
 import { postgresOrderStore } from "../infra/order-store.ts";
 import { envReceiptSigner } from "../infra/receipt-signer.ts";
@@ -53,7 +54,7 @@ const toOrder = (
   approvalUrl: order.status === "pending_approval" ? approvalUrl(baseUrl(), order.orderId) : null,
 });
 
-export interface ApiDeps extends OrderDeps {
+export interface ApiDeps extends ApprovalDeps {
   /** Read on every response, so a new PUBLIC_BASE_URL applies to orders already stored. */
   publicBaseUrl: () => string;
 }
@@ -67,13 +68,15 @@ const REFUSAL_STATUS = {
 } as const satisfies Record<Refusal["code"], 400 | 409 | 502>;
 
 const DECISION_STATUS = {
+  BAD_REQUEST: 400,
+  OFFER_INVALID: 400,
   NOT_FOUND: 404,
   CONFLICT: 409,
   STALE_OFFER: 409,
   OFFER_EXPIRED: 409,
   NOT_IMPLEMENTED: 501,
   UPSTREAM_FAILED: 502,
-} as const satisfies Record<DecisionError["code"], 404 | 409 | 501 | 502>;
+} as const satisfies Record<DecisionError["code"], 400 | 404 | 409 | 501 | 502>;
 
 const envelope = (failure: Refusal | DecisionError) => ({
   error: { code: failure.code, message: failure.message },
@@ -86,14 +89,16 @@ const refused = {
 };
 
 const defaultDeps = (db: Db): ApiDeps => {
-  let mandates: OrderDeps["mandates"] | undefined;
+  let mandates: ApiDeps["mandates"] | undefined;
   return {
     store: postgresOrderStore(db),
     verifyOffer: processOfferVerifier(),
+    issuedOffers: offersClient,
     // Resolved on first use: the base URL needs the server's environment.
     mandates: {
       current: (agentId) => (mandates ??= mandateClient(`${selfBaseUrl()}/api`)).current(agentId),
     },
+    offers: offersClient,
     payment: refusingPayment,
     signReceipt: envReceiptSigner,
     now: () => new Date(),
@@ -103,7 +108,26 @@ const defaultDeps = (db: Db): ApiDeps => {
 
 export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
   const deps: ApiDeps = { ...defaultDeps(db), ...overrides };
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let running: Promise<void> | undefined;
+  const tick = () => {
+    if (running !== undefined) return;
+    running = runCutoffJob(deps)
+      .catch((error: unknown) => console.error("Order cutoff job failed", error))
+      .finally(() => {
+        running = undefined;
+      });
+  };
   return new Elysia({ prefix: "/orders" })
+    .onStart(() => {
+      tick();
+      timer = setInterval(tick, 60_000);
+    })
+    .onStop(async () => {
+      clearInterval(timer);
+      timer = undefined;
+      await running;
+    })
     .use(badRequestEnvelope())
     .post(
       "/",
@@ -118,11 +142,20 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
         return result.value.created ? status(201, order) : order;
       },
     )
-    .get("/pending", { response: { 200: PendingListSchema } }, async ({ request }) => ({
-      orders: (await listPending(deps, await principalFrom(request))).map((order) =>
-        toOrder(order, deps.publicBaseUrl),
-      ),
-    }))
+    .get("/pending", { response: { 200: PendingListSchema } }, async ({ request }) => {
+      const principal = await principalFrom(request);
+      try {
+        await runCutoffJob(deps, principal.customer);
+      } catch (error) {
+        console.error("Order cutoff cleanup failed before listing pending orders", error);
+      }
+      const now = deps.now();
+      return {
+        orders: (await listPending(deps, principal))
+          .filter((order) => !isCutoffDue(order, now))
+          .map((order) => toOrder(order, deps.publicBaseUrl)),
+      };
+    })
     .post(
       "/precheck",
       { body: PrecheckRequestSchema, response: { 200: PrecheckSchema, ...refused } },
@@ -150,6 +183,7 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
         body: DecideApprovalRequestSchema,
         response: {
           200: OrderSchema,
+          400: ErrorEnvelopeSchema,
           404: ErrorEnvelopeSchema,
           409: ErrorEnvelopeSchema,
           501: ErrorEnvelopeSchema,

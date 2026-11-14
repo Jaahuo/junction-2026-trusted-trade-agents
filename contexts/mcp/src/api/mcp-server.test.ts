@@ -55,12 +55,27 @@ const fakeViews: ViewPages = {
     view === "approval-card" ? ok(`<html>${view}</html>`) : err("NOT_FOUND"),
 };
 
+const versionOf = (html: string) => createHash("sha256").update(html).digest("hex").slice(0, 12);
+const APPROVAL_CARD_URI = `ui://trusted-trade/approval-card/${versionOf("<html>approval-card</html>")}`;
+/** The URI the server announces with fakeViews: only approval-card has HTML to hash. */
+const announcedUri = ({ view, uri }: (typeof VIEWS)[number]) =>
+  view === "approval-card" ? APPROVAL_CARD_URI : uri;
+
+const QUIET_TWINS = [
+  ["find_products", "search_products"],
+  ["quote_offers", "get_offers"],
+  ["get_mandate", "show_mandate"],
+] as const;
+
 const inputs: { [T in ToolName]: z.input<(typeof TOOL_INPUT)[T]> } = {
   search_products: fixtures.searchRequest,
+  find_products: fixtures.searchRequest,
   get_offers: fixtures.offersRequest,
+  quote_offers: fixtures.offersRequest,
   place_order: fixtures.placeOrderRequest,
   get_order_status: { orderId: fixtures.order.orderId },
   get_mandate: {},
+  show_mandate: {},
   draft_mandate: fixtures.draftMandateRequest,
   list_pending_approvals: {},
   decide_approval: fixtures.decideApprovalInput,
@@ -83,7 +98,8 @@ const ToolSchema = z.looseObject({
     })
     .optional(),
 });
-const uiOf = ({ _meta: meta }: z.infer<typeof ToolSchema>) => meta?.ui;
+const metaOf = ({ _meta: meta }: z.infer<typeof ToolSchema>) => meta;
+const uiOf = (tool: z.infer<typeof ToolSchema>) => metaOf(tool)?.ui;
 const ToolsListSchema = z.looseObject({ result: z.looseObject({ tools: z.array(ToolSchema) }) });
 const CallResultSchema = z.looseObject({
   result: z.looseObject({
@@ -116,7 +132,7 @@ const mcp = (overrides: Partial<McpDeps> = {}) => {
 };
 
 describe("tools/list", () => {
-  test("MCP_VIEW_TOOLS=app lists the seven model tools and the three view tools as app-only", async () => {
+  test("MCP_VIEW_TOOLS=app lists model tools and the three view tools as app-only", async () => {
     const tools = await mcp().listTools();
     expect(tools.map((tool) => tool.name).toSorted()).toEqual(
       [...MODEL_TOOLS, ...VIEW_TOOLS].toSorted(),
@@ -172,11 +188,41 @@ describe("tools/list", () => {
         const tool = tools.find((entry) => entry.name === name);
         expect({ name, uri: tool === undefined ? undefined : uiOf(tool)?.resourceUri }).toEqual({
           name,
-          uri: VIEWS_NOT_IN_CHAT.has(view.view) ? undefined : view.uri,
+          uri: VIEWS_NOT_IN_CHAT.has(view.view) ? undefined : announcedUri(view),
         });
       }
     }
     expect(VIEWS_NOT_IN_CHAT.has("offer-comparison")).toBe(true);
+  });
+
+  test("quiet lookups have no view and the same data schemas as their explicit-view tools", async () => {
+    const tools = await mcp().listTools();
+    const byName = (name: string) => tools.find((tool) => tool.name === name);
+    for (const [quiet, loud] of QUIET_TWINS) {
+      const tool = byName(quiet);
+      expect({ quiet, meta: tool === undefined ? undefined : metaOf(tool) }).toEqual({
+        quiet,
+        meta: {},
+      });
+      expect({ quiet, input: tool?.inputSchema, output: tool?.outputSchema }).toEqual({
+        quiet,
+        input: z.toJSONSchema(TOOL_INPUT[loud], { target: "draft-7", io: "input" }),
+        output: byName(loud)?.outputSchema,
+      });
+    }
+    const shown = byName("search_products");
+    expect(shown === undefined ? undefined : uiOf(shown)?.resourceUri).toBe(
+      "ui://trusted-trade/search-results",
+    );
+  });
+
+  test("only the explicit mandate tools declare the mandate app view", async () => {
+    const tools = await mcp().listTools();
+    const mandateTools = tools
+      .filter((tool) => uiOf(tool)?.resourceUri === "ui://trusted-trade/mandate-settings")
+      .map((tool) => tool.name)
+      .toSorted();
+    expect(mandateTools).toEqual(["draft_mandate", "show_mandate"]);
   });
 });
 
@@ -196,6 +242,21 @@ describe("tools/call", () => {
     const result = await callTool("search_products", fixtures.searchRequest);
     expect(result.structuredContent).toEqual(fixtures.searchResult);
     expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
+  });
+
+  test("a quiet twin calls the same route and returns the same result as its twin", async () => {
+    for (const [quiet, loud] of QUIET_TWINS) {
+      const twin = mcp();
+      const viewless = mcp();
+      const shown = await twin.callTool(loud, inputs[loud]);
+      const result = await viewless.callTool(quiet, inputs[quiet]);
+      expect({ quiet, content: result.structuredContent, text: result.content[0]?.text }).toEqual({
+        quiet,
+        content: shown.structuredContent,
+        text: shown.content[0]?.text,
+      });
+      expect({ quiet, calls: viewless.calls }).toEqual({ quiet, calls: twin.calls });
+    }
   });
 
   test("language reaches no REST route: search_products sends the request without it", async () => {
@@ -313,6 +374,111 @@ describe("tools/call", () => {
   });
 });
 
+/** A ViewPages fake whose HTML a test can change, and that counts its fetches. */
+const changingViews = (initial: Result<string, "NOT_FOUND" | "UPSTREAM_FAILED">) => {
+  let html = initial;
+  const fetched: ViewName[] = [];
+  const views: ViewPages = {
+    html: async (view) => {
+      fetched.push(view);
+      return html;
+    },
+  };
+  return {
+    views,
+    fetched,
+    set: (next: typeof initial) => {
+      html = next;
+    },
+  };
+};
+
+const resourceUriOf = async (session: ReturnType<typeof mcp>, name: ToolName) => {
+  const tool = (await session.listTools()).find((entry) => entry.name === name);
+  return tool === undefined ? undefined : uiOf(tool)?.resourceUri;
+};
+
+describe("versioned view URIs", () => {
+  test("tools/list announces ui://trusted-trade/<view>/<first 12 hex of SHA-256> in both meta keys", async () => {
+    const tools = await mcp().listTools();
+    const tool = tools.find((entry) => entry.name === "place_order");
+    expect(tool === undefined ? undefined : metaOf(tool)).toEqual({
+      ui: { resourceUri: APPROVAL_CARD_URI },
+      "ui/resourceUri": APPROVAL_CARD_URI,
+    });
+    expect(APPROVAL_CARD_URI).toMatch(/^ui:\/\/trusted-trade\/approval-card\/[0-9a-f]{12}$/);
+  });
+
+  test("the same HTML gives the same URI and changed HTML gives a new URI", async () => {
+    const first = await resourceUriOf(
+      mcp({ views: changingViews(ok("<html>a</html>")).views }),
+      "place_order",
+    );
+    const same = await resourceUriOf(
+      mcp({ views: changingViews(ok("<html>a</html>")).views }),
+      "place_order",
+    );
+    const changed = await resourceUriOf(
+      mcp({ views: changingViews(ok("<html>b</html>")).views }),
+      "place_order",
+    );
+    expect(first).toBe(`ui://trusted-trade/approval-card/${versionOf("<html>a</html>")}`);
+    expect(same).toBe(first);
+    expect(changed).toBe(`ui://trusted-trade/approval-card/${versionOf("<html>b</html>")}`);
+  });
+
+  test("the server hashes each view once per process, across requests", async () => {
+    const pages = changingViews(ok("<html>a</html>"));
+    const session = mcp({ views: pages.views });
+    const first = await resourceUriOf(session, "place_order");
+    pages.set(ok("<html>b</html>"));
+    expect(await resourceUriOf(session, "place_order")).toBe(first);
+    expect(pages.fetched.filter((view) => view === "approval-card")).toEqual(["approval-card"]);
+  });
+
+  test("a view it cannot fetch keeps the base URI, and the server fetches it again next time", async () => {
+    const pages = changingViews(err("UPSTREAM_FAILED"));
+    const session = mcp({ views: pages.views });
+    expect(await resourceUriOf(session, "place_order")).toBe("ui://trusted-trade/approval-card");
+    pages.set(ok("<html>a</html>"));
+    expect(await resourceUriOf(session, "place_order")).toBe(
+      `ui://trusted-trade/approval-card/${versionOf("<html>a</html>")}`,
+    );
+  });
+
+  test("resources/read returns the current HTML under the current, an older and the base URI", async () => {
+    const pages = changingViews(ok("<html>new</html>"));
+    const { rpc } = mcp({ views: pages.views });
+    const older = `ui://trusted-trade/approval-card/${versionOf("<html>old</html>")}`;
+    const current = `ui://trusted-trade/approval-card/${versionOf("<html>new</html>")}`;
+    for (const uri of [current, older, "ui://trusted-trade/approval-card"]) {
+      expect(await rpc("resources/read", { uri })).toEqual({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          contents: [{ uri, mimeType: "text/html;profile=mcp-app", text: "<html>new</html>" }],
+        },
+      });
+    }
+  });
+
+  test("resources/read of an unknown view gives -32602 and of a missing view -32002, with or without a version", async () => {
+    const { rpc } = mcp();
+    expect(await rpc("resources/read", { uri: "ui://trusted-trade/nope/0123456789ab" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32602, message: expect.stringContaining("nope") },
+    });
+    expect(
+      await rpc("resources/read", { uri: "ui://trusted-trade/order-timeline/0123456789ab" }),
+    ).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32002, message: expect.stringContaining("order-timeline") },
+    });
+  });
+});
+
 describe("resources", () => {
   test("resources/list has one text/html;profile=mcp-app resource per view", async () => {
     const body = z
@@ -323,7 +489,7 @@ describe("resources", () => {
       })
       .parse(await mcp().rpc("resources/list"));
     expect(body.result.resources.map(({ uri, mimeType }) => ({ uri, mimeType }))).toEqual(
-      VIEWS.map(({ uri }) => ({ uri, mimeType: "text/html;profile=mcp-app" })),
+      VIEWS.map((view) => ({ uri: announcedUri(view), mimeType: "text/html;profile=mcp-app" })),
     );
   });
 
@@ -506,7 +672,7 @@ test("GET /mcp answers 405 because the server is stateless", async () => {
   expect(response.status).toBe(405);
 });
 
-const connectClient = async (deps: Omit<McpDeps, "skills">) => {
+const connectClient = async (deps: Omit<McpDeps, "skills" | "viewUris">) => {
   const app = createRoot(deps);
   const client = new Client({ name: "test-host", version: "0.0.0" });
   await client.connect(

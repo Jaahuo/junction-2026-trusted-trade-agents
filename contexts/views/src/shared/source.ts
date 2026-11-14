@@ -1,6 +1,13 @@
 import { VIEWS } from "@app/contract";
 import { App } from "@modelcontextprotocol/ext-apps";
-import { fixtureSource, hostSource, plainSource, type Source, type ViewName } from "./bridge.ts";
+import {
+  fixtureSource,
+  hostSource,
+  plainSource,
+  resultData,
+  type Source,
+  type ViewName,
+} from "./bridge.ts";
 import { resolveLang, setLang } from "./locale.ts";
 
 export type { Source } from "./bridge.ts";
@@ -42,7 +49,7 @@ function bridgeSource(view: ViewName): Source {
   // The tool-result handler is set before connecting, so no result is missed.
   const source = hostSource({
     onToolResult: (listener) => {
-      app.ontoolresult = (params) => listener(params.structuredContent);
+      app.ontoolresult = (params) => listener(resultData(params));
     },
     onToolInput: (listener) => {
       app.ontoolinput = (params) => {
@@ -57,7 +64,7 @@ function bridgeSource(view: ViewName): Source {
       const text = result.content.find((item) => item.type === "text")?.text;
       return {
         isError: result.isError === true,
-        structuredContent: result.structuredContent,
+        structuredContent: resultData(result),
         ...(text === undefined ? {} : { text }),
       };
     },
@@ -76,6 +83,18 @@ function bridgeSource(view: ViewName): Source {
   return source;
 }
 
+/** A page of its own: the plain REST routes on this origin, in the page's language. */
+export function pageSource(view: ViewName, query: URLSearchParams): Source {
+  applyPageLang();
+  // A page opened in the browser calls the API on its own origin (the API, or the web app's
+  // proxy), which stays right even when PUBLIC_BASE_URL points elsewhere.
+  return plainSource(view, {
+    fetch: (url, init) => fetch(url, init),
+    baseUrl: location.origin,
+    query,
+  });
+}
+
 /**
  * The harness injects a fixture; embedded views use the host bridge. A top-level
  * view loads its plain REST route when it has the required data.
@@ -87,16 +106,9 @@ export function sourceFor(view: ViewName): Source {
     return fixtureSource(JSON.parse(fixture));
   }
   if (window.parent === window) {
-    applyPageLang();
     const entry = VIEWS.find((candidate) => candidate.view === view);
     const query = new URLSearchParams(location.search);
-    // A page opened in the browser calls the API on its own origin (the API, or the web app's
-    // proxy), which stays right even when PUBLIC_BASE_URL points elsewhere.
-    const source = plainSource(view, {
-      fetch: (url, init) => fetch(url, init),
-      baseUrl: location.origin,
-      query,
-    });
+    const source = pageSource(view, query);
     if (
       entry?.plainLoad != null &&
       (entry.plainQuery === null || query.get(entry.plainQuery)?.trim() || entry.plainList !== null)

@@ -18,9 +18,11 @@ import {
   nextDeliveryDateAfterCutoff,
   netTotal,
   reasonsByProduct,
+  ruleFor,
 } from "../domain/evaluate.ts";
 import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import type {
+  IssuedOfferPort,
   MandatePort,
   OfferVerifier,
   OrderStore,
@@ -33,6 +35,7 @@ import type {
 export interface OrderDeps {
   store: OrderStore;
   verifyOffer: OfferVerifier;
+  issuedOffers: IssuedOfferPort;
   mandates: MandatePort;
   payment: PaymentPort;
   signReceipt: ReceiptSigner;
@@ -58,18 +61,64 @@ interface Checked {
   mandate: Mandate | null;
 }
 
-const verifyAll = async (
-  verifyOffer: OfferVerifier,
-  tokens: string[],
+/** An offer reference is an offer ID (`off_…`); anything else is treated as a token. */
+const isOfferId = (ref: string): boolean => /^off_[\w-]+$/.test(ref);
+
+/** An offer named by ID, with the token issued for it, or an offer named by its token. */
+interface Resolved {
+  token: string;
+  byId: boolean;
+}
+
+const unknownOffer = (ref: string): Refusal =>
+  refusal("OFFER_INVALID", `Offer ${ref} is unknown or expired; request new offers.`);
+
+/**
+ * Replaces each offer ID with the token issued for it (SPEC-009 R3). An ID the offers service does
+ * not return, including an expired offer, is OFFER_INVALID.
+ */
+const resolveRefs = async (
+  issuedOffers: IssuedOfferPort,
+  refs: string[],
+): Promise<Result<Resolved[], Refusal>> => {
+  const ids = refs.filter(isOfferId);
+  if (ids.length === 0) return ok(refs.map((token) => ({ token, byId: false })));
+  const issued = await issuedOffers.issued([...new Set(ids)]);
+  if (!issued.ok) return err(refusal("UPSTREAM_FAILED", "The offers could not be looked up."));
+  const resolved: Resolved[] = [];
+  for (const ref of refs) {
+    if (!isOfferId(ref)) {
+      resolved.push({ token: ref, byId: false });
+      continue;
+    }
+    const token = issued.value.get(ref);
+    if (token === undefined) return err(unknownOffer(ref));
+    resolved.push({ token, byId: true });
+  }
+  return ok(resolved);
+};
+
+/**
+ * Verifies each offer. An offer named by ID must also be this principal's: the lookup goes through an
+ * internal call that does not carry the caller, so orders checks the owner itself (SPEC-009 R3).
+ */
+const verifyRefs = async (
+  deps: OrderDeps,
+  principal: Principal,
+  refs: string[],
   now: Date,
 ): Promise<Result<OrderLine[], Refusal>> => {
+  const resolved = await resolveRefs(deps.issuedOffers, refs);
+  if (!resolved.ok) return resolved;
   const lines: OrderLine[] = [];
-  for (const token of tokens) {
-    const verified = await verifyOffer(token, now);
+  for (const [index, { token, byId }] of resolved.value.entries()) {
+    const verified = await deps.verifyOffer(token, now);
     let claims: OfferClaims;
     if (verified.ok) claims = verified.value;
     else if (verified.error.code === "OFFER_EXPIRED") claims = verified.error.claims;
     else return err(refusal("OFFER_INVALID", "An offer token failed verification."));
+    if (byId && (claims.customer !== principal.customer || claims.agentId !== principal.agentId))
+      return err(unknownOffer(refs[index] ?? claims.offerId));
     lines.push({ offerId: claims.offerId, token, claims });
   }
   return ok(lines);
@@ -85,10 +134,10 @@ const checkTokens = async (
 ): Promise<Result<Checked, Refusal>> => {
   const all = [...offers, ...alternatives];
   if (new Set(all).size !== all.length)
-    return err(refusal("OFFER_INVALID", "The request repeats an offer token."));
-  const lines = await verifyAll(deps.verifyOffer, offers, now);
+    return err(refusal("OFFER_INVALID", "The request repeats an offer."));
+  const lines = await verifyRefs(deps, principal, offers, now);
   if (!lines.ok) return lines;
-  const alternativeLines = await verifyAll(deps.verifyOffer, alternatives, now);
+  const alternativeLines = await verifyRefs(deps, principal, alternatives, now);
   if (!alternativeLines.ok) return alternativeLines;
 
   const claims = [...lines.value, ...alternativeLines.value].map((line) => line.claims);
@@ -154,8 +203,10 @@ export const precheck = async (
 };
 
 const sameTokens = (order: StoredOrder, request: PlaceOrderRequest): boolean =>
-  JSON.stringify(order.requested) ===
-  JSON.stringify({ offers: request.offers, alternatives: request.alternatives ?? [] });
+  JSON.stringify(order.requested.offers) === JSON.stringify(request.offers) &&
+  JSON.stringify(order.requested.alternatives) === JSON.stringify(request.alternatives ?? []) &&
+  order.requested.supersedes?.orderId === request.supersedes?.orderId &&
+  order.requested.supersedes?.proposalVersion === request.supersedes?.proposalVersion;
 
 const replayOrConflict = (
   order: StoredOrder,
@@ -172,11 +223,26 @@ const replayOrConflict = (
 const auditOf = (
   evaluation: Evaluation,
   byProduct: Map<string, ReasonCode[]>,
+  checked: Pick<Checked, "lines" | "mandate">,
   at: string,
 ): AuditEvent[] => {
+  const standing: AuditEvent[] = checked.lines.flatMap(({ claims }) => {
+    const rule = checked.mandate === null ? undefined : ruleFor(checked.mandate.limits, claims);
+    if (rule?.policy !== "auto") return [];
+    return [
+      {
+        at,
+        actor: "server",
+        event: "check_passed",
+        productId: claims.productId,
+        detail: `Substitute allowed without asking: standing approval given ${rule.decidedAt.slice(0, 10)}.`,
+      },
+    ];
+  });
   const opened: AuditEvent[] = [
     { at, actor: "agent", event: "order_requested" },
     { at, actor: "server", event: "offer_verified" },
+    ...standing,
   ];
   if (evaluation.decision === "auto")
     return [...opened, { at, actor: "server", event: "check_passed" }];
@@ -210,13 +276,21 @@ const buildOrder = (
 ): StoredOrder => {
   const claims = checked.lines.map((line) => line.claims);
   const at = now.toISOString();
+  const audit = auditOf(evaluation, byProduct, checked, at);
+  const requested = audit[0];
+  if (requested !== undefined && request.supersedes !== undefined)
+    requested.detail = `Replaces ${request.supersedes.orderId} proposal ${request.supersedes.proposalVersion}`;
   return {
     orderId: `ord_${crypto.randomUUID()}`,
     customer: principal.customer,
     agentId: principal.agentId,
     accountId: principal.accountId,
     idempotencyKey: request.idempotencyKey,
-    requested: { offers: request.offers, alternatives: request.alternatives ?? [] },
+    requested: {
+      offers: request.offers,
+      alternatives: request.alternatives ?? [],
+      ...(request.supersedes === undefined ? {} : { supersedes: request.supersedes }),
+    },
     offerIds: checked.lines.map((line) => line.offerId),
     lines: checked.lines,
     alternatives: checked.alternatives,
@@ -234,7 +308,7 @@ const buildOrder = (
     nextDeliveryDate: evaluation.reasons.includes("CUTOFF_PASSED")
       ? nextDeliveryDateAfterCutoff(claims, now)
       : null,
-    audit: auditOf(evaluation, byProduct, at),
+    audit,
     createdAt: at,
   };
 };
@@ -257,6 +331,37 @@ const refuse = async (
       return err(refusal("UPSTREAM_FAILED", "The audit record could not be verified."));
   }
   return err(error);
+};
+
+const replacementPredecessor = async (
+  tx: OrderTx,
+  principal: Principal,
+  supersedes: PlaceOrderRequest["supersedes"],
+): Promise<Result<StoredOrder | null, Refusal>> => {
+  if (supersedes === undefined) return ok(null);
+  const previous = await tx.find(principal.customer, supersedes.orderId);
+  if (
+    previous === null ||
+    previous.agentId !== principal.agentId ||
+    previous.accountId !== principal.accountId ||
+    previous.status !== "pending_approval" ||
+    previous.proposalVersion !== supersedes.proposalVersion
+  )
+    return err(refusal("CONFLICT", "The proposal to replace is not pending or has changed."));
+  return ok(previous);
+};
+
+const closeReplacedProposal = (previous: StoredOrder, replacement: StoredOrder, now: Date) => {
+  const at = now.toISOString();
+  const detail = `Replaced by ${replacement.orderId}`;
+  return appendOrderAudit(
+    {
+      ...previous,
+      status: "declined",
+      decision: { action: "reject", next: "stop", note: detail, by: "server", at },
+    },
+    [{ at, actor: "server", event: "declined", detail }],
+  );
 };
 
 /**
@@ -299,6 +404,14 @@ export const placeOrder = async (
       )
     )
       return err(refusal("OFFER_INVALID", "An offer has already been used in an order."));
+    const predecessor = await replacementPredecessor(tx, principal, request.supersedes);
+    if (!predecessor.ok) return predecessor;
+    const closed =
+      predecessor.value === null
+        ? null
+        : await closeReplacedProposal(predecessor.value, order, now);
+    if (closed !== null && !closed.ok)
+      return err(refusal("UPSTREAM_FAILED", "The earlier proposal's audit could not be verified."));
     const final =
       evaluation.decision === "auto"
         ? await commitPlacement({
@@ -311,6 +424,10 @@ export const placeOrder = async (
           })
         : ok(order);
     if (!final.ok) return err(refusal("UPSTREAM_FAILED", "The order could not be finalized."));
+    if (final.value.status !== "rejected" && closed !== null && closed.ok) {
+      if (!(await tx.decide(closed.value, closed.value.proposalVersion)))
+        throw new Error("The replacement proposal changed under the customer's lock.");
+    }
     await tx.insert(final.value);
     return ok({ order: final.value, created: true });
   });
@@ -324,3 +441,6 @@ export const findOrder = (
   principal: Principal,
   orderId: string,
 ): Promise<StoredOrder | null> => store.find(principal.customer, orderId);
+
+// Shared with approvals: edit and pick_alternative run these checks again (SPEC-011).
+export { auditOf, checkTokens, evaluateChecked, type Evaluated };

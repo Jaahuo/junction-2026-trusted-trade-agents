@@ -8,9 +8,14 @@ Each candidate has its own GitHub Issues and private board. Issues are created u
 4. Inspect task state with `bun scripts/task.ts status <issue>`. The current authenticated user needs project access and scope for board updates. Do not rely on the repository Actions token as a Projects credential.
 5. Integrate changes, run the applicable checks and gate at the integrated end, and smoke the real changed flow. Document actual results, limitations, risk and review evidence in the PR.
 6. The owner runs `bun scripts/ship.ts --risk <risk>` to open or update a PR. The default does not merge. After required evidence and authorization, `bun scripts/ship.ts --risk <risk> --merge` requests the merge. After the merge, it runs step 7 for a `task/<issue>` branch and the worktree cleanup for any other branch. Never force-push or bypass hooks.
+   For an ordinary PR, `bun scripts/ship.ts --risk ordinary --auto` returns at once and leaves a detached `ship --merge` that waits for the gate, merges with the same checks and finishes the task; it prints its log path. GitHub auto-merge is not used: the repository has no required checks, so it would merge before CI.
 7. When the PR merged outside ship, run `bun run task finish <issue> --pr <merged-pr>`. It verifies the PR merged from `task/<issue>` into main and its merge commit is reachable from fetched `origin/main`, closes the issue if open, moves its board item to Done and cleans up the worktree. Ship adds `Closes #<issue>` to task-branch PR bodies while preserving existing closing links.
 
 CI runs the full gate inside an isolated Linux PID and mount namespace. A system helper creates it, then drops to the runner's original user before executing repository code. This keeps protected host processes outside the cleanup tests without changing cleanup permissions or skipping tests.
+
+## Agents draining the backlog
+
+Many agents can work the backlog at once with the `backlog-loop` skill. `bun scripts/backlog.ts next` lists the issues an agent can finish start to end now; `--all` shows why the others wait. `bun scripts/backlog.ts claim <issue>` creates the remote branch `task/<issue>` through the GitHub refs API, which refuses an existing ref, so of two agents that claim at once exactly one wins and is assigned; the other exits 3 and picks the next issue. Unlike assignment, the claim is atomic across machines. An agent that cannot finish runs `bun scripts/backlog.ts release <issue> --reason <text>` when it pushed no work, or opens a draft PR and labels the issue `blocked`.
 
 ## Worktree cleanup after merge
 
@@ -52,34 +57,40 @@ Claude resolves the active worktree from the hook input's `cwd`, even when the s
 
 The `gate` workflow keeps one aggregate `gate` check for required-check consumers. Each required job must succeed. Failure, cancellation or an unexpected skip fails the aggregate.
 
-| Stage        | Responsibility                                                              |
-| ------------ | --------------------------------------------------------------------------- |
-| Quality      | Types, formatting, lint, unused code, duplication and migration consistency |
-| Tests        | Full test suite against disposable PostgreSQL                               |
-| Secrets      | Gitleaks scan of Git history                                                |
-| Dependencies | Bun audit of the complete workspace lockfile                                |
-| Image        | Build the amd64 container once, create its SBOM and scan installed packages |
-| Gate         | Require every preceding job to succeed                                      |
-| Publish      | Verify a trusted main-push gate artifact and publish that same image        |
-| Deploy       | Deploy its digest with production-only credentials and verify health        |
+| Stage   | Responsibility                                                              |
+| ------- | --------------------------------------------------------------------------- |
+| Quality | Types, formatting, lint, unused code, duplication and migration consistency |
+| Tests   | Full test suite against disposable PostgreSQL                               |
+| Secrets | Gitleaks scan of Git history                                                |
+| Gate    | Require quality, tests and secrets to succeed                               |
+| Publish | Build and smoke the selected main commit's image, then publish its digest   |
+| Deploy  | Deploy that digest with production-only credentials and verify health       |
 
-All gate and deployment jobs use GitHub-hosted `ubuntu-24.04` runners. Image builds and publication use the same runner baseline to avoid Docker image-store differences during artifact validation. The image SBOM, vulnerability scans and delivery evidence remain required.
+All jobs use GitHub-hosted `ubuntu-24.04` runners. PR, main-push and scheduled gates run code checks without production credentials. Only a successful main-push gate can enable automatic deployment. Scheduled gates do not deploy.
 
-PR and main-push gates run without production credentials. Scheduled gates refresh security evidence but cannot publish or deploy. Actions and container bases use immutable digests or commit pins. Update these pins deliberately and review the resulting security reports.
+### Caches
 
-### Findings policy
+Quality caches Bun package downloads at `~/.bun/install/cache`. Tests and deployment restore that cache. Keys include the runner OS, architecture, pinned tools and lockfile. Every install still uses `--frozen-lockfile`; the cache does not replace installation or checks. GitHub isolates PR caches from the main branch.
 
-High and critical dependency or image findings block delivery, including findings with no available fix. Scanner errors, invalid reports and missing evidence also block delivery. Low and moderate findings remain in reports; passing the gate does not mean the reports contain no findings. The initial audit reports the moderate esbuild advisory [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99).
+Deployment builds use the GitHub Actions Docker layer cache under `production-image`. Only the trusted publication job requests cache-write access. It builds the selected main SHA from the checkout, not from PR artifacts. Docker validates layer reuse against build inputs; source changes can still invalidate dependency layers because the Dockerfile copies source before installation.
 
-Do not use blanket ignore flags or hide unfixed vulnerabilities. A policy exception needs a reviewed issue that names the advisory, affected artifact, owner, mitigation and expiry. The current pipeline has no exception mechanism. Until one is explicitly approved and implemented, fix the finding before delivery.
+### Temporary security coverage
+
+Issue #233 records the owner's temporary pause of Bun dependency audits, image vulnerability scans and SBOM generation. Those jobs do not run, and the aggregate gate does not claim they passed. Image builds run only in deployment after the code gate succeeds.
+
+The production image smoke test remains required before publication. It checks health, runtime UID and the absence of common shells and package managers. It does not detect vulnerable dependencies or replace an SBOM.
+
+To restore the previous security gates, revert the scoped #233 implementation commit through a PR. Restore audit and image scanning together with the deployment artifact contract and aggregate gate requirements. Review the current workflow before reverting if later changes touch it.
+
+When restored, high and critical findings block delivery, including findings without a fix. Scanner errors and missing reports also block delivery. Do not hide findings with blanket ignore flags.
 
 ### Evidence and limits
 
-Download the artifacts from the exact gate and deployment run, including its run attempt. Retain the audit JSON, image scan JSON, CycloneDX SBOM, manifest and checksum file. Match the commit, lockfile hash, run identity and image digest before using them as release evidence. Private reports expire after 90 days; large image archives expire after 7 days to limit storage use. Copy required records to an approved archive before expiry. This retention setting is not a tamper-proof audit store.
+Deployment evidence records the selected commit, lockfile hash, successful push gate run and attempt, build run and attempt, image config digest and published image digest. The manifest explicitly marks security scans as paused. The publisher verifies the archive's config digest and the registry manifest before it passes an immutable digest to deployment.
 
-The image SBOM inventories detected OS and installed language packages. It includes development dependencies shipped in the runtime image. It does not prove complete coverage of bundled browser code, the Bun executable, application logic or external services. Scanners use advisory databases available at scan time. New advisories can appear after release. Checksums bind files together but do not authenticate their author. These reports are not signed attestations, an independent security assessment or proof of zero vulnerabilities.
+Identity evidence and deployment results expire after 90 days. Image archives, audit reports, vulnerability reports and SBOMs are not retained or generated in this mode. Registry images need their own retention policy. Copy required records to an approved archive before expiry.
 
-Publication uses the selected main commit's successful push-gate artifact, not an artifact from a PR or the triggering run by assumption. Deployment records link the scanned build to the published digest. See [hosted deployment](deploy.md#security-and-audit-evidence) for configuration, enforcement gaps and rollback constraints.
+Passing code checks and image smoke tests does not prove vulnerability-free dependencies, complete component inventory or release approval. These records are not signed attestations or an independent security assessment. See [hosted deployment](deploy.md#security-and-audit-evidence) for credential boundaries and rollback constraints.
 
 ## Risk and evidence
 

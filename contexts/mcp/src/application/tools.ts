@@ -70,14 +70,25 @@ const decide = (
     : Promise.resolve(err(badRequest(issueText(body.error))));
 };
 
+// A quiet twin (SPEC-012) calls the same route as the tool with the view.
 const TOOLS: { [T in ToolName]: Tool<T> } = {
   search_products: {
     input: TOOL_INPUT.search_products,
     call: (rest, input) => rest.search(input),
     text: searchSummary,
   },
+  find_products: {
+    input: TOOL_INPUT.find_products,
+    call: (rest, input) => rest.search(input),
+    text: searchSummary,
+  },
   get_offers: {
     input: TOOL_INPUT.get_offers,
+    call: (rest, input) => rest.offers(input),
+    text: offersSummary,
+  },
+  quote_offers: {
+    input: TOOL_INPUT.quote_offers,
     call: (rest, input) => rest.offers(input),
     text: offersSummary,
   },
@@ -93,6 +104,11 @@ const TOOLS: { [T in ToolName]: Tool<T> } = {
   },
   get_mandate: {
     input: TOOL_INPUT.get_mandate,
+    call: (rest) => rest.mandate(),
+    text: mandateSummary,
+  },
+  show_mandate: {
+    input: TOOL_INPUT.show_mandate,
     call: (rest) => rest.mandate(),
     text: mandateSummary,
   },

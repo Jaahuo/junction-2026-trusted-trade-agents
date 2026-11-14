@@ -1,14 +1,15 @@
 import { err, ok, type Result } from "@app/kernel";
-import type {
-  AvailabilityQuote,
-  OfferClaims,
-  OfferLine,
-  OffersRequest,
-  OffersResult,
-  OmitReason,
-  PriceQuote,
-  Principal,
-  ProductFacts,
+import {
+  type AvailabilityQuote,
+  type OfferClaims,
+  type OfferLine,
+  type OffersRequest,
+  type OffersResult,
+  type OmitReason,
+  type PriceQuote,
+  type Principal,
+  type ProductFacts,
+  samePair,
 } from "@app/contract";
 import {
   availabilityOmitReason,
@@ -101,7 +102,7 @@ const earlierBound = (price: PriceQuote, quote: AvailabilityQuote): ExpiryReason
     ? "NO_DELIVERY_DATE"
     : "NO_PRICE";
 
-async function mapLimit<T, R>(
+export async function mapLimit<T, R>(
   items: readonly T[],
   limit: number,
   run: (item: T) => Promise<R>,
@@ -307,8 +308,15 @@ export async function getOffers(
     current?.limits.substitutions === "never"
       ? []
       : eligible.filter((original) => original.shortfall !== null);
+  // A substitute the human said not to suggest again.
+  const blocked = (replaces: string, productId: string): boolean =>
+    (current?.limits.substitutionRules ?? []).some(
+      (rule) => rule.policy === "never" && samePair(rule, { replaces, productId }),
+    );
   const substituteIds = unique(
-    substituteOrigins.flatMap((original) => original.product.substitutes),
+    substituteOrigins.flatMap((original) =>
+      original.product.substitutes.filter((id) => !blocked(original.product.productId, id)),
+    ),
   ).filter((id) => !factsById.has(id) && !unknown.has(id));
   if (substituteIds.length > 0) {
     const read = await deps.catalog.facts({ productIds: substituteIds, hard: constraints.hard });
@@ -324,6 +332,7 @@ export async function getOffers(
       const product = factsById.get(id);
       if (
         id === origin.product.productId ||
+        blocked(origin.product.productId, id) ||
         unknown.has(id) ||
         product === undefined ||
         contradictedAttribute(product.match, constraints.hard) !== null

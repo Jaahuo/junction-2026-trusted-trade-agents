@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import { edenTradeRest } from "../infra/eden-rest.ts";
 import { fsSkillPack } from "../infra/skill-files.ts";
 import { httpViewPages } from "../infra/view-pages.ts";
+import { viewUris } from "../application/view-uris.ts";
 import { handleMcpRequest, type McpDeps, viewToolsMode } from "./mcp-server.ts";
 
 // The MCP binding (SPEC-012) has no /api routes; it serves `ALL /mcp` through `root`.
@@ -10,7 +11,7 @@ export const createApi = () => new Elysia({ prefix: "/mcp" });
 
 export type Api = ReturnType<typeof createApi>;
 
-type RootDeps = Omit<McpDeps, "skills"> & Partial<Pick<McpDeps, "skills">>;
+type RootDeps = Omit<McpDeps, "skills" | "viewUris"> & Partial<Pick<McpDeps, "skills">>;
 
 export const createRoot = (
   deps: RootDeps = {
@@ -18,9 +19,12 @@ export const createRoot = (
     views: httpViewPages(),
     viewTools: viewToolsMode(env("MCP_VIEW_TOOLS")),
   },
-) =>
-  new Elysia().all("/mcp", { parse: "none" }, ({ request }) =>
-    handleMcpRequest(request, { skills: fsSkillPack(), ...deps }),
+) => {
+  // Built once per root, so the view versions survive the per-request MCP servers.
+  const uris = viewUris(deps.views);
+  return new Elysia().all("/mcp", { parse: "none" }, ({ request }) =>
+    handleMcpRequest(request, { skills: fsSkillPack(), viewUris: uris, ...deps }),
   );
+};
 
 export const context: ContextModule = { name: "mcp", api: createApi, root: () => createRoot() };

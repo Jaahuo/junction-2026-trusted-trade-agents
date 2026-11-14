@@ -1,11 +1,23 @@
-import type { AuditEvent, Mandate, OfferClaims, Order } from "@app/contract";
+import type {
+  AuditEvent,
+  Mandate,
+  OfferClaims,
+  OffersResult,
+  Order,
+  RequoteRequest,
+  SubstitutePair,
+} from "@app/contract";
 import type { Result } from "@app/kernel";
 import type { HistoryRow } from "../domain/evaluate.ts";
 
 /** An order as stored: the approval URL is computed on read (SPEC-010). */
 export type StoredOrder = Omit<Order, "approvalUrl"> & {
   idempotencyKey: string;
-  requested: { offers: string[]; alternatives: string[] };
+  requested: {
+    offers: string[];
+    alternatives: string[];
+    supersedes?: { orderId: string; proposalVersion: number };
+  };
 };
 
 type VerifiedOffer = Result<
@@ -16,9 +28,24 @@ type VerifiedOffer = Result<
 /** Verifies an offer token's signature, alg, typ and kid; an expired offer comes back with its claims. */
 export type OfferVerifier = (token: string, now: Date) => Promise<VerifiedOffer>;
 
+export interface IssuedOfferPort {
+  /**
+   * The unexpired tokens the offers service issued to the principal for these offer IDs
+   * (SPEC-006 `issued`), by offer ID; an unknown ID has no entry.
+   */
+  issued(offerIds: string[]): Promise<Result<Map<string, string>, "UPSTREAM_FAILED">>;
+}
+
 export interface MandatePort {
   /** The current mandate of the agent; null when the agent has none. */
   current(agentId: string): Promise<Result<Mandate | null, "UPSTREAM_FAILED">>;
+}
+
+export interface RequotePort {
+  /** New signed offers for the tokens with the changes applied (SPEC-006 `requote`). */
+  requote(
+    request: RequoteRequest,
+  ): Promise<Result<OffersResult, "BAD_REQUEST" | "UPSTREAM_FAILED">>;
 }
 
 export interface PaymentPort {
@@ -32,10 +59,13 @@ export interface OrderTx {
   find(customer: string, orderId: string): Promise<StoredOrder | null>;
   findByKey(customer: string, idempotencyKey: string): Promise<StoredOrder | null>;
   hasUsedOffers(customer: string, offerIds: readonly string[]): Promise<boolean>;
+  /** The customer's approved orders with a line that is this substitute pair. */
+  approvedWithPair(customer: string, pair: SubstitutePair): Promise<StoredOrder[]>;
   insert(order: StoredOrder): Promise<void>;
   /**
-   * Writes a decided order over the pending one it was read as. False when the stored order is no
-   * longer pending at `proposalVersion`, so only one decision wins.
+   * Writes the next state of a pending order (a decision, or the approver's next proposal) over the
+   * one read at `proposalVersion`. False when the stored order is no longer pending at
+   * `proposalVersion`, so only one write wins.
    */
   decide(order: StoredOrder, proposalVersion: number): Promise<boolean>;
   /** Gross total of the customer's placed invoice orders, EUR. */
@@ -47,6 +77,8 @@ export interface OrderStore {
   find(customer: string, orderId: string): Promise<StoredOrder | null>;
   /** The customer's orders that wait for a decision, oldest first. */
   pending(customer: string): Promise<StoredOrder[]>;
+  /** Pending orders with at least one line at or past its cutoff, optionally for one customer. */
+  expiredPending(now: Date, customer?: string): Promise<StoredOrder[]>;
   findByKey(customer: string, idempotencyKey: string): Promise<StoredOrder | null>;
   history(customer: string, productIds: string[]): Promise<HistoryRow[]>;
   refuse(customer: string, event: AuditEvent): Promise<Result<void, "AUDIT_INVALID">>;

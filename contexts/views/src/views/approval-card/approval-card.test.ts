@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { type Order, OrderSchema } from "@app/contract";
+import { DecideApprovalRequestSchema, type Order, OrderSchema } from "@app/contract";
+import standingOffer from "../../../fixtures/approval-card/approved-standing-offer.json";
+import declinedSubstitution from "../../../fixtures/approval-card/declined-substitution.json";
 import pendingLate from "../../../fixtures/approval-card/pending-late.json";
+import pendingNew from "../../../fixtures/approval-card/pending-new-product.json";
 import pendingPartial from "../../../fixtures/approval-card/pending-partial.json";
 import pending from "../../../fixtures/approval-card/pending.json";
 import trust from "../../../fixtures/approval-card/pending-trust.json";
@@ -9,6 +12,8 @@ import mismatch from "../../../fixtures/approval-card/placed-mismatch.json";
 import signed from "../../../fixtures/approval-card/placed-signed.json";
 import unsigned from "../../../fixtures/approval-card/placed-unsigned.json";
 import { pick, setLang } from "../../shared/locale.ts";
+import { pricePerStdUnit } from "../offer-comparison/model.ts";
+import { OFFERS } from "../offer-comparison/strings.ts";
 import { ApprovalCard, reasonSummaries } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
 import { day, money } from "./parts.ts";
@@ -55,6 +60,8 @@ const ORDER_FIXTURES = [
   "awaiting-payment",
   "declined-stop",
   "declined-alternatives",
+  "approved-standing-offer",
+  "declined-substitution",
 ];
 
 const firstClaims = (order: Order) => {
@@ -77,6 +84,77 @@ test("a line with a shortfall gets a to-do naming what arrives, linked to its ch
   expect(shown).toContain(`id="line-${c.offerId}"`);
   expect(shown).not.toContain(text.checkYouWantProduct);
   expect(reasonSummaries(order)).toEqual([text.notAllOnTime(c.product.name)]);
+});
+
+/** pending-partial with a substitute in the order that covers the butter's missing 8 kg. */
+const toppedUp = () => {
+  const order = OrderSchema.parse(pendingPartial);
+  const short = firstClaims(order);
+  const [line] = order.lines;
+  if (line === undefined) throw new Error("Expected the short line");
+  const claims = {
+    ...short,
+    offerId: "off_test_topup",
+    productId: "prod_test_topup",
+    product: {
+      ...short.product,
+      name: "Test butter 250 g",
+      perSalesUnit: { value: 0.25, unit: "KGM" },
+    },
+    quantity: { value: 32, unit: "CT" },
+    total: { net: 60, gross: 68.4 },
+    shortfall: null,
+    replaces: short.productId,
+  };
+  order.lines.push({ ...line, offerId: claims.offerId, claims });
+  order.offerIds.push(claims.offerId);
+  order.reasons.push("SUBSTITUTION");
+  return { order, short };
+};
+
+test("a substitute that tops up a short line is one of its choices, not an out-of-stock product", () => {
+  const text = pick(CARD);
+  const { order, short } = toppedUp();
+  const shown = markup(cardFor(order).card.render());
+
+  expect(shown).toContain(text.howToHandle(text.packs("16")));
+  expect(shown).toContain(text.topUpWith("Test butter 250 g"));
+  expect(shown).toContain(text.otherChoices(3));
+  expect(shown).not.toContain(text.replaceWith);
+  expect(shown).not.toContain(text.chooseReplacement);
+  expect(shown).not.toContain('id="line-off_test_topup"');
+  expect(reasonSummaries(order)).toEqual([text.notAllOnTime(short.product.name)]);
+});
+
+test("the top-up is approved as it is; Order fewer drops it from the order", () => {
+  const { order, short } = toppedUp();
+  const approving = cardFor(order);
+  click(approving.card, 'part="button approve"');
+  expect(approving.sent).toEqual([
+    { type: "tt-decide", detail: { decision: "approve", proposalVersion: order.proposalVersion } },
+  ]);
+
+  const fewer = cardFor(order);
+  const more = clickHandler(fewer.card.render(), 'class="more-products"');
+  if (more === undefined) throw new Error("the short line shows its other choices");
+  more();
+  // Top up, split, all later, then Order fewer.
+  const radios = handlers(fewer.card.render(), 'name="handling-', "@change=");
+  radios[3]?.();
+  click(fewer.card, 'part="button approve"');
+  expect(fewer.sent).toEqual([
+    {
+      type: "tt-decide",
+      detail: {
+        decision: "edit",
+        proposalVersion: order.proposalVersion,
+        changes: [
+          { productId: "prod_test_topup", quantity: { value: 0, unit: "CT" } },
+          { productId: short.productId, quantity: { value: 24, unit: "CT" } },
+        ],
+      },
+    },
+  ]);
 });
 
 test("a late line with no shortfall is flagged with the same choices as a short line", () => {
@@ -117,7 +195,6 @@ test("a late line's choices send approve, remove or the agent prompt", () => {
 
   const approving = cardFor(order);
   click(approving.card, 'part="button approve"');
-  click(approving.card, 'part="button approve-confirm"');
   expect(approving.sent).toEqual([
     { type: "tt-decide", detail: { decision: "approve", proposalVersion: order.proposalVersion } },
   ]);
@@ -131,7 +208,6 @@ test("a late line's choices send approve, remove or the agent prompt", () => {
   if (removeRadio === undefined) throw new Error("the late line offers removal");
   removeRadio();
   click(removing.card, 'part="button approve"');
-  click(removing.card, 'part="button approve-confirm"');
   expect(removing.sent).toEqual([
     {
       type: "tt-decide",
@@ -188,38 +264,26 @@ test("each total says whether it includes VAT; the limit compares the gross tota
   expect(text).toContain("Order total excl. VAT");
 });
 
-test("approve asks with the gross total and sends only after the second click", () => {
+test("one click approves", () => {
   const { card, sent } = cardFor(pending);
-  const order = OrderSchema.parse(pending);
   click(card, 'part="button approve"');
-  expect(sent).toEqual([]);
-  expect(visible(card)).toContain(`Approve order of ${money(order.total.gross)} incl. VAT?`);
-  click(card, 'part="button cancel"');
-  expect(visible(card)).not.toContain("Approve order of");
-  click(card, 'part="button approve"');
-  click(card, 'part="button approve-confirm"');
   expect(sent).toEqual([
-    { type: "tt-decide", detail: { decision: "approve", proposalVersion: order.proposalVersion } },
+    {
+      type: "tt-decide",
+      detail: { decision: "approve", proposalVersion: card.order?.proposalVersion },
+    },
   ]);
 });
 
-test("reject asks first, then stops or lets the agent look for alternatives", () => {
-  for (const next of ["stop", "alternatives"] as const) {
-    const { card, sent } = cardFor(pending);
-    click(card, 'part="button reject"');
-    expect(sent).toEqual([]);
-    const text = visible(card);
-    expect(text).toContain("Reject this order?");
-    expect(text).toContain("Reject and stop");
-    expect(text).toContain("Reject, allow alternatives");
-    click(card, `part="button reject-${next}"`);
-    expect(sent).toEqual([
-      {
-        type: "tt-decide",
-        detail: { decision: "reject", next, proposalVersion: card.order?.proposalVersion },
-      },
-    ]);
-  }
+test("one click rejects, and the agent stops", () => {
+  const { card, sent } = cardFor(pending);
+  click(card, 'part="button reject"');
+  expect(sent).toEqual([
+    {
+      type: "tt-decide",
+      detail: { decision: "reject", next: "stop", proposalVersion: card.order?.proposalVersion },
+    },
+  ]);
 });
 
 test("no card shows a raw id outside More details; the details keep the order id", async () => {
@@ -289,6 +353,247 @@ test("the trust parts follow the view language", () => {
     expect(output).toContain("Voi sisältää seesaminsiemeniä");
     expect(output).toContain("Rikkoo sääntöäsi: ei kananmunaa");
     expect(output).toContain("Tarkista, sopiiko se sääntöösi: ei seesaminsiemeniä");
+  } finally {
+    setLang("en");
+  }
+});
+
+const SUBSTITUTE = "Test plant-based yogurt unsweetened 400 g";
+const ORIGINAL = "Test plant-based yogurt 750 g";
+
+test("the server's standing offer asks to stop asking; Yes sends the auto rule", () => {
+  const text = pick(CARD);
+  const { card, sent } = cardFor(standingOffer);
+  expect(visible(card)).toContain(text.standingOffer(SUBSTITUTE, ORIGINAL, 3));
+  click(card, 'part="rule"');
+  expect(sent).toEqual([
+    {
+      type: "tt-remember",
+      detail: {
+        replaces: "prod_test_yogurt_750",
+        productId: "prod_test_yogurt_400",
+        policy: "auto",
+        productName: SUBSTITUTE,
+        replacesName: ORIGINAL,
+      },
+    },
+  ]);
+  card.remembered = true;
+  expect(visible(card)).toContain(text.standingSaved(SUBSTITUTE, ORIGINAL));
+});
+
+test("Keep asking hides the offer, and an approval without the offer shows none", () => {
+  const text = pick(CARD);
+  const { card } = cardFor(standingOffer);
+  click(card, 'class="btn ghost"');
+  expect(visible(card)).not.toContain(text.keepAsking);
+  const { standingOffer: _offer, ...plain } = standingOffer;
+  expect(visible(cardFor(plain).card)).not.toContain(text.yesAutomatically);
+});
+
+test("a declined substitute offers one tap to stop suggesting it", () => {
+  const text = pick(CARD);
+  const { card, sent } = cardFor(declinedSubstitution);
+  expect(visible(card)).toContain(text.neverSuggest(SUBSTITUTE, ORIGINAL));
+  click(card, 'class="rule"');
+  expect(sent).toMatchObject([{ type: "tt-remember", detail: { policy: "never" } }]);
+  card.remembered = true;
+  expect(visible(card)).toContain(text.neverSaved(SUBSTITUTE, ORIGINAL));
+});
+
+for (const next of ["stop", "alternatives"] as const) {
+  test(`a server decline with next ${next} does not offer a standing substitution rule`, () => {
+    const text = pick(CARD);
+    const order = OrderSchema.parse(declinedSubstitution);
+    for (const event of order.audit) {
+      if (event.event === "declined") event.actor = "server";
+    }
+    const { card } = cardFor({
+      ...order,
+      decision: { ...order.decision, action: "reject", next, by: "server" },
+    });
+    expect(visible(card)).not.toContain(text.dontSuggestAgain);
+    expect(visible(card)).not.toContain(text.neverSuggest(SUBSTITUTE, ORIGINAL));
+  });
+}
+
+test("a pair that already has a rule is not offered again", () => {
+  const text = pick(CARD);
+  const { card } = cardFor(declinedSubstitution);
+  card.rules = [
+    {
+      replaces: "prod_test_yogurt_750",
+      productId: "prod_test_yogurt_400",
+      policy: "never",
+      decidedAt: "2026-11-14T10:00:00+00:00",
+    },
+  ];
+  expect(visible(card)).not.toContain(text.dontSuggestAgain);
+  card.remembered = true;
+  expect(visible(card)).toContain(text.neverSaved(SUBSTITUTE, ORIGINAL));
+});
+
+test("the rule offers follow the view language", () => {
+  setLang("fi");
+  try {
+    expect(visible(cardFor(standingOffer).card)).toContain("Saako agentti tehdä tämän kysymättä?");
+    expect(visible(cardFor(declinedSubstitution).card)).toContain("Älä ehdota enää");
+  } finally {
+    setLang("en");
+  }
+});
+
+test("reduce to fit fills the amounts on the card, sends nothing, and confirm sends the edit", () => {
+  const { card, sent } = cardFor(pending);
+  const order = OrderSchema.parse(pending);
+  card.orderLimit = 1700;
+  expect(visible(card)).toContain("Over your limit");
+  click(card, 'part="reduce"');
+  expect(sent).toEqual([]);
+  const text = visible(card);
+  expect(text).toContain(pick(CARD).reducedToFit(money(1700)));
+  expect(text).toContain("Under your limit");
+
+  click(card, 'part="button approve"');
+  const [only] = sent;
+  if (only?.type !== "tt-confirm-changes") throw new Error("confirm sends the changed amounts");
+  const detail = DecideApprovalRequestSchema.parse(only.detail);
+  if (detail.decision !== "edit") throw new Error("the changed amounts are sent as an edit");
+  expect(detail.changes.length).toBeGreaterThan(0);
+  for (const change of detail.changes) {
+    const was = order.lines.find((l) => l.claims.productId === change.productId)?.claims;
+    const amount = change.quantity?.value ?? 0;
+    expect(amount).toBeGreaterThanOrEqual(1);
+    expect(amount).toBeLessThan(was?.quantity.value ?? 0);
+  }
+});
+
+test("reduce to fit says so when even one of each is over the limit, and changes nothing", () => {
+  const { card, sent } = cardFor(pending);
+  card.orderLimit = 10;
+  click(card, 'part="reduce"');
+  expect(sent).toEqual([]);
+  expect(visible(card)).toContain(pick(CARD).cannotFit);
+  click(card, 'part="button approve"');
+  expect(sent[0]?.type).toBe("tt-decide");
+});
+
+test("without a known order limit there is nothing to reduce to", () => {
+  const { card } = cardFor(pending);
+  card.orderLimit = null;
+  expect(markup(card.render())).not.toContain('part="reduce"');
+});
+
+/** Each product row's offer summary, by offerId: status, short reason, price and toggle. */
+const offerRows = (card: ApprovalCard) =>
+  new Map(
+    markup(card.render())
+      .split('class="line-offer"')
+      .slice(1)
+      .map((block) => {
+        const id = /aria-controls=offer-(\S+)/.exec(block)?.[1] ?? "";
+        const field = (pattern: RegExp) => pattern.exec(block)?.[1]?.trim() ?? "";
+        return [
+          id,
+          {
+            expanded: field(/aria-expanded=(\w+)/),
+            label: field(/aria-label=(.*?)\s+@click=/s),
+            status: field(/offer-status (\w+)/),
+            reason: field(/class="offer-reason">([^<]*)</),
+            price: field(/class="offer-price">([^<]*)</),
+            block,
+          },
+        ];
+      }),
+  );
+const lineOf = (data: unknown, productId: string) => {
+  const line = OrderSchema.parse(data).lines.find((l) => l.claims.productId === productId);
+  if (line === undefined) throw new Error(`no line for ${productId}`);
+  return line.claims;
+};
+const rowOf = (card: ApprovalCard, offerId: string) => {
+  const row = offerRows(card).get(offerId);
+  if (row === undefined) throw new Error(`no offer row for ${offerId}`);
+  return row;
+};
+const MILK = "prod_test_off_test_10";
+const FLOUR = "prod_test_off_test_11";
+
+test("each product row shows the status icon, the short reason and the price per l/kg", () => {
+  const text = pick(OFFERS);
+  const over = cardFor(pending).card;
+  over.orderLimit = 1000;
+  const milk = lineOf(pending, MILK);
+  const milkRow = rowOf(over, milk.offerId);
+  expect(milkRow.status).toBe("attention");
+  expect(milkRow.reason).toBe(text.short.SPEND_OVER_LIMIT);
+  expect(milkRow.price).toBe(pricePerStdUnit(milk)?.shown ?? "missing");
+  expect(milkRow.label).toContain(text.words.needsApproval);
+  const flour0 = rowOf(over, lineOf(pending, FLOUR).offerId);
+  expect([flour0.status, flour0.reason]).toEqual(["auto", ""]);
+
+  const fresh = cardFor(pendingNew).card;
+  const barista = rowOf(fresh, lineOf(pendingNew, "prod_test_off_test_17").offerId);
+  expect([barista.status, barista.reason]).toEqual(["attention", text.short.NEW_PRODUCT]);
+  const flour = rowOf(fresh, lineOf(pendingNew, "prod_test_off_test_11").offerId);
+  expect(flour.reason).toBe(text.short.CO2_ABOVE_MAX);
+
+  const short = rowOf(
+    cardFor(pendingPartial).card,
+    lineOf(pendingPartial, "prod_test_off_test_18").offerId,
+  );
+  expect(short.status).toBe("attention");
+  expect(short.reason).toMatch(/ of /);
+  const late = rowOf(
+    cardFor(pendingLate).card,
+    lineOf(pendingLate, "prod_test_off_test_18").offerId,
+  );
+  expect(late.reason).toMatch(/late/);
+
+  expect(offerRows(cardFor(signed).card).size).toBe(0);
+});
+
+test("the chevron opens one product's details and closes the others", () => {
+  const { card } = cardFor(pending);
+  card.orderLimit = 1000;
+  const milk = lineOf(pending, MILK).offerId;
+  const flour = lineOf(pending, FLOUR).offerId;
+  expect([...offerRows(card).values()].every((row) => row.expanded === "false")).toBe(true);
+  click(card, `aria-controls=offer-${milk}`);
+  expect(rowOf(card, milk).expanded).toBe("true");
+  expect(rowOf(card, milk).block).toContain(pick(OFFERS).needsYourApproval);
+  expect(rowOf(card, milk).block).toContain(`id=offer-${milk}`);
+  click(card, `aria-controls=offer-${flour}`);
+  expect([rowOf(card, milk).expanded, rowOf(card, flour).expanded]).toEqual(["false", "true"]);
+  click(card, `aria-controls=offer-${flour}`);
+  expect([...offerRows(card).values()].every((row) => row.expanded === "false")).toBe(true);
+});
+
+test("missing reliability or CO2 reads No data, never 0", () => {
+  const order = OrderSchema.parse(pending);
+  const [first, ...rest] = order.lines;
+  if (first === undefined) throw new Error("no line");
+  const product = { ...first.claims.product, deliveryReliability: null, co2PerKg: null };
+  const blank = { ...order, lines: [{ ...first, claims: { ...first.claims, product } }, ...rest] };
+  const { card } = cardFor(blank);
+  click(card, `aria-controls=offer-${first.claims.offerId}`);
+  const text = pick(OFFERS);
+  const block = rowOf(card, first.claims.offerId).block.replace(/>\s+</g, "><");
+  expect(block).toContain(`<dt>${text.labels.reliability}</dt><dd>${text.noData}</dd>`);
+  expect(block).toContain(`<dt>${text.labels.co2}</dt><dd>${text.noData}</dd>`);
+});
+
+test("Finnish renders the product row and its details", () => {
+  setLang("fi");
+  try {
+    const { card } = cardFor(pending);
+    card.orderLimit = 1000;
+    const milk = lineOf(pending, MILK).offerId;
+    expect(rowOf(card, milk).reason).toBe(OFFERS.fi.short.SPEND_OVER_LIMIT);
+    expect(rowOf(card, milk).label).toContain(CARD.fi.offerDetails);
+    expect(rowOf(card, milk).label).not.toContain(CARD.en.offerDetails);
+    click(card, `aria-controls=offer-${milk}`);
+    expect(rowOf(card, milk).block).toContain(OFFERS.fi.needsYourApproval);
   } finally {
     setLang("en");
   }

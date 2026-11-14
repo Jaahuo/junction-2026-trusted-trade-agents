@@ -1,6 +1,6 @@
 import { $ } from "bun";
 import { existsSync } from "node:fs";
-import { configure, waitUntilUp } from "./openwebui.ts";
+import { waitUntilUp } from "./openwebui.ts";
 
 // Deploys an immutable image to the Vultr host that infra/ creates. See docs/deploy.md.
 
@@ -95,7 +95,6 @@ export const renderCaddyfile = (outputs: Outputs, chat = false): string =>
   (chat ? `\n${site(chatHostname(outputs), CHAT_PORT)}` : "");
 
 // Open WebUI as the hosted chat host (#155). It runs only when VERDA_INFERENCE_KEY is set.
-const CHAT_IMAGE = "ghcr.io/open-webui/open-webui:v0.13.3";
 const CHAT_PORT = 8080;
 const CHAT_MODEL_URL = "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1";
 const CHAT_BASE_MODEL = "nemotron-3.5-super-vl";
@@ -154,6 +153,9 @@ export const chatEnv = (outputs: Outputs, chat: Chat): Map<string, string> =>
     ["WEBUI_ADMIN_PASSWORD", chat.adminPassword],
     ["OPENAI_API_BASE_URL", CHAT_MODEL_URL],
     ["OPENAI_API_KEY", chat.inferenceKey],
+    ["MCP_SERVER_URL", `${outputs.public_base_url}/mcp`],
+    ["AGENT_MODEL_ID", CHAT_BASE_MODEL],
+    ["OPENWEBUI_MAX_TOKENS", "4096"],
   ]);
 
 export const CHAT_SERVICE = `[Unit]
@@ -162,9 +164,11 @@ After=docker.service network-online.target
 Wants=network-online.target
 Requires=docker.service
 ConditionPathExists=/etc/trusted-trade-chat.env
+ConditionPathExists=/etc/trusted-trade-chat-image.env
 
 [Service]
-ExecStart=/usr/bin/docker run --rm --name trusted-trade-chat --pull=never --env-file /etc/trusted-trade-chat.env -p 127.0.0.1:${CHAT_PORT}:8080 -v trusted-trade-chat:/app/backend/data -v /opt/trusted-trade-chat/branding/custom.css:/app/backend/open_webui/static/custom.css:ro -v /opt/trusted-trade-chat/branding:/app/backend/open_webui/static/acme:ro ${CHAT_IMAGE}
+EnvironmentFile=/etc/trusted-trade-chat-image.env
+ExecStart=/usr/bin/docker run --rm --name trusted-trade-chat --pull=never --env-file /etc/trusted-trade-chat.env -p 127.0.0.1:${CHAT_PORT}:8080 -v trusted-trade-chat:/app/backend/data \${TRUSTED_TRADE_CHAT_IMAGE}
 ExecStop=/usr/bin/docker stop --time 30 trusted-trade-chat
 TimeoutStopSec=40
 Restart=on-failure
@@ -282,46 +286,61 @@ export const push = async (
   outputs: Outputs,
   settings: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<void> => {
+  const chat = chatSettings(settings);
   const image = settings["DEPLOY_IMAGE"] ?? "";
-  if (!new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}$`).test(image))
+  const chatImage = settings["DEPLOY_CHAT_IMAGE"] ?? "";
+  const imagePattern = new RegExp(
+    `^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}$`,
+  );
+  if (!imagePattern.test(image))
     throw new Error("DEPLOY_IMAGE must be the trusted GHCR repository pinned by sha256 digest");
+  if (chat && !imagePattern.test(chatImage))
+    throw new Error(
+      "DEPLOY_CHAT_IMAGE must be the trusted GHCR repository pinned by sha256 digest",
+    );
   const user = settings["DEPLOY_REGISTRY_USER"] ?? "";
   const token = settings["DEPLOY_REGISTRY_TOKEN"] ?? "";
   if (!user || !token || /[\r\n]/.test(user) || /[\r\n]/.test(token))
     throw new Error("DEPLOY_REGISTRY_USER and DEPLOY_REGISTRY_TOKEN are required");
   const unit = renderService(outputs);
   const envFile = renderEnvFile(await loadDeployEnv(outputs));
-  const chat = chatSettings(settings);
   const host = `root@${outputs.public_ip}`;
   const dir = shellQuote(outputs.app_dir);
   await $`ssh ${SSH} ${host} cloud-init status --wait`.quiet();
   await $`ssh ${SSH} ${host} ${`set -eu; if ! command -v docker >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io; fi; systemctl enable --now docker; mkdir -p ${dir}/data`}`;
-  const pull = `set -eu
+  const pullImage = async (reference: string): Promise<string> => {
+    const pull = `set -eu
 config=$(mktemp -d)
 trap 'rm -rf "$config"' EXIT
 export DOCKER_CONFIG="$config"
 docker login ghcr.io --username ${shellQuote(user)} --password-stdin >&2
-docker pull ${shellQuote(image)} >&2
-docker image inspect --format '{{.Id}}' ${shellQuote(image)}
-docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${shellQuote(image)}
+docker pull ${shellQuote(reference)} >&2
+docker image inspect --format '{{.Id}}' ${shellQuote(reference)}
+docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${shellQuote(reference)}
 `;
-  const [expectedImageId, ...digests] = (
-    await $`ssh ${SSH} ${host} ${pull} < ${new Response(token)}`.text()
-  )
-    .trim()
-    .split("\n");
-  if (expectedImageId === undefined || !/^sha256:[0-9a-f]{64}$/.test(expectedImageId))
-    throw new Error("Pulled image has an invalid SHA-256 image ID");
-  if (!digests.includes(image))
-    throw new Error("Pulled image does not contain the requested repository digest");
+    const [id, ...digests] = (await $`ssh ${SSH} ${host} ${pull} < ${new Response(token)}`.text())
+      .trim()
+      .split("\n");
+    if (id === undefined || !/^sha256:[0-9a-f]{64}$/.test(id))
+      throw new Error("Pulled image has an invalid SHA-256 image ID");
+    if (!digests.includes(reference))
+      throw new Error("Pulled image does not contain the requested repository digest");
+    return id;
+  };
+  const expectedImageId = await pullImage(image);
+  const expectedChatImageId = chat ? await pullImage(chatImage) : undefined;
+  if (chat) {
+    const role = (
+      await $`ssh ${SSH} ${host} ${`docker image inspect --format '{{index .Config.Labels "io.trusted-trade.service"}}' ${shellQuote(chatImage)}`}`.text()
+    ).trim();
+    if (role !== "openwebui") throw new Error("DEPLOY_CHAT_IMAGE is not an Open WebUI image");
+  }
   const remoteShell = `ssh ${SSH.join(" ")}`;
   if (existsSync("data")) await transferData("data/", host, outputs.app_dir, remoteShell);
   // Everything slow or network-bound for the chat host happens before the app stops.
   if (chat) {
-    await $`ssh ${SSH} ${host} docker pull --quiet ${CHAT_IMAGE}`;
-    await $`ssh ${SSH} ${host} mkdir -p /opt/trusted-trade-chat`;
-    await $`rsync -az --exclude=.env --exclude=.env.* --exclude=__pycache__ --exclude=*.pyc -e ${remoteShell} hosts/openwebui/agent hosts/openwebui/branding hosts/openwebui/scripts ${`${host}:/opt/trusted-trade-chat/`}`;
     await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat.env < ${new Response(renderEnvFile(chatEnv(outputs, chat)))}`;
+    await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat-image.env < ${new Response(`TRUSTED_TRADE_CHAT_IMAGE="${chatImage}"\n`)}`;
     await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade-chat.service < ${new Response(CHAT_SERVICE)}`;
   }
   await $`ssh ${SSH} ${host} systemctl stop trusted-trade`;
@@ -344,18 +363,15 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   if (chat) {
     // The chat restarts only after the app is healthy, so it never adds to the app's downtime.
     await $`ssh ${SSH} ${host} ${"systemctl daemon-reload && systemctl enable trusted-trade-chat && systemctl restart trusted-trade-chat"}`;
-    const base = `https://${chatHostname(outputs)}`;
-    await waitUntilUp(base);
-    await configure({
-      base,
-      email: chat.adminEmail,
-      password: chat.adminPassword,
-      mcpUrl: `${outputs.public_base_url}/mcp`,
-      openaiUrl: CHAT_MODEL_URL,
-      openaiKey: chat.inferenceKey,
-      baseModel: CHAT_BASE_MODEL,
-      recipePermission: chat.recipePermission,
-    });
+    await waitUntilUp(`https://${chatHostname(outputs)}`);
+    const runningChatImage = (
+      await $`ssh ${SSH} ${host} ${"docker container inspect --format '{{.Image}} {{.State.Running}}' trusted-trade-chat"}`.text()
+    ).trim();
+    if (runningChatImage !== `${expectedChatImageId} true`)
+      throw new Error(
+        "Running chat container image hash or running state does not match the expected image",
+      );
+    await $`ssh ${SSH} ${host} docker exec trusted-trade-chat python /opt/trusted-trade/hosts/openwebui/scripts/provision_agent.py`;
   } else console.log("chat host: skipped, VERDA_INFERENCE_KEY is not set");
 };
 

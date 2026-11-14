@@ -122,8 +122,21 @@ jobs:
           jq -n --arg sha "$SHA" --arg run "$RUN_ID" --arg attempt "$ATTEMPT" --arg image "$image_id" --arg chatImage "$chat_image_id" --arg lock "$lock_hash" \
             --arg build "$GITHUB_RUN_ID" --arg buildAttempt "$GITHUB_RUN_ATTEMPT" \
             '{schemaVersion: 2, sourceSha: $sha, gateRunId: $run, gateRunAttempt: $attempt, buildRunId: $build, buildRunAttempt: $buildAttempt, imageId: $image, chatImageId: $chatImage, lockfileSha256: $lock, securityScans: "paused"}' > "$RUNNER_TEMP/deployment-evidence/manifest.json"
+      - name: Release build cache before loading images
+        run: |
+          set -euo pipefail
+          df -h "$RUNNER_TEMP"
+          docker buildx prune --all --force
+          df -h "$RUNNER_TEMP"
+      - name: Load verified images and remove archives
+        run: |
+          set -euo pipefail
           docker load --input "$RUNNER_TEMP/image.tar"
-          docker load --input "$RUNNER_TEMP/chat-image.tar"
+          rm "$RUNNER_TEMP/image.tar"
+          gzip -1 "$RUNNER_TEMP/chat-image.tar"
+          docker load --input "$RUNNER_TEMP/chat-image.tar.gz"
+          rm "$RUNNER_TEMP/chat-image.tar.gz"
+          df -h "$RUNNER_TEMP"
       - name: Smoke production runtime
         run: |
           umask 077

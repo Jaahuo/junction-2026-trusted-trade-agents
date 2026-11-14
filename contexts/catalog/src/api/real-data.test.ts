@@ -4,6 +4,7 @@ import { DemoProductsSchema, SearchResultSchema } from "@app/contract";
 import { ok } from "@app/kernel";
 import { lazyCatalog } from "../application/catalog.ts";
 import { createCatalog } from "../domain/catalog.ts";
+import { matchHard } from "../domain/match.ts";
 import { defaultDataDir, loadProductFile } from "../infra/product-file.ts";
 import { createApi } from "./index.ts";
 
@@ -76,4 +77,19 @@ test("every product sold by weight has its volume per sales unit in KGM", async 
   );
   expect(weighed.length).toBeGreaterThan(0);
   expect(weighed.filter((product) => product.perSalesUnit?.unit !== "KGM")).toEqual([]);
+});
+
+test("the demo diets gluten-free, egg-free and vegan each confirm and contradict some products", async () => {
+  const products = await loadProductFile(defaultDataDir());
+  const hard = [
+    { attribute: "gluten", is: "free_from" },
+    { attribute: "egg", is: "free_from" },
+    { attribute: "vegan", is: "yes" },
+  ] as const;
+  for (const constraint of hard) {
+    const states = new Set(
+      products.map((product) => matchHard(product.claims, [constraint])[constraint.attribute]),
+    );
+    expect(states).toEqual(new Set(["confirmed", "contradicted", "unknown"]));
+  }
 });

@@ -24,6 +24,7 @@ export const PARTS = {
       DZ: "dozen",
     } as Record<string, string>,
     today: "Today",
+    vat: { net: "excl. VAT", gross: "incl. VAT" },
   },
   fi: {
     // The short forms of a Finnish wholesale order.
@@ -48,6 +49,7 @@ export const PARTS = {
       DZ: "tusina",
     } as Record<string, string>,
     today: "Tänään",
+    vat: { net: "alv 0 %", gross: "sis. ALV" },
   },
 };
 
@@ -63,6 +65,7 @@ export const VIEW = {
     verifying: "Verifying the signed offers and checking them against your limits.",
     cantShowTitle: "This approval can't be shown here",
     cantShowBody: "Open it on the approval page to review and decide.",
+    cantShowRetry: "Try again in a moment.",
     openApprovalPage: "Open approval page",
     tryAgain: "Try again",
     opensNewTab: "Opens in a new tab",
@@ -84,6 +87,17 @@ export const VIEW = {
         "Changing amounts is not available yet. Approve the order as it is, or ask the agent.",
     } as Record<string, string>,
     notSaved: "The decision was not saved. Try again.",
+    // What the card says for the approver after a decision; the agent reads it.
+    decided: {
+      placed: (name: string, brand: string) => `${name} approved. It is placed with ${brand}.`,
+      awaitingPayment: (name: string, brand: string) =>
+        `${name} approved. It goes to ${brand} when the payment is confirmed.`,
+      notPlaced: (name: string, reasons: string) => `${name} was not placed: ${reasons}`,
+      alternatives: (name: string) =>
+        `${name} rejected. Look for alternatives and send me a new order to approve.`,
+      stop: (name: string) =>
+        `${name} rejected. Order nothing for it, and do not ask again unless I ask for a new order.`,
+    },
   },
   fi: {
     approvals: "Hyväksynnät",
@@ -96,6 +110,7 @@ export const VIEW = {
     verifying: "Tarkistetaan allekirjoitetut tarjoukset ja verrataan niitä rajoihisi.",
     cantShowTitle: "Hyväksyntää ei voi näyttää tässä",
     cantShowBody: "Avaa se hyväksyntäsivulla, niin voit tarkistaa ja päättää.",
+    cantShowRetry: "Yritä hetken päästä uudelleen.",
     openApprovalPage: "Avaa hyväksyntäsivu",
     tryAgain: "Yritä uudelleen",
     opensNewTab: "Avautuu uuteen välilehteen",
@@ -118,5 +133,16 @@ export const VIEW = {
         "Määrien muuttaminen ei ole vielä mahdollista. Hyväksy tilaus sellaisenaan tai kysy agentilta.",
     } as Record<string, string>,
     notSaved: "Päätöstä ei tallennettu. Yritä uudelleen.",
+    decided: {
+      placed: (name: string, brand: string) =>
+        `Hyväksyin: ${name}. Tilaus on lähetetty toimittajalle ${brand}.`,
+      awaitingPayment: (name: string, brand: string) =>
+        `Hyväksyin: ${name}. Se lähtee toimittajalle ${brand}, kun maksu on vahvistettu.`,
+      notPlaced: (name: string, reasons: string) => `${name} ei mennyt läpi: ${reasons}`,
+      alternatives: (name: string) =>
+        `Hylkäsin: ${name}. Etsi vaihtoehtoja ja lähetä minulle uusi tilaus hyväksyttäväksi.`,
+      stop: (name: string) =>
+        `Hylkäsin: ${name}. Älä tilaa sitä äläkä kysy uudelleen, ellen pyydä uutta tilausta.`,
+    },
   },
 };

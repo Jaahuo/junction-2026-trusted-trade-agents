@@ -102,3 +102,55 @@ The order statuses have a documented [Peppol/UBL mapping](specs.md#peppolubl-sta
 - One unauthenticated demo account; human approval endpoints are publicly callable.
 - Buyer key custody is simulated on the server. Buyer-side custody and mandate signature verification on use are future work.
 - Add accounts and authorization, real payment and another wholesaler adapter before production use.
+
+## Partner challenges
+
+[Implementation and partner technologies](implementation.md#partner-technologies) holds the evidence for each claim below.
+We enter the Nemotron, Codex, ElevenLabs, Vultr and Tiger Data challenges.
+
+### Partner slide text
+
+**Kicker:** Partner technologies. **Title:** Built with.
+
+| Partner                      | Card title           | Card text                                                                                                                                                                                   |
+| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NVIDIA Nemotron 3.5 Super VL | The buyer's agent    | Turns a chef's sentence or a recipe plan into a checked order through our MCP tools. Served by Verda. With a longer output limit and simpler tools, it passed 7 of 7 chat scenarios, twice. |
+| OpenAI Codex                 | The development team | Codex agents planned, built and reviewed in parallel worktrees: 377 subagent sessions. As the independent reviewer, it raised 171 findings, and we fixed 156.                               |
+| ElevenLabs                   | The agent's voice    | The chef speaks; the agent answers aloud in the hosted chat (`eleven_multilingual_v2`). Speech-to-text stays local. Approval stays a tap.                                                   |
+| Vultr                        | Runs everything live | The API, the MCP endpoint, the web app, the chat and our CI runners. Built with OpenTofu. Every push to main deploys.                                                                       |
+| Tiger Data                   | The database         | Managed PostgreSQL for orders, mandates, offers and the hash-chained audit log. Our migrations ran on it unchanged.                                                                         |
+
+Speaker notes: Nemotron reads an informal request and picks products, amounts and a date. The server checks every choice, so a wrong model choice cannot become an unchecked order. Codex counts come from our agent session logs. A person approves with a tap, never by voice. We do not use Tiger Data's time-series features.
+
+### Nemotron form text
+
+The Nemotron challenge requires this explanation as text in the submission form:
+
+```text
+Model: NVIDIA Nemotron 3.5 Super VL (nemotron-3.5-super-vl), served by
+Verda on a B300 GPU through an OpenAI-compatible endpoint.
+
+What it does: Nemotron is the buyer's AI agent in our Open WebUI
+workspace for a restaurant and a bakery. It turns a chef's spoken
+sentence or a recipe plan into an order: it searches the wholesaler
+catalogue with the buyer's constraints through our MCP tools, gets
+signed offers, and places the order. When a rule stops the order, it
+explains the reason and shows the approval card for a person.
+
+Why it matters: kitchen staff order while their hands and attention are
+busy. Nemotron reads the informal request and chooses products, amounts
+and the delivery date. The wholesaler's server checks every choice
+against the buyer's signed limits, so a wrong model choice cannot become
+an unchecked order.
+
+How we improved its outputs: we embedded our ordering skill and the
+reason codes in the system prompt. A browser test sends the demo
+sentences to the model and checks the tool calls, the stored order and
+the reply. It showed that about 1 reply in 7 stopped inside the model's
+reasoning. Raising the output limit from 4,096 to 16,384 tokens fixed
+this: 7 of 7 scenarios passed twice in a row. We made the tools easier
+for a model to use: short offer IDs instead of 1,350-character tokens,
+server-made idempotency keys, and quiet tool versions. We also fixed the
+prompt for wrong replies found in tests, for example never saying "Done"
+while an order waits for a person.
+```

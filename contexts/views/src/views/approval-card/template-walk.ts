@@ -8,34 +8,30 @@ const isTemplate = (value: unknown): value is { strings: readonly string[]; valu
   Array.isArray(value.strings) &&
   Array.isArray(value.values);
 
-/** The `@click` handler of the first button after `marker` in a template, found without a DOM. */
-export const clickHandler = (value: unknown, marker: string): (() => void) | undefined => {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = clickHandler(item, marker);
-      if (found !== undefined) return found;
-    }
-    return undefined;
-  }
-  if (!isTemplate(value)) return undefined;
+/**
+ * Each template's first `event` handler (`@click` by default) after `marker`, outer templates
+ * first, found without a DOM.
+ */
+export const handlers = (value: unknown, marker: string, event = "@click="): (() => void)[] => {
+  if (Array.isArray(value)) return value.flatMap((item) => handlers(item, marker, event));
+  if (!isTemplate(value)) return [];
+  const found: (() => void)[] = [];
   let markup = "";
   for (const [index, part] of value.strings.entries()) {
     markup += part;
     const bound = value.values[index];
-    if (
-      markup.includes(marker) &&
-      part.trimEnd().endsWith("@click=") &&
-      typeof bound === "function"
-    )
-      return () => bound();
+    if (markup.includes(marker) && part.trimEnd().endsWith(event) && typeof bound === "function") {
+      found.push(() => bound());
+      break;
+    }
     if (typeof bound === "string") markup += bound;
   }
-  for (const nested of value.values) {
-    const found = clickHandler(nested, marker);
-    if (found !== undefined) return found;
-  }
-  return undefined;
+  for (const nested of value.values) found.push(...handlers(nested, marker, event));
+  return found;
 };
+
+/** The `@click` handler of the first button after `marker`. */
+export const clickHandler = (value: unknown, marker: string) => handlers(value, marker)[0];
 
 /** The template's markup with its text values, leaving out templates that start with `skip`. */
 export const markup = (value: unknown, skip?: string): string => {

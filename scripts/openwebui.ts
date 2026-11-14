@@ -157,7 +157,7 @@ export async function configure(host: ChatHost): Promise<void> {
   }
   async function must(step: string, path: string, body?: Json): Promise<unknown> {
     const { status, data } = await call(path, body);
-    if (status !== 200 && path === "/api/v1/auths/signin")
+    if (status === 400 && path === "/api/v1/auths/signin" && host.email !== "")
       throw new Error(
         `sign in: HTTP ${status}. Open WebUI keeps the admin password of its first start, so a changed password secret does not apply.`,
       );

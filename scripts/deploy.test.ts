@@ -137,6 +137,9 @@ const chatSecrets = {
 test("the deploy skips the chat host until the inference key is set", () => {
   expect(chatSettings({})).toBeUndefined();
   expect(chatSettings({ ...chatSecrets, VERDA_INFERENCE_KEY: " " })).toBeUndefined();
+  expect(chatSettings({ ...chatSecrets, OPENWEBUI_ADMIN_PASSWORD: "admin-password\r " })).toEqual(
+    chatSettings(chatSecrets),
+  );
   expect(chatSettings(chatSecrets)).toEqual({
     inferenceKey: "inference-key",
     secretKey: "session-key",

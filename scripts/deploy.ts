@@ -121,16 +121,17 @@ export const chatSettings = (
 ): Chat | undefined => {
   const inferenceKey = (settings["VERDA_INFERENCE_KEY"] ?? "").trim();
   if (inferenceKey === "") return undefined;
-  const missing = CHAT_SECRETS.filter((name) => (settings[name] ?? "").trim() === "");
+  const value = (name: (typeof CHAT_SECRETS)[number]): string => (settings[name] ?? "").trim();
+  const missing = CHAT_SECRETS.filter((name) => value(name) === "");
   if (missing.length > 0)
     throw new Error(
       `VERDA_INFERENCE_KEY is set, so the chat host also needs ${missing.join(", ")}`,
     );
   return {
     inferenceKey,
-    secretKey: settings["OPENWEBUI_SECRET_KEY"] ?? "",
-    adminEmail: settings["OPENWEBUI_ADMIN_EMAIL"] ?? "",
-    adminPassword: settings["OPENWEBUI_ADMIN_PASSWORD"] ?? "",
+    secretKey: value("OPENWEBUI_SECRET_KEY"),
+    adminEmail: value("OPENWEBUI_ADMIN_EMAIL"),
+    adminPassword: value("OPENWEBUI_ADMIN_PASSWORD"),
   };
 };
 
@@ -318,13 +319,13 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${digest}"\n`)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade.service < ${new Response(unit)}`;
-  if (chat)
-    await $`ssh ${SSH} ${host} ${"systemctl daemon-reload && systemctl enable trusted-trade-chat && systemctl restart trusted-trade-chat"}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs, chat !== undefined))}`;
   // The Vultr Ubuntu image enables ufw with only SSH open.
   await $`ssh ${SSH} ${host} ${"ufw allow 80/tcp && ufw allow 443/tcp && systemctl daemon-reload && systemctl enable --now trusted-trade && systemctl reload caddy"}`;
   await waitForHealth(outputs.public_base_url);
   if (chat) {
+    // The chat restarts only after the app is healthy, so it never adds to the app's downtime.
+    await $`ssh ${SSH} ${host} ${"systemctl daemon-reload && systemctl enable trusted-trade-chat && systemctl restart trusted-trade-chat"}`;
     const base = `https://${chatHostname(outputs)}`;
     await waitUntilUp(base);
     await configure({

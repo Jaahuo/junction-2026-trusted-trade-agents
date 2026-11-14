@@ -34,10 +34,10 @@ import {
 } from "./parts.ts";
 
 // Figma: Junction 2026 › Screens › "Approval request — v17 (reasons on to-dos)", with the
-// v11–v16 style and the prototype flows (choose another product, ask the agent, edit products,
-// reject). Every approval is an order of products, in one column at any width. Fields the
-// order does not carry (order limit, kitchen, on behalf of, the out-of-stock product's name and
-// the agent's reasons for a choice) are left out until the contract has them.
+// v11–v16 style and the prototype flows (choose another product, agent help, edit products).
+// Every approval is an order of products, in one column at any width. Fields the order does
+// not carry (order limit, kitchen, on behalf of, the agent's reason for a substitute) are left
+// out until the contract has them.
 
 type Reason = { title: string; detail: string | null; tone: "warning" | "info" };
 
@@ -109,19 +109,6 @@ export function reasonTitle(order: Order) {
     : reasonCopy(first, order, order.lines[0]?.claims).title;
 }
 
-/** Reject reasons from the design; they go to the agent with the note. */
-const REJECT_REASONS = ["Too expensive", "Wrong product", "Not needed", "Other"] as const;
-
-/** Prototype P8 "After rejecting": what the agent does next (DecideApprovalRequest.next). */
-const AFTER_REJECT = [
-  {
-    next: "alternatives",
-    label: "Look for a better option",
-    hint: "The agent tries again with your note.",
-  },
-  { next: "stop", label: "Stop", hint: "No order is placed." },
-] as const;
-
 const REQUOTE: ReadonlySet<ReasonCode> = new Set(["PRICE_CHANGED", "AVAILABILITY_DIFFERS"]);
 const isApproved = (o: Order) => o.status === "placed" || o.status === "awaiting_payment";
 const signed = (value: number) => `${value >= 0 ? "+" : "−"}${money(Math.abs(value))}`;
@@ -173,9 +160,6 @@ export class ApprovalCard extends LitElement {
     busy: { type: Boolean },
     canAsk: { type: Boolean, attribute: "can-ask" },
     handling: { state: true },
-    rejecting: { state: true },
-    rejectReason: { state: true },
-    afterReject: { state: true },
     detailsOpen: { state: true },
     allProducts: { state: true },
     editing: { state: true },
@@ -365,18 +349,6 @@ export class ApprovalCard extends LitElement {
         border-radius: var(--radius-full);
         background: var(--color-bg-success);
         color: var(--color-text-success);
-      }
-      .after-reject {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-sm);
-        margin: 0;
-        padding: 0;
-        border: 0;
-      }
-      .after-reject legend {
-        margin-bottom: var(--spacing-sm);
-        padding: 0;
       }
       .choice {
         display: flex;
@@ -608,9 +580,6 @@ export class ApprovalCard extends LitElement {
   declare canAsk: boolean;
   /** How to handle a shortfall (v16 options): split delivery, all later, or fewer. */
   declare private handling: Handling;
-  declare private rejecting: boolean;
-  declare private rejectReason: (typeof REJECT_REASONS)[number] | null;
-  declare private afterReject: (typeof AFTER_REJECT)[number]["next"];
   declare private detailsOpen: boolean;
   declare private allProducts: boolean;
   declare private editing: boolean;
@@ -629,9 +598,6 @@ export class ApprovalCard extends LitElement {
     this.busy = false;
     this.canAsk = false;
     this.handling = "split";
-    this.rejecting = false;
-    this.rejectReason = null;
-    this.afterReject = "alternatives";
     this.detailsOpen = false;
     this.allProducts = false;
     this.editing = false;
@@ -658,24 +624,12 @@ export class ApprovalCard extends LitElement {
     );
   }
 
-  private reject(order: Order) {
-    const field = this.renderRoot.querySelector<HTMLInputElement>("#reject-note");
-    const note = [this.rejectReason, field?.value.trim()].filter(Boolean).join(": ");
-    this.decide({
-      decision: "reject",
-      next: this.afterReject,
-      proposalVersion: order.proposalVersion,
-      ...(note === "" ? {} : { note }),
-    });
-  }
-
   private eyebrow(order: Order) {
     if (order.status === "placed") return "Approved";
     if (order.status === "awaiting_payment") return "Approved · waiting for payment";
     if (order.status !== "pending_approval") return "Rejected";
     if (this.editing) return "Editing products";
     if (this.busy && this.savedEdit) return "Getting a new offer";
-    if (this.rejecting) return "Rejecting";
     return "Approval required";
   }
 
@@ -689,7 +643,7 @@ export class ApprovalCard extends LitElement {
     const facts = html`<dl class="facts">
       ${fact("Order no.", order.orderId)} ${fact("Products", String(order.lines.length))}
     </dl>`;
-    const pill = order.status === "pending_approval" && !this.rejecting && !this.editing;
+    const pill = order.status === "pending_approval" && !this.editing;
     return brandHeader(this.eyebrow(order), title, facts, pill);
   }
 
@@ -1237,7 +1191,13 @@ export class ApprovalCard extends LitElement {
           part="button reject"
           class="btn ghost"
           ?disabled=${this.busy}
-          @click=${() => (this.rejecting = true)}
+          @click=${() =>
+            // Just reject: no reason form yet, and the agent does not try again.
+            this.decide({
+              decision: "reject",
+              next: "stop",
+              proposalVersion: order.proposalVersion,
+            })}
         >
           Reject
         </button>
@@ -1477,63 +1437,6 @@ export class ApprovalCard extends LitElement {
       }`;
   }
 
-  private rejectBody(order: Order) {
-    return html`<p class="strong">
-        Why are you rejecting? The agent uses this to find a better option.
-      </p>
-      <div class="chips" role="group" aria-label="Reason">
-        ${REJECT_REASONS.map(
-          (reason) =>
-            html`<button
-              class="chip"
-              aria-pressed=${this.rejectReason === reason ? "true" : "false"}
-              @click=${() => (this.rejectReason = reason)}
-            >
-              ${reason}
-            </button>`,
-        )}
-      </div>
-      <div>
-        <label class="field-label" for="reject-note">Note to agent (optional)</label>
-        <input id="reject-note" class="field" placeholder="Find a cheaper brand" />
-      </div>
-      <fieldset class="after-reject">
-        <legend class="section-title">After rejecting</legend>
-        ${AFTER_REJECT.map(
-          (choice) =>
-            html`<label class="choice ${this.afterReject === choice.next ? "selected" : ""}">
-              <input
-                type="radio"
-                name="after-reject"
-                .checked=${this.afterReject === choice.next}
-                @change=${() => (this.afterReject = choice.next)}
-              />
-              <span
-                ><span class="choice-label">${choice.label}</span><br /><span class="body-small"
-                  >${choice.hint}</span
-                ></span
-              >
-            </label>`,
-        )}
-      </fieldset>
-      ${this.orderedFor(order)}
-      <div class="actions">
-        <button
-          part="button send-back"
-          class="btn primary"
-          ?disabled=${this.busy}
-          aria-busy=${this.busy ? "true" : "false"}
-          @click=${() => this.reject(order)}
-        >
-          ${this.busy ? html`<span class="spinner" role="status" aria-label="Sending"></span>` : nothing}
-          ${this.busy ? "Sending…" : "Send to agent"}
-        </button>
-        <button class="btn ghost" ?disabled=${this.busy} @click=${() => (this.rejecting = false)}>
-          Cancel
-        </button>
-      </div>`;
-  }
-
   private decidedBody(order: Order) {
     const decision = order.decision;
     const by =
@@ -1577,10 +1480,7 @@ export class ApprovalCard extends LitElement {
                   title: "Rejected",
                   text: order.reasons.map((r) => REASON_TEXT[r]).join(" "),
                 };
-    // The reject note is "<reason>: <note>"; split it back into the two rows of the design.
-    const [reasonLabel = "", ...rest] = (decision?.note ?? "").split(": ");
-    const known = REJECT_REASONS.some((r) => r === reasonLabel);
-    const note = known ? rest.join(": ") : (decision?.note ?? "");
+    const note = decision?.note ?? "";
     return html`<div class="result ${result.tone}" part="result" role="status">
         ${icon(result.svg)}
         <div>
@@ -1599,10 +1499,7 @@ export class ApprovalCard extends LitElement {
                 : nothing
             }
             ${this.changeUntil(order)} ${this.products(order)}`
-          : rows([
-              ["Reason", known ? reasonLabel : null],
-              ["Your note", note === "" ? null : `“${note}”`],
-            ])
+          : rows([["Your note", note === "" ? null : `“${note}”`]])
       }
       ${this.orderedFor(order)}`;
   }
@@ -1680,9 +1577,7 @@ export class ApprovalCard extends LitElement {
         ? this.decidedBody(order)
         : this.editing
           ? this.editBody(order)
-          : this.rejecting
-            ? this.rejectBody(order)
-            : this.pendingBody(order);
+          : this.pendingBody(order);
     return html`<article class="card" part="card">
       ${this.header(order)}
       <div class="body">${body}</div>

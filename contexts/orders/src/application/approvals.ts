@@ -16,7 +16,14 @@ import { err, ok, type Result } from "@app/kernel";
 import { grossTotal, netTotal, ruleFor } from "../domain/evaluate.ts";
 import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import { expireCutoff } from "./cutoff.ts";
-import { auditOf, checkTokens, type Evaluated, evaluateChecked, type OrderDeps } from "./orders.ts";
+import {
+  auditOf,
+  type Checked,
+  checkTokens,
+  type Evaluated,
+  evaluateChecked,
+  type OrderDeps,
+} from "./orders.ts";
 import type { OrderTx, RequotePort, StoredOrder } from "./ports.ts";
 
 type DecisionErrorCode = Extract<
@@ -54,7 +61,20 @@ class ChangedMeanwhile extends Error {
   }
 }
 
-/** Runs `work` under the customer's lock; a ChangedMeanwhile rolls it back and answers 409. */
+/**
+ * Thrown inside the placement transaction when commitPlacement fails, so everything written before
+ * it in that transaction rolls back. A payment authorization already made is not undone.
+ */
+class NotFinalized extends Error {
+  constructor(readonly orderId: string) {
+    super("The order could not be finalized.");
+  }
+}
+
+/**
+ * Runs `work` under the customer's lock. A ChangedMeanwhile rolls it back and answers 409; a
+ * NotFinalized rolls it back and answers 502. Both are logged with the order they hit.
+ */
 const underLock = async (
   deps: OrderDeps,
   customer: string,
@@ -63,6 +83,12 @@ const underLock = async (
   try {
     return await deps.store.withCustomerLock(customer, work);
   } catch (error) {
+    if (error instanceof NotFinalized) {
+      console.error("The order could not be finalized; the placement rolled back.", {
+        orderId: error.orderId,
+      });
+      return failure("UPSTREAM_FAILED", "The order could not be finalized. Try again.");
+    }
     if (!(error instanceof ChangedMeanwhile)) throw error;
     // Every writer of a pending order holds this lock, so another writer changed it without it.
     console.error("A pending order changed under the customer's lock.", {
@@ -72,15 +98,38 @@ const underLock = async (
   }
 };
 
+/** Places `order` through commitPlacement, or rolls the transaction back (NotFinalized). */
+const placeOrThrow = async (
+  deps: OrderDeps,
+  principal: Principal,
+  tx: OrderTx,
+  order: StoredOrder,
+  now: Date,
+): Promise<StoredOrder> => {
+  const placed = await commitPlacement({
+    tx,
+    order,
+    creditLimit: principal.creditLimit,
+    payment: deps.payment,
+    signReceipt: deps.signReceipt,
+    now,
+  });
+  if (!placed.ok) throw new NotFinalized(order.orderId);
+  return placed.value;
+};
+
 /** The guarded write or a rollback: when the order is no longer pending at `proposalVersion`. */
 const guardedWrite = async (tx: OrderTx, order: StoredOrder, proposalVersion: number) => {
   if (!(await tx.decide(order, proposalVersion))) throw new ChangedMeanwhile(order.orderId);
 };
 
-/** A fault on the offers side, logged with the order it hit. */
+/** A fault on the offers side, logged with the order it hit; the order is left as it was. */
 const upstream = (orderId: string, message: string, detail: object = {}) => {
   console.error(message, { orderId, ...detail });
-  return failure("UPSTREAM_FAILED", "The offers could not be re-quoted.");
+  return failure(
+    "UPSTREAM_FAILED",
+    "The offers could not be re-quoted. Try again; if it keeps failing, reject the order and ask the agent for new offers.",
+  );
 };
 
 export const listPending = (deps: OrderDeps, principal: Principal): Promise<StoredOrder[]> =>
@@ -95,6 +144,11 @@ const approverEvent = (
 const isExpired = (lines: OrderLine[], now: Date): boolean =>
   lines.some((line) => line.claims.exp <= Math.floor(now.getTime() / 1000));
 
+/** An offer that expired or whose order cut-off passed can no longer be placed. */
+const lapsed = (lines: OrderLine[], now: Date): boolean =>
+  isExpired(lines, now) ||
+  lines.some((line) => line.claims.cutoffAt !== null && new Date(line.claims.cutoffAt) <= now);
+
 const madeUnderOtherMandate = (order: StoredOrder, mandate: Mandate): boolean =>
   order.lines.some(
     (line) =>
@@ -102,11 +156,12 @@ const madeUnderOtherMandate = (order: StoredOrder, mandate: Mandate): boolean =>
   );
 
 /**
- * Approve: re-checks the order against the current mandate of its agent and the offers' expiry,
- * then places it through commitPlacement, which runs the credit and payment steps (SPEC-010,
- * SPEC-011). An order whose offers were already stale when the decision arrived went through
- * approveWithRequote instead; offers that turn stale between that check and the lock leave the
- * order pending with 409, and the approver approves again.
+ * Approve: re-checks the order against the mandate read before the lock and the offers' expiry at
+ * `now` (read under the lock), then places it through commitPlacement, which runs the credit and
+ * payment steps (SPEC-010, SPEC-011). An order whose offers were already stale when the decision
+ * arrived went through approveWithRequote instead. An offer that expires while the decision waits
+ * for the lock answers 409 OFFER_EXPIRED and the approver approves again, which re-quotes it. The
+ * mandate is not read again under the lock: a mandate change in that window is not seen.
  */
 const approve = async (
   deps: OrderDeps,
@@ -149,20 +204,16 @@ const approve = async (
       : failure("UPSTREAM_FAILED", "The audit record could not be verified.");
   }
   if (madeUnderOtherMandate(order, mandate))
-    return failure("STALE_OFFER", "The mandate changed since the offers were made.");
+    return failure(
+      "STALE_OFFER",
+      "The mandate changed since the offers were made. Approve again to re-quote.",
+    );
   if (isExpired(order.lines, now))
-    return failure("OFFER_EXPIRED", "An offer of this order has expired.");
-  const placed = await commitPlacement({
-    tx,
-    order: decided,
-    creditLimit: principal.creditLimit,
-    payment: deps.payment,
-    signReceipt: deps.signReceipt,
-    now,
-  });
-  return placed.ok
-    ? ok(placed.value)
-    : failure("UPSTREAM_FAILED", "The order could not be finalized.");
+    return failure(
+      "OFFER_EXPIRED",
+      "An offer of this order has expired. Approve again to re-quote.",
+    );
+  return ok(await placeOrThrow(deps, principal, tx, decided, now));
 };
 
 const reject = async (
@@ -306,10 +357,19 @@ const invalidChanges = (
   return null;
 };
 
+/** Every offer ID the order has held: its lines and both sides of its requotes (SPEC-009). */
+const usedOfferIds = (order: StoredOrder): Set<string> =>
+  new Set([
+    ...order.offerIds,
+    ...order.requotes.flatMap((entry) => [entry.previous.offerId, entry.current.offerId]),
+  ]);
+
 /**
- * Edit: a new offer for every line through `requote`, with the approver's changes, so no line keeps
- * an old price, date or mandate. Each fresh offer is matched to its line by product and by the
- * product it replaces. An answer that does not fit the request is a fault of the offers side.
+ * Re-quote every line through `requote`, with the approver's changes when there are any (an edit)
+ * or none (an approval whose offers went stale), so no line keeps an old price, date or mandate.
+ * Each fresh offer is matched to its line by product and by the product it replaces, using the
+ * response's copy of the claims; `signedMismatch` then checks the signed tokens themselves. An
+ * answer that does not fit the request is a fault of the offers side.
  */
 const edited = async (
   offers: RequotePort,
@@ -324,10 +384,7 @@ const edited = async (
     return result.error === "BAD_REQUEST"
       ? upstream(order.orderId, "The offers refused a re-quote.", { code: result.error })
       : failure("UPSTREAM_FAILED", "The offers could not be re-quoted.");
-  const used = new Set([
-    ...order.offerIds,
-    ...order.requotes.flatMap((entry) => [entry.previous.offerId, entry.current.offerId]),
-  ]);
+  const used = usedOfferIds(order);
   const fresh = [...result.value.offers];
   const proposed: Proposed[] = [];
   for (const line of order.lines) {
@@ -406,9 +463,41 @@ const pairsOf = (proposed: Proposed[], lines: OrderLine[]): Pair[] => {
   });
 };
 
+/**
+ * What the signed claims of a re-quoted line contradict, or null. Lines are matched on the
+ * response's copy of the claims; what is stored and placed is the token, so the token must name the
+ * same product and replaced product as the line, carry the asked amount and date, have an offer ID
+ * the order never used, and agree with the offer ID the line carries.
+ */
+const signedMismatch = (
+  order: StoredOrder,
+  pairs: Pair[],
+  lines: OrderLine[],
+  changes: Changes,
+): string | null => {
+  // Every line is re-quoted, so a checked line without a pair kept an offer the order already holds.
+  if (pairs.length !== lines.length) return "an offer the order already holds";
+  const used = usedOfferIds(order);
+  for (const { previous, current } of pairs) {
+    if (previous === null) return "a line no line asked for";
+    const before = previous.claims;
+    const after = current.claims;
+    if (after.productId !== before.productId || after.replaces !== before.replaces)
+      return "another product than the line";
+    if (current.offerId !== after.offerId) return "an offer ID its token does not carry";
+    if (used.has(after.offerId)) return "an offer this order already used";
+    const notApplied = unapplied(previous, after, changes);
+    if (notApplied !== null) return `a token without ${notApplied}`;
+  }
+  return null;
+};
+
 /** Net price of one sales unit, deposits included, at full precision. */
 const unitCost = (claims: OfferClaims): number =>
   claims.unitPrice.net + claims.deposits / claims.quantity.value;
+
+/** Gross line total per sales unit (deposits included when the offer includes them). */
+const unitGross = (claims: OfferClaims): number => claims.total.gross / claims.quantity.value;
 
 const samePack = (previous: OfferClaims, current: OfferClaims): boolean => {
   const before = previous.product.perSalesUnit;
@@ -419,35 +508,26 @@ const samePack = (previous: OfferClaims, current: OfferClaims): boolean => {
 };
 
 /**
- * The products whose re-quoted price is above the one the approver saw: a higher net unit price
- * with deposits, or a different pack size, which changes what one unit buys.
- */
-const pricedUp = (pairs: Pair[]): string[] =>
-  pairs.flatMap(({ previous, current }) =>
-    previous !== null &&
-    (unitCost(current.claims) > unitCost(previous.claims) ||
-      !samePack(previous.claims, current.claims))
-      ? [current.claims.productId]
-      : [],
-  );
-
-/** Gross price of one sales unit, deposits included, at full precision. */
-const unitGross = (claims: OfferClaims): number => claims.total.gross / claims.quantity.value;
-
-/**
- * What a re-quote at approval made worse than the terms the approver approved, per product: a
- * higher net or gross unit price or another pack size (`price`), or a later delivery date, another
- * amount or unit, or a new shortfall (`availability`). Approval may place the order only when both
- * are empty and the order's gross total is not higher.
+ * The one verdict on a re-quote: per product, where the new offer is worse than the line the
+ * approver saw. `price`: a higher net unit price with deposits, a higher gross unit price, another
+ * pack size (it changes what one unit buys), or deposits that became unknown (an unknown amount is
+ * never cheaper). `availability`: a later delivery date, another amount or unit, or a new shortfall.
+ * An edit changes amounts on purpose, so it uses `price` only; an approval uses both.
  */
 const worsened = (pairs: Pair[]): { price: string[]; availability: string[] } => {
-  const price = new Set(pricedUp(pairs));
+  const price = new Set<string>();
   const availability = new Set<string>();
   for (const { previous, current } of pairs) {
     if (previous === null) continue;
     const before = previous.claims;
     const after = current.claims;
-    if (unitGross(after) > unitGross(before)) price.add(after.productId);
+    if (
+      unitCost(after) > unitCost(before) ||
+      unitGross(after) > unitGross(before) ||
+      !samePack(before, after) ||
+      (before.depositsIncluded !== false && after.depositsIncluded === false)
+    )
+      price.add(after.productId);
     if (
       after.deliveryDate > before.deliveryDate ||
       after.quantity.value !== before.quantity.value ||
@@ -460,9 +540,39 @@ const worsened = (pairs: Pair[]): { price: string[]; availability: string[] } =>
 };
 
 /**
- * Adds `reason` for `products`, so the order waits for the approver instead of being placed on
- * terms nobody approved: PRICE_CHANGED for a higher price (SPEC-011), AVAILABILITY_DIFFERS for a
- * later date or another amount.
+ * Each reason of an evaluation as "productId|reason", or "|reason" for a reason about the whole
+ * order: the same split auditOf writes as check_failed events, one per product.
+ */
+const reasonKeys = ({ evaluation, byProduct }: Evaluated): Set<string> => {
+  const keys = new Set<string>();
+  for (const reason of evaluation.reasons) {
+    const products = [...byProduct].filter(([, reasons]) => reasons.includes(reason));
+    if (products.length === 0) keys.add(`|${reason}`);
+    for (const [productId] of products) keys.add(`${productId}|${reason}`);
+  }
+  return keys;
+};
+
+/**
+ * The product and reason pairs the approver was shown: the check_failed events of the current
+ * proposal, which end with its last sent_to_approval. None found means none can be taken as seen.
+ */
+const shownReasonKeys = (order: StoredOrder): Set<string> => {
+  const keys = new Set<string>();
+  const end = order.audit.findLastIndex((event) => event.event === "sent_to_approval");
+  for (let index = end - 1; index >= 0; index -= 1) {
+    const event = order.audit[index];
+    if (event === undefined) break;
+    if (event.event === "check_failed" && event.reason !== undefined)
+      keys.add(`${event.productId ?? ""}|${event.reason}`);
+    else if (event.event !== "check_passed" && event.event !== "offer_verified") break;
+  }
+  return keys;
+};
+
+/**
+ * Adds `reason` for the products a re-quote or edit made worse (see `worsened`), so the order waits
+ * for the approver instead of being placed on terms nobody approved.
  */
 const withReason = (
   { evaluation, byProduct }: Evaluated,
@@ -487,24 +597,49 @@ const withReason = (
   };
 };
 
+const cents = (value: number): number => Math.round(value * 100) / 100;
+
+/** ", label before → after", or nothing when the value did not change. */
+const differs = (label: string, before: string, after: string, unit = ""): string =>
+  before === after ? "" : `, ${label} ${before} → ${after}${unit}`;
+
+const packOf = ({ product }: OfferClaims): string =>
+  product.perSalesUnit === null
+    ? "unknown"
+    : `${product.perSalesUnit.value} ${product.perSalesUnit.unit}`;
+
+const depositsOf = (claims: OfferClaims): string =>
+  claims.depositsIncluded === false ? "unknown" : `${claims.deposits} EUR`;
+
+/**
+ * The audit text of one changed line: amount, delivery date, net and gross unit price, deposits and
+ * pack, so the approver can see which term a re-quote or edit changed.
+ */
 const change = (previous: OfferClaims, current: OfferClaims): string => {
   const name =
     previous.productId === current.productId
       ? current.product.name
       : `${previous.product.name} → ${current.product.name}`;
   const amount =
-    previous.quantity.value === current.quantity.value
+    previous.quantity.value === current.quantity.value &&
+    previous.quantity.unit === current.quantity.unit
       ? `${current.quantity.value} ${current.quantity.unit}`
-      : `${previous.quantity.value} → ${current.quantity.value} ${current.quantity.unit}`;
-  const date =
-    previous.deliveryDate === current.deliveryDate
-      ? ""
-      : `, delivery ${previous.deliveryDate} → ${current.deliveryDate}`;
-  const price =
-    previous.unitPrice.net === current.unitPrice.net
-      ? ""
-      : `, unit price ${previous.unitPrice.net} → ${current.unitPrice.net} EUR net`;
-  return `${name}: ${amount}${date}${price}`;
+      : previous.quantity.unit === current.quantity.unit
+        ? `${previous.quantity.value} → ${current.quantity.value} ${current.quantity.unit}`
+        : `${previous.quantity.value} ${previous.quantity.unit} → ${current.quantity.value} ${current.quantity.unit}`;
+  return [
+    `${name}: ${amount}`,
+    differs("delivery", previous.deliveryDate, current.deliveryDate),
+    differs("unit price", `${previous.unitPrice.net}`, `${current.unitPrice.net}`, " EUR net"),
+    differs(
+      "unit price incl. VAT",
+      `${cents(unitGross(previous))}`,
+      `${cents(unitGross(current))}`,
+      " EUR",
+    ),
+    differs("deposits", depositsOf(previous), depositsOf(current)),
+    differs("pack", packOf(previous), packOf(current)),
+  ].join("");
 };
 
 /** Who changed the lines: the approver's edit or pick, or the server's re-quote at approval. */
@@ -568,14 +703,18 @@ const revision = (input: {
     alternatives: kept,
     mandateId: mandate?.mandateId ?? null,
     mandateVersion: mandate?.version ?? null,
-    // `auto` is stored as pending here; revise then sends it through commitPlacement, which places
-    // it or rejects it on credit or payment.
+    // An order to be placed is stored as pending here; its caller (revise for `auto`,
+    // approveWithRequote when the terms are the same or better) then sends it through
+    // commitPlacement, which places it or rejects it on credit or payment.
     status: evaluation.decision === "rejected" ? "rejected" : "pending_approval",
     reasons: evaluation.reasons,
     proposalVersion: order.proposalVersion + 1,
     total: { net: netTotal(claims), gross: grossTotal(claims) },
+    // A pending proposal has no decision yet. A rejection by the re-check after a re-quote is the
+    // server's, not the approver's approval, so it records none either.
     decision:
-      evaluation.decision === "needs_approval"
+      evaluation.decision === "needs_approval" ||
+      (changedBy === "requote" && evaluation.decision === "rejected")
         ? null
         : { action, next: null, note: null, by: principal.accountId, at },
     requotes: [...order.requotes, ...requotes],
@@ -606,11 +745,41 @@ const termsChanged = (principal: Principal, lines: OrderLine[]): boolean =>
   lines.some((line) => line.claims.paymentTerms !== principal.paymentTerms);
 
 /**
+ * The token checks of freshly re-quoted lines. The tokens are minted by the offers side, so any
+ * refusal (another mandate, customer or payment terms, a bad signature) is a fault there: logged
+ * and answered 502 with the order left as it was.
+ */
+const checkRequoted = async (
+  deps: ApprovalDeps,
+  principal: Principal,
+  order: StoredOrder,
+  proposal: Proposed[],
+  changes: Changes,
+  now: Date,
+): Promise<Result<{ checked: Checked; pairs: Pair[] }, DecisionError>> => {
+  const tokens = proposal.map((line) => line.token);
+  const checked = await checkTokens(deps, principal, tokens, [], now);
+  if (!checked.ok)
+    return checked.error.code === "UPSTREAM_FAILED"
+      ? failure("UPSTREAM_FAILED", checked.error.message)
+      : upstream(order.orderId, "A re-quoted offer failed the token checks.", {
+          code: checked.error.code,
+          message: checked.error.message,
+        });
+  if (isExpired(checked.value.lines, now))
+    return upstream(order.orderId, "The re-quote returned an offer that has already expired.");
+  const pairs = pairsOf(proposal, checked.value.lines);
+  const mismatch = signedMismatch(order, pairs, checked.value.lines, changes);
+  if (mismatch !== null) return upstream(order.orderId, `A re-quoted token carries ${mismatch}.`);
+  return ok({ checked: checked.value, pairs });
+};
+
+/**
  * Edit and pick_alternative (SPEC-011): the new lines go through every token check and the rules of
- * SPEC-009 again. An expired line is refused with 409 OFFER_EXPIRED and the order is unchanged. A
- * reason keeps the order pending as the next proposal, a rejecting reason rejects it, and none sends
- * it through commitPlacement. An edited line priced higher than before adds PRICE_CHANGED. An edit
- * can never skip a check.
+ * SPEC-009 again. A picked alternative that expired is refused with 409 OFFER_EXPIRED and the order
+ * is unchanged. A reason keeps the order pending as the next proposal, a rejecting reason rejects
+ * it, and none sends it through commitPlacement. An edited line priced higher than before (see
+ * `worsened`) adds PRICE_CHANGED. An edit can never skip a check.
  */
 const revise = async (
   deps: ApprovalDeps,
@@ -634,19 +803,31 @@ const revise = async (
   if (!proposal.ok) return proposal;
   const tokens = proposal.value.map((line) => line.token);
   const now = deps.now();
-  // The stored alternatives were checked when the order was placed; they are not checked again here.
-  const checked = await checkTokens(deps, principal, tokens, [], now);
-  if (!checked.ok)
-    return isEdit && checked.error.code === "OFFER_INVALID"
-      ? upstream(known.orderId, "A re-quoted offer failed verification.", {
-          message: checked.error.message,
-        })
-      : failure(checked.error.code, checked.error.message);
-  if (isExpired(checked.value.lines, now))
-    return failure("OFFER_EXPIRED", "An offer of this order has expired.");
+  let checked: Checked;
+  let pairs: Pair[];
+  if (isEdit) {
+    const requoted = await checkRequoted(
+      deps,
+      principal,
+      known,
+      proposal.value,
+      request.changes,
+      now,
+    );
+    if (!requoted.ok) return requoted;
+    ({ checked, pairs } = requoted.value);
+  } else {
+    // The stored alternatives were checked when the order was placed; they are not checked again.
+    const result = await checkTokens(deps, principal, tokens, [], now);
+    if (!result.ok) return failure(result.error.code, result.error.message);
+    if (isExpired(result.value.lines, now))
+      return failure("OFFER_EXPIRED", "An offer of this order has expired.");
+    checked = result.value;
+    pairs = pairsOf(proposal.value, checked.lines);
+  }
   const alternatives = pickable(
     known.alternatives.filter((line) => !tokens.includes(line.token)),
-    checked.value.mandate,
+    checked.mandate,
     now,
   );
   if (alternatives.dropped > 0)
@@ -654,25 +835,33 @@ const revise = async (
       orderId: known.orderId,
       dropped: alternatives.dropped,
     });
-  const pairs = pairsOf(proposal.value, checked.value.lines);
-  const checkedAgain = await evaluateChecked(deps, principal, checked.value, now);
+  const checkedAgain = await evaluateChecked(deps, principal, checked, now);
   const evaluated = isEdit
-    ? withReason(checkedAgain, "PRICE_CHANGED", pricedUp(pairs))
+    ? withReason(checkedAgain, "PRICE_CHANGED", worsened(pairs).price)
     : checkedAgain;
 
   return underLock(deps, principal.customer, async (tx) => {
     const order = await tx.find(principal.customer, known.orderId);
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (!isOpen(order, request.proposalVersion)) return changed();
-    const cutoff = await expireCutoff(tx, order, deps.now());
+    const lockNow = deps.now();
+    const cutoff = await expireCutoff(tx, order, lockNow);
     if (cutoff === "audit_invalid")
       return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
     if (cutoff === "expired") return changed();
-    const added = checked.value.lines
+    // The new lines were checked before the lock; one that lapsed while this waited is not placed.
+    if (lapsed(checked.lines, lockNow) && !lapsed(checked.lines, now))
+      return failure(
+        "OFFER_EXPIRED",
+        "An offer expired while the order was being changed. Try again.",
+      );
+    const added = checked.lines
       .map((line) => line.offerId)
       .filter((offerId) => !order.offerIds.includes(offerId));
     if (await tx.hasUsedOffers(principal.customer, added))
-      return failure("OFFER_INVALID", "An offer has already been used in an order.");
+      return isEdit
+        ? upstream(order.orderId, "The re-quote returned an offer already used in an order.")
+        : failure("OFFER_INVALID", "An offer has already been used in an order.");
     // `known` and `order` are the same pending proposal: every write that keeps an order pending
     // raises proposalVersion, every other write moves it out of pending, and isOpen checked it here.
     const proposed = revision({
@@ -681,28 +870,19 @@ const revise = async (
       action: request.decision,
       changedBy: "approver",
       pairs,
-      lines: checked.value.lines,
+      lines: checked.lines,
       alternatives,
-      mandate: checked.value.mandate,
+      mandate: checked.mandate,
       evaluated,
-      now,
+      now: lockNow,
     });
     // Verifies the stored chain, then appends the revision's events to it.
     const revised = await appendOrderAudit(proposed.order, proposed.events);
     if (!revised.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
-    let final = revised.value;
-    if (evaluated.evaluation.decision === "auto") {
-      const placed = await commitPlacement({
-        tx,
-        order: revised.value,
-        creditLimit: principal.creditLimit,
-        payment: deps.payment,
-        signReceipt: deps.signReceipt,
-        now,
-      });
-      if (!placed.ok) return failure("UPSTREAM_FAILED", "The order could not be finalized.");
-      final = placed.value;
-    }
+    const final =
+      evaluated.evaluation.decision === "auto"
+        ? await placeOrThrow(deps, principal, tx, revised.value, lockNow)
+        : revised.value;
     await guardedWrite(tx, final, request.proposalVersion);
     return ok(final);
   });
@@ -714,12 +894,14 @@ const needsRequote = (order: StoredOrder, mandate: Mandate, now: Date): boolean 
 
 /**
  * Approve with re-quote (SPEC-011): every line gets a new offer under the current mandate through
- * `requote`, and the new lines run every check of SPEC-009 again. Only terms the same or better than
- * the approved ones on every line (unit price net and gross, pack, amount, delivery date, no new
- * shortfall), a gross total not higher, and no reason the approver has not seen replace the lines
- * (`requoted`) and approve and place the order. Anything worse stays pending as the next proposal,
- * with PRICE_CHANGED or AVAILABILITY_DIFFERS (even when the old proposal already listed them), a
- * `Requote` per line and `proposalVersion` + 1, so the approver decides on the new terms.
+ * `requote`, and the new lines run the token checks and the rules of SPEC-009 again (not the live
+ * amount check: `validate` is not built). The new lines always replace the old ones (a `requoted`
+ * event and a `Requote` per line, `proposalVersion` + 1). The order is then approved and placed only
+ * when `worsened` finds nothing on any line and every product and reason pair of the new check was
+ * on the proposal the approver saw. Otherwise it stays pending, with PRICE_CHANGED or
+ * AVAILABILITY_DIFFERS on the lines that got worse (even when the old proposal already listed
+ * them) or with the new reason, and the approver decides on the new terms. A rejecting reason from
+ * the new check rejects it. A line offers no longer offers answers 409 or 400 and changes nothing.
  */
 const approveWithRequote = async (
   deps: ApprovalDeps,
@@ -727,6 +909,8 @@ const approveWithRequote = async (
   known: StoredOrder,
   request: Extract<DecideApprovalRequest, { decision: "approve" }>,
 ): Promise<Result<StoredOrder, DecisionError>> => {
+  // A stale or decided proposal is refused before anything is asked of offers.
+  if (!isOpen(known, request.proposalVersion)) return changed();
   if (termsChanged(principal, known.lines))
     return failure(
       "CONFLICT",
@@ -734,90 +918,73 @@ const approveWithRequote = async (
     );
   const proposal = await edited(deps.offers, known, []);
   if (!proposal.ok) return proposal;
-  const tokens = proposal.value.map((line) => line.token);
   const now = deps.now();
-  const checked = await checkTokens(deps, principal, tokens, [], now);
-  if (!checked.ok)
-    return checked.error.code === "OFFER_INVALID"
-      ? upstream(known.orderId, "A re-quoted offer failed verification.", {
-          message: checked.error.message,
-        })
-      : failure(checked.error.code, checked.error.message);
-  if (isExpired(checked.value.lines, now))
-    return upstream(known.orderId, "The re-quote returned an offer that has already expired.");
-  const alternatives = pickable(known.alternatives, checked.value.mandate, now);
-  const pairs = pairsOf(proposal.value, checked.value.lines);
-  // The approver approved these exact terms. Worse terms always come back to them, whatever reasons
-  // the old proposal already showed: a higher price than they saw is never approved implicitly.
+  const requoted = await checkRequoted(deps, principal, known, proposal.value, [], now);
+  if (!requoted.ok) return requoted;
+  const { checked, pairs } = requoted.value;
+  const alternatives = pickable(known.alternatives, checked.mandate, now);
+  // Worse terms always come back to the approver, whatever reasons the old proposal already showed:
+  // a higher price or a later date than they saw is never approved implicitly.
   const worse = worsened(pairs);
-  const totalUp =
-    grossTotal(checked.value.lines.map((line) => line.claims)) > known.total.gross
-      ? checked.value.lines.map((line) => line.claims.productId)
-      : [];
   const evaluated = withReason(
-    withReason(await evaluateChecked(deps, principal, checked.value, now), "PRICE_CHANGED", [
-      ...new Set([...worse.price, ...totalUp]),
-    ]),
+    withReason(await evaluateChecked(deps, principal, checked, now), "PRICE_CHANGED", worse.price),
     "AVAILABILITY_DIFFERS",
     worse.availability,
   );
-  const { evaluation } = evaluated;
+  const shown = shownReasonKeys(known);
   const approvable =
-    evaluation.decision !== "rejected" &&
+    evaluated.evaluation.decision !== "rejected" &&
     worse.price.length === 0 &&
     worse.availability.length === 0 &&
-    totalUp.length === 0 &&
-    evaluation.reasons.every((reason) => known.reasons.includes(reason));
+    [...reasonKeys(evaluated)].every((key) => shown.has(key));
 
   return underLock(deps, principal.customer, async (tx) => {
     const order = await tx.find(principal.customer, known.orderId);
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (!isOpen(order, request.proposalVersion)) return changed();
-    const cutoff = await expireCutoff(tx, order, deps.now());
+    const lockNow = deps.now();
+    const cutoff = await expireCutoff(tx, order, lockNow);
     if (cutoff === "audit_invalid")
       return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
     if (cutoff === "expired") return changed();
-    const added = checked.value.lines
+    // The fresh offers were checked before the lock; one that lapsed while this waited is not placed.
+    if (lapsed(checked.lines, lockNow) && !lapsed(checked.lines, now))
+      return failure(
+        "OFFER_EXPIRED",
+        "A re-quoted offer expired while the order was being approved. Approve again.",
+      );
+    const added = checked.lines
       .map((line) => line.offerId)
       .filter((offerId) => !order.offerIds.includes(offerId));
     if (await tx.hasUsedOffers(principal.customer, added))
-      return failure("OFFER_INVALID", "An offer has already been used in an order.");
+      return upstream(order.orderId, "The re-quote returned an offer already used in an order.");
     const proposed = revision({
       principal,
       order,
       action: "approve",
       changedBy: "requote",
       pairs,
-      lines: checked.value.lines,
+      lines: checked.lines,
       alternatives,
-      mandate: checked.value.mandate,
+      mandate: checked.mandate,
       evaluated,
-      now,
+      now: lockNow,
     });
-    const requoted = await appendOrderAudit(proposed.order, proposed.events);
-    if (!requoted.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
-    let final = requoted.value;
+    const revised = await appendOrderAudit(proposed.order, proposed.events);
+    if (!revised.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+    let final = revised.value;
     if (approvable) {
-      const at = now.toISOString();
+      const at = lockNow.toISOString();
       const approved = await appendOrderAudit(
         {
-          ...requoted.value,
+          ...revised.value,
           decision: { action: "approve", next: null, note: null, by: principal.accountId, at },
         },
         [approverEvent(at, "approved")],
       );
       if (!approved.ok)
         return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
-      const placed = await commitPlacement({
-        tx,
-        order: approved.value,
-        creditLimit: principal.creditLimit,
-        payment: deps.payment,
-        signReceipt: deps.signReceipt,
-        now,
-      });
-      if (!placed.ok) return failure("UPSTREAM_FAILED", "The order could not be finalized.");
-      final = placed.value;
+      final = await placeOrThrow(deps, principal, tx, approved.value, lockNow);
     }
     await guardedWrite(tx, final, request.proposalVersion);
     return ok(final);
@@ -825,9 +992,10 @@ const approveWithRequote = async (
 };
 
 /**
- * A human decision on a pending order. Approve and remember answers NOT_IMPLEMENTED. The decision
- * is written only if the order is still pending at the request's proposalVersion, under the
- * customer's placement lock; otherwise everything written in that transaction rolls back.
+ * A human decision on a pending order. Approve and remember answers NOT_IMPLEMENTED. An approval
+ * whose offers expired or were made under another mandate re-quotes first (approveWithRequote). The
+ * decision is written only if the order is still pending at the request's proposalVersion, under
+ * the customer's placement lock; otherwise everything written in that transaction rolls back.
  */
 export const decide = async (
   deps: ApprovalDeps,
@@ -852,12 +1020,13 @@ export const decide = async (
       return approveWithRequote(deps, principal, known, request);
   }
 
-  const now = deps.now();
   return underLock(deps, principal.customer, async (tx) => {
     const order = await tx.find(principal.customer, orderId);
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (!isOpen(order, request.proposalVersion)) return changed();
-    const cutoff = await expireCutoff(tx, order, deps.now());
+    // The clock is read under the lock, so an offer that expired while this waited is caught.
+    const now = deps.now();
+    const cutoff = await expireCutoff(tx, order, now);
     if (cutoff === "audit_invalid")
       return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
     if (cutoff === "expired") return changed();

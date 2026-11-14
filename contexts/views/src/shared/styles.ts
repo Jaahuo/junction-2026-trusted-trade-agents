@@ -14,6 +14,10 @@ const tokens = css`
     --color-button-text: #003747;
     --color-light-purple-aimo: #eee8f5;
     --color-yellow-aimo-soft: #fff3b0;
+    /* The Valio sunrise gradient of the loading shimmer. */
+    --color-sunrise-lilac: #d9d2f5;
+    --color-sunrise-pink: #e0a6f1;
+    --color-sunrise-amber: #e8b57a;
     --color-text: #23282d;
     --color-text-secondary: #555759;
     --color-text-on-brand: #ffffff;
@@ -193,14 +197,27 @@ export const base = css`
   .message.danger {
     color: var(--color-text-danger);
   }
-  .spinner {
-    display: inline-block;
-    width: 1rem;
-    height: 1rem;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
-    border-radius: var(--radius-full);
-    animation: spin 0.8s linear infinite;
+  /* Loading: a shimmering Valio sunrise gradient, no spinners. Always aria-hidden. One
+     gradient, fixed to the viewport and repeating, moves across every shimmer at once, so the
+     bars stay in step and the movement never jumps. */
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      var(--color-sunrise-lilac) 0%,
+      var(--color-sunrise-pink) 30%,
+      var(--color-sunrise-amber) 50%,
+      var(--color-sunrise-pink) 70%,
+      var(--color-sunrise-lilac) 100%
+    );
+    background-size: 200vw 100%;
+    background-repeat: repeat;
+    background-attachment: fixed;
+    animation: shimmer 3s linear infinite;
+  }
+  /* A shimmer bar along the bottom of a header or strip while something loads. */
+  .load-bar {
+    display: block;
+    height: 6px;
   }
   .empty {
     padding: var(--spacing-2xl) var(--spacing-xl);
@@ -212,9 +229,19 @@ export const base = css`
     color: var(--color-link);
     font-weight: 600;
   }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
+  /* Exactly one gradient width per loop, so the end matches the start. */
+  @keyframes shimmer {
+    from {
+      background-position: 0 0;
     }
+    to {
+      background-position: 200vw 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer {
+      animation: none;
+    }
+  }
   }
 `;

@@ -37,9 +37,10 @@ export abstract class ViewElement<E extends ViewEntry> extends LitElement {
   override render() {
     const state = this.state;
     if (state.kind === "loading")
-      return html`<p class="secondary body-small" part="loading">
-        <span class="spinner" role="status" aria-label="Loading"></span> Loading…
-      </p>`;
+      return html`<div part="loading">
+        <p class="secondary body-small" role="status">Loading…</p>
+        <span class="shimmer load-bar" aria-hidden="true"></span>
+      </div>`;
     if (state.kind === "empty")
       return html`<div class="empty" part="empty">
         <p class="strong">Nothing to show</p>

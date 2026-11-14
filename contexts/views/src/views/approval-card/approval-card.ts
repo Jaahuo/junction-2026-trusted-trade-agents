@@ -675,7 +675,7 @@ export class ApprovalCard extends LitElement {
   declare private picked: string | null;
   /** True from Confirm with changed amounts until the new quote arrives. */
   declare private requoting: boolean;
-  /** True from Reject until the decision comes back: the spinner sits on Reject. */
+  /** True from Reject until the decision comes back: Reject says "Rejecting…". */
   declare private rejecting: boolean;
 
   constructor() {
@@ -1211,7 +1211,7 @@ export class ApprovalCard extends LitElement {
     const gettingOffer =
       this.busy && this.requoting
         ? html`<p class="getting strong" role="status">
-            <span class="spinner"></span>Getting a new offer and ordering…
+            Getting a new offer and placing the order…
           </p>`
         : nothing;
     const confirm = () => {
@@ -1242,11 +1242,6 @@ export class ApprovalCard extends LitElement {
           aria-busy=${this.busy && !this.rejecting ? "true" : "false"}
           @click=${() => (this.busy ? undefined : confirm())}
         >
-          ${
-            this.busy && !this.requoting && !this.rejecting
-              ? html`<span class="spinner" role="status" aria-label="Sending"></span>`
-              : nothing
-          }
           ${this.approveLabel(order)}
         </button>
         <button
@@ -1264,11 +1259,7 @@ export class ApprovalCard extends LitElement {
             });
           }}
         >
-          ${
-            this.busy && this.rejecting
-              ? html`<span class="spinner" role="status" aria-label="Rejecting"></span>Rejecting…`
-              : "Reject"
-          }
+          ${this.busy && this.rejecting ? "Rejecting…" : "Reject"}
         </button>
       </div>
       ${
@@ -1558,6 +1549,11 @@ export class ApprovalCard extends LitElement {
       order.status !== "pending_approval" ? this.decidedBody(order) : this.pendingBody(order);
     return html`<article class="card" part="card">
       ${this.header(order)}
+      ${
+        this.busy && this.requoting
+          ? html`<span class="shimmer load-bar" aria-hidden="true"></span>`
+          : nothing
+      }
       <div class="body">${body}</div>
       ${this.details(order)}
     </article>`;

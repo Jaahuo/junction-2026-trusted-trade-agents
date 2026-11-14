@@ -142,7 +142,7 @@ The exact shapes are in [specs](specs.md); the examples below are illustrative.
 
 ### Search request
 
-The host agent fills these fields from the user's sentence. Hard constraints exclude products, and soft constraints only affect ranking. Standing constraints from the mandate are added by the server.
+The host agent fills these fields from the user's sentence. A hard constraint that a product contradicts excludes the product, and one with missing data sends the order to approval. Soft constraints only affect ranking. Standing constraints from the mandate are added by the server. The first build supports one hard constraint attribute, lactose-free, and refuses a request with any other hard constraint.
 
 ```json
 {

@@ -160,6 +160,7 @@ export const TOOL_INPUT = {
 
 - `DecideApprovalInput` is flat because a tool input schema is one object. The MCP binding drops `orderId`, keeps the fields that belong to `decision`, and the REST route validates the result as `DecideApprovalRequest`; a field that does not belong to the decision → 400.
 - No tool input has a customer, account, agent, password or passcode field.
+- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not in `HARD_CONSTRAINT_VALUES` for that attribute, → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` (`standingConstraints.hard`) and the `facts` route.
 - Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
 
 Verification: a contract test that `ROUTES` keys, tools, `TOOL_INPUT` and `TOOL_OUTPUT` match this table and that every `TOOL_INPUT` schema is a JSON object schema.
@@ -174,9 +175,15 @@ export interface Quantity {
   unit: string;
 }
 export type MatchState = "confirmed" | "contradicted" | "unknown";
+export const HARD_CONSTRAINT_ATTRIBUTES = ["lactose"] as const; // attributes with a data mapping below
+export type HardConstraintAttribute = (typeof HARD_CONSTRAINT_ATTRIBUTES)[number];
+export const HARD_CONSTRAINT_VALUES = { lactose: ["free_from"] } as const satisfies Record<
+  HardConstraintAttribute,
+  readonly string[]
+>;
 export interface HardConstraint {
-  attribute: string;
-  is: string;
+  attribute: HardConstraintAttribute;
+  is: (typeof HARD_CONSTRAINT_VALUES)[HardConstraintAttribute][number];
 } // { attribute: "lactose", is: "free_from" }
 export interface SoftConstraint {
   attribute: string;
@@ -230,11 +237,13 @@ export interface FactsResult {
   products: ProductFacts[];
   unknown: string[];
 }
-export const ALLERGEN_ATTRIBUTES = ["lactose", "gluten"] as const;
+export const ALLERGEN_ATTRIBUTES = ["lactose"] as const; // hard constraint attributes gated by allergenData
 ```
 
 - The server merges the mandate's standing constraints into the request: hard = request ∪ mandate, soft = request ∪ mandate. `SearchResult.constraints` returns the merged set.
-- Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. An unsupported attribute → `unknown`. Missing data is never `confirmed`.
+- Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the values in `HARD_CONSTRAINT_VALUES`. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
+- Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. Missing data is never `confirmed`.
+- A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
 - A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by soft matches, then reliability.
 - Quantity: consumer-unit volume × units per sales unit gives `perSalesUnit`; `GRM` converts to `KGM`; the order quantity rounds up to a multiple of `allowedLotSize`. No volume → `orderQuantity` and `equals` are null.
 - The index loads once per process; parallel first requests share one load.
@@ -245,7 +254,9 @@ Data meaning:
 - `co2PerKg`: the estimated average kg CO2-eq per kg for the product's group, not a measurement of the product; `null` when absent.
 - Nutrition and allergen data are often missing for fresh produce. A missing value is `unknown`, never "free from".
 
-Failure paths: empty `terms` → 400.
+Failure paths: empty `terms` → 400. An unsupported hard constraint attribute or value → 400 (SPEC-003).
+
+Verification: a request with an unsupported hard constraint attribute gets 400 on search, offers and mandate registration.
 
 ## SPEC-005 Wholesaler adapter
 
@@ -434,12 +445,13 @@ Then the order is stored with every reason collected:
 1. No current mandate for the principal's agent → `MANDATE_INVALID`.
 2. Expiry: `cutoffAt` passed → `CUTOFF_PASSED` with `nextDeliveryDate`; else `exp` passed → `OFFER_EXPIRED`. Cut-off takes precedence.
 3. Fixed guardrails: a sales block or lost date from `validate` → `SALES_BLOCKED` or `CUTOFF_PASSED`. The summed quantity of a product over 10 × the median of that product's order history (sales units, SPEC-010) or, with no history, over 2000 std units (no conversion → over) → `QUANTITY_UNUSUAL`. Unconfirmed stock over 500 std units for a product (no conversion → over) → `UNCONFIRMED_STOCK`.
-4. Buyer limits: order gross total over `maxOrderTotal` → `SPEND_OVER_LIMIT`; category not listed → `CATEGORY_NOT_ALLOWED`; `replaces` set and policy not `auto` → `SUBSTITUTION`; no order history row for the product (SPEC-010) and `newProducts: ask` → `NEW_PRODUCT`; reliability below minimum → `RELIABILITY_BELOW_MIN`, missing with `ifNoData: ask` → `UNCONFIRMED_DATA`; CO2 above maximum → `CO2_ABOVE_MAX`, missing with ask → `UNCONFIRMED_DATA`; a merged hard constraint on an allergen attribute with `unknown` match and `allergenData.ifNoData: ask` → `UNCONFIRMED_ALLERGEN`; terms policy `ask` → `PAYMENT_TERMS`; `deliveryDate` after `requestedDate` or `shortfall` set → `AVAILABILITY_DIFFERS`.
+4. Buyer limits: order gross total over `maxOrderTotal` → `SPEND_OVER_LIMIT`; category not listed → `CATEGORY_NOT_ALLOWED`; `replaces` set and policy not `auto` → `SUBSTITUTION`; no order history row for the product (SPEC-010) and `newProducts: ask` → `NEW_PRODUCT`; reliability below minimum → `RELIABILITY_BELOW_MIN`, missing with `ifNoData: ask` → `UNCONFIRMED_DATA`; CO2 above maximum → `CO2_ABOVE_MAX`, missing with ask → `UNCONFIRMED_DATA`; a merged hard constraint on an attribute in `ALLERGEN_ATTRIBUTES` whose match in the offer is `unknown` and `allergenData.ifNoData: ask` → `UNCONFIRMED_ALLERGEN`; a merged hard constraint whose match is `contradicted` or missing → `UNCONFIRMED_ALLERGEN` whatever the setting; terms policy `ask` → `PAYMENT_TERMS`; `deliveryDate` after `requestedDate` or `shortfall` set → `AVAILABILITY_DIFFERS`.
 5. Result: any reject reason → `rejected`; else any approval reason → `pending_approval`; else `commitPlacement` (SPEC-010), which checks credit.
 
+- Invariant: an order with any hard-constraint match that is not `confirmed` is never placed automatically, except an `unknown` match under `allergenData.ifNoData: auto`.
 - Steps 1-5 are `evaluate`, a pure function. `precheck` runs R1, R3-R5 (same errors, but no `order_refused` record) and `evaluate`, and returns the decision and reasons. It never calls `commitPlacement`, writes nothing and does not check credit. Only `place_order` and approval call `commitPlacement`.
 
-Verification: one rule test per reason; a test that all reasons are listed; one test per R step; a test that `precheck` leaves orders, credit and audit unchanged.
+Verification: one rule test per reason; a test that all reasons are listed; one test per R step; a test that `precheck` leaves orders, credit and audit unchanged; a test that an offer whose hard-constraint match is `unknown` is never placed automatically unless the mandate allows it (`allergenData.ifNoData: auto`).
 
 ## SPEC-010 Orders and placement
 

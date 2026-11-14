@@ -15,20 +15,6 @@
     "contexts/mandates": {
       "ignoreDependencies": ["@app/kernel", "drizzle-orm", "zod"]
     },
-    "contexts/mcp": {
-      "ignoreDependencies": [
-        "@app/contract",
-        "@app/kernel",
-        "@ctx/catalog",
-        "@ctx/mandates",
-        "@ctx/offers",
-        "@ctx/orders",
-        "@elysia/eden",
-        "@modelcontextprotocol/ext-apps",
-        "@modelcontextprotocol/sdk",
-        "zod"
-      ]
-    },
     "contexts/offers": {
       "ignoreDependencies": [
         "@app/kernel",

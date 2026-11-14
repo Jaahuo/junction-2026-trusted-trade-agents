@@ -1,2 +1,2 @@
 # Project hooks require Worktrunk approval. Install before initializing this worktree.
-pre-start = "[ -e .env ] || [ ! -f '{{ primary_worktree_path }}/.env' ] || (umask 077 && cp '{{ primary_worktree_path }}/.env' .env); bun install && bun scripts/runtime.ts setup"
+pre-start = "[ -e .env ] || [ ! -f {{ primary_worktree_path }}/.env ] || (umask 077 && cp {{ primary_worktree_path }}/.env .env); bun install && bun scripts/runtime.ts setup"

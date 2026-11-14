@@ -7,16 +7,32 @@ export interface MandateOwner {
   readonly agent: string;
 }
 
+/** Signs a mandate as the buyer: an ES256 compact JWS whose payload is exactly the mandate. */
+export type MandateSigner = (mandate: Mandate) => Promise<string>;
+
+interface SignedMandate {
+  readonly mandate: Mandate;
+  readonly jws: string;
+}
+
+export interface Registration {
+  readonly stored: StoredMandate;
+  /** True when the operationId was registered before and the stored mandate is returned unchanged. */
+  readonly replayed: boolean;
+}
+
 export interface MandateStore {
   /**
-   * In one transaction, serialised per owner: revokes the owner's active mandate and stores
-   * the mandate that `next` builds from the highest stored version (0 when none).
+   * In one transaction, serialised per owner: returns the mandate stored under `operationId` when
+   * there is one; otherwise revokes the owner's active mandate and stores the signed mandate that
+   * `next` builds from the highest stored version (0 when none).
    */
   replaceActive(
     owner: MandateOwner,
-    next: (previousVersion: number) => Mandate,
+    operationId: string | undefined,
+    next: (previousVersion: number) => Promise<SignedMandate>,
     registeredAt: Date,
-  ): Promise<StoredMandate>;
+  ): Promise<Registration>;
   findActive(owner: MandateOwner): Promise<StoredMandate | null>;
   /** Marks the owner's mandate revoked and returns it; null when the owner has no such mandate. */
   revoke(owner: MandateOwner, mandateId: string): Promise<StoredMandate | null>;
@@ -32,15 +48,19 @@ const ownerOf = (principal: Principal): MandateOwner => ({
 const newMandateId = (): string => `mnd_${crypto.randomUUID()}`;
 
 export const registerMandate = (
-  store: MandateStore,
+  ports: { store: MandateStore; sign: MandateSigner },
   principal: Principal,
   request: RegisterMandateRequest,
   now: Date,
   mandateId: string = newMandateId(),
-): Promise<StoredMandate> =>
-  store.replaceActive(
+): Promise<Registration> =>
+  ports.store.replaceActive(
     ownerOf(principal),
-    (previousVersion) => buildMandate({ principal, request, mandateId, previousVersion, now }),
+    request.operationId,
+    async (previousVersion) => {
+      const mandate = buildMandate({ principal, request, mandateId, previousVersion, now });
+      return { mandate, jws: await ports.sign(mandate) };
+    },
     now,
   );
 

@@ -167,7 +167,7 @@ const OfferRefsSchema = z.array(OfferRefSchema).min(1).max(20);
 
 export const PlaceOrderRequestSchema = z.strictObject({
   offers: OfferRefsSchema,
-  alternatives: z.array(OfferRefSchema).optional(),
+  alternatives: z.array(OfferRefSchema).max(20).optional(),
   originalRequest: z.string().optional(),
   idempotencyKey: z.string().min(1),
 });

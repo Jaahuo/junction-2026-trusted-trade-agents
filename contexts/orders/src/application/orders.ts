@@ -63,54 +63,64 @@ interface Checked {
 /** An offer reference is an offer ID (`off_…`); anything else is treated as a token. */
 const isOfferId = (ref: string): boolean => /^off_[\w-]+$/.test(ref);
 
+/** An offer named by ID, with the token issued for it, or an offer named by its token. */
+interface Resolved {
+  token: string;
+  byId: boolean;
+}
+
+const unknownOffer = (ref: string): Refusal =>
+  refusal("OFFER_INVALID", `Offer ${ref} is unknown or expired; request new offers.`);
+
 /**
- * Replaces each offer ID with the token issued for it (SPEC-009 R3). An ID the offers service does not
- * know for the principal, including an expired or another customer's offer, is OFFER_INVALID.
+ * Replaces each offer ID with the token issued for it (SPEC-009 R3). An ID the offers service does
+ * not return, including an expired offer, is OFFER_INVALID.
  */
 const resolveRefs = async (
   issuedOffers: IssuedOfferPort,
   refs: string[],
-): Promise<Result<string[], Refusal>> => {
+): Promise<Result<Resolved[], Refusal>> => {
   const ids = refs.filter(isOfferId);
-  if (ids.length === 0) return ok(refs);
+  if (ids.length === 0) return ok(refs.map((token) => ({ token, byId: false })));
   const issued = await issuedOffers.issued([...new Set(ids)]);
   if (!issued.ok) return err(refusal("UPSTREAM_FAILED", "The offers could not be looked up."));
-  const tokens: string[] = [];
+  const resolved: Resolved[] = [];
   for (const ref of refs) {
-    const token = isOfferId(ref) ? issued.value.get(ref) : ref;
-    if (token === undefined)
-      return err(
-        refusal("OFFER_INVALID", `Offer ${ref} is unknown or expired; request new offers.`),
-      );
-    tokens.push(token);
+    if (!isOfferId(ref)) {
+      resolved.push({ token: ref, byId: false });
+      continue;
+    }
+    const token = issued.value.get(ref);
+    if (token === undefined) return err(unknownOffer(ref));
+    resolved.push({ token, byId: true });
   }
-  return ok(tokens);
+  return ok(resolved);
 };
 
-const verifyAll = async (
-  verifyOffer: OfferVerifier,
-  tokens: string[],
+/**
+ * Verifies each offer. An offer named by ID must also be this principal's: the lookup goes through an
+ * internal call that does not carry the caller, so orders checks the owner itself (SPEC-009 R3).
+ */
+const verifyRefs = async (
+  deps: OrderDeps,
+  principal: Principal,
+  refs: string[],
   now: Date,
 ): Promise<Result<OrderLine[], Refusal>> => {
+  const resolved = await resolveRefs(deps.issuedOffers, refs);
+  if (!resolved.ok) return resolved;
   const lines: OrderLine[] = [];
-  for (const token of tokens) {
-    const verified = await verifyOffer(token, now);
+  for (const [index, { token, byId }] of resolved.value.entries()) {
+    const verified = await deps.verifyOffer(token, now);
     let claims: OfferClaims;
     if (verified.ok) claims = verified.value;
     else if (verified.error.code === "OFFER_EXPIRED") claims = verified.error.claims;
     else return err(refusal("OFFER_INVALID", "An offer token failed verification."));
+    if (byId && (claims.customer !== principal.customer || claims.agentId !== principal.agentId))
+      return err(unknownOffer(refs[index] ?? claims.offerId));
     lines.push({ offerId: claims.offerId, token, claims });
   }
   return ok(lines);
-};
-
-const verifyRefs = async (
-  deps: OrderDeps,
-  refs: string[],
-  now: Date,
-): Promise<Result<OrderLine[], Refusal>> => {
-  const tokens = await resolveRefs(deps.issuedOffers, refs);
-  return tokens.ok ? verifyAll(deps.verifyOffer, tokens.value, now) : tokens;
 };
 
 /** SPEC-009 R3-R5, plus the payment terms of SPEC-002. Neither precheck nor place_order goes past a refusal. */
@@ -124,9 +134,9 @@ const checkTokens = async (
   const all = [...offers, ...alternatives];
   if (new Set(all).size !== all.length)
     return err(refusal("OFFER_INVALID", "The request repeats an offer."));
-  const lines = await verifyRefs(deps, offers, now);
+  const lines = await verifyRefs(deps, principal, offers, now);
   if (!lines.ok) return lines;
-  const alternativeLines = await verifyRefs(deps, alternatives, now);
+  const alternativeLines = await verifyRefs(deps, principal, alternatives, now);
   if (!alternativeLines.ok) return alternativeLines;
 
   const claims = [...lines.value, ...alternativeLines.value].map((line) => line.claims);

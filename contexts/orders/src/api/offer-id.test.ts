@@ -59,14 +59,41 @@ test("an unknown, expired or other customer's offer id is refused with OFFER_INV
     expect(await counts(db)).toEqual({ orders: 0, refusals: 1, history: 0 });
   }));
 
-test("an issued token for another customer is still refused", async () =>
+for (const [owner, changes] of [
+  ["customer", { customer: "cust_other" }],
+  ["agent", { agentId: "agent_other" }],
+] as const) {
+  test(`an offer id whose token names another ${owner} is refused with OFFER_INVALID`, async () =>
+    withDatabase(async (db) => {
+      // The lookup is an internal call without the caller, so orders checks the owner itself.
+      const { app, issued, sign } = await mount(db);
+      const id = offerId();
+      issued.set(id, await sign({ offerId: id, ...changes }));
+      const response = await place(app, [id]);
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toBe("OFFER_INVALID");
+      expect(await counts(db)).toEqual({ orders: 0, refusals: 1, history: 0 });
+    }));
+}
+
+test("an offer id and its own token in one request repeat the offer", async () =>
   withDatabase(async (db) => {
     const { app, issued, sign } = await mount(db);
     const id = offerId();
-    issued.set(id, await sign({ offerId: id, customer: "cust_other" }));
-    const response = await place(app, [id]);
+    const token = await sign({ offerId: id });
+    issued.set(id, token);
+    const response = await place(app, [id, token]);
     expect(response.status).toBe(400);
-    expect((await counts(db)).orders).toBe(0);
+    expect(await errorOf(response)).toBe("OFFER_INVALID");
+  }));
+
+test("more than 20 alternatives is a bad request, not an upstream failure", async () =>
+  withDatabase(async (db) => {
+    const { app, sign } = await mount(db);
+    const alternatives = Array.from({ length: 21 }, offerId);
+    const response = await place(app, [await sign()], { alternatives });
+    expect(response.status).toBe(400);
+    expect(await errorOf(response)).toBe("BAD_REQUEST");
   }));
 
 test("a full token still works", async () =>

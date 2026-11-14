@@ -11,13 +11,15 @@ interface Entry {
 
 /** Sweeps expired entries once per this many new ones, so the map holds about the live offers. */
 const SWEEP_EVERY = 256;
+/** A bound on memory: past it, the oldest offer is forgotten and its ID gives OFFER_INVALID. */
+const MAX_ISSUED = 10_000;
 
 /**
  * The tokens this process signed, by offer ID, until they expire (SPEC-006 `issued`). An agent can
  * then name an offer by its short ID instead of copying the token. Process memory: a restart forgets
  * the IDs, and the agent requests new offers or sends the token.
  */
-export function createIssuedOffers(): IssuedOffers {
+export function createIssuedOffers(max = MAX_ISSUED): IssuedOffers {
   const entries = new Map<string, Entry>();
   let added = 0;
   const sweep = (nowSeconds: number) => {
@@ -33,6 +35,11 @@ export function createIssuedOffers(): IssuedOffers {
       });
       added += 1;
       if (added % SWEEP_EVERY === 0) sweep(now.getTime() / 1000);
+      // A Map iterates in insertion order, so the first key is the oldest offer.
+      for (const oldest of entries.keys()) {
+        if (entries.size <= max) break;
+        entries.delete(oldest);
+      }
     },
     find(principal, offerIds, now) {
       const nowSeconds = now.getTime() / 1000;

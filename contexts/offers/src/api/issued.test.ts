@@ -81,6 +81,19 @@ test("the store answers only the customer and agent the offer was issued to", ()
   expect(store.find({ customer, agentId: "agent_other" }, ["off_a"], now)).toEqual([]);
 });
 
+test("past its bound the store forgets the oldest offer first", () => {
+  const store = createIssuedOffers(2);
+  const now = new Date("2026-11-16T08:00:00Z");
+  const exp = now.getTime() / 1000 + 600;
+  const { customer, agentId } = DEMO_ACCOUNT;
+  for (const offerId of ["off_1", "off_2", "off_3"])
+    store.remember(offerId, { ...fixtures.offerClaims, offerId, customer, agentId, exp }, now);
+  expect(store.find({ customer, agentId }, ["off_1", "off_2", "off_3"], now)).toEqual([
+    { offerId: "off_2", token: "off_2" },
+    { offerId: "off_3", token: "off_3" },
+  ]);
+});
+
 test("issued refuses an empty id list", async () => {
   const { app } = setup();
   expect((await postJson(app, "/issued", { offerIds: [] })).status).toBe(400);

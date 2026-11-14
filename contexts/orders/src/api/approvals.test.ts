@@ -223,23 +223,16 @@ test("approve with another mandateId or version gives 409 STALE_OFFER and the or
     );
   }));
 
-test("edit, pick_alternative and approve_and_remember give 501", async () =>
+test("approve_and_remember gives 501", async () =>
   withDatabase(async (db) => {
     const { app, sign } = await mount(db);
     const pending = await pendingOrder(app, sign(overLimit));
-    const bodies = [
-      {
-        decision: "edit",
-        changes: [{ productId: fixtures.offerClaims.productId, deliverBy: "2026-11-21" }],
-      },
-      { decision: "pick_alternative", offerId: "off_other" },
-      { decision: "approve_and_remember", maxOrderTotal: 2000 },
-    ];
-    for (const body of bodies) {
-      const response = await decide(app, pending, body);
-      expect(response.status).toBe(501);
-      expect(await errorOf(response)).toBe("NOT_IMPLEMENTED");
-    }
+    const response = await decide(app, pending, {
+      decision: "approve_and_remember",
+      maxOrderTotal: 2000,
+    });
+    expect(response.status).toBe(501);
+    expect(await errorOf(response)).toBe("NOT_IMPLEMENTED");
     const unknown = await decide(app, pending, { decision: "approve", extra: true });
     expect(unknown.status).toBe(400);
     expect((await orderOf(await call(app, "GET", `/${pending.orderId}`))).status).toBe(

@@ -101,7 +101,7 @@ const earlierBound = (price: PriceQuote, quote: AvailabilityQuote): ExpiryReason
     ? "NO_DELIVERY_DATE"
     : "NO_PRICE";
 
-async function mapLimit<T, R>(
+export async function mapLimit<T, R>(
   items: readonly T[],
   limit: number,
   run: (item: T) => Promise<R>,

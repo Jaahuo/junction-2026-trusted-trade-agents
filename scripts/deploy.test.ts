@@ -146,6 +146,7 @@ test("the deploy skips the chat host until the inference key is set", () => {
     adminEmail: "admin@example.com",
     adminPassword: "admin-password",
     recipePermission: "False",
+    elevenLabsKey: "",
   });
 });
 
@@ -174,6 +175,22 @@ test("the chat host runs with login on, sign-up off and the hosted inference end
   expect(env.get("AGENT_MODEL_ID")).toBe("nemotron-3.5-super-vl");
   expect(env.get("OPENWEBUI_MAX_TOKENS")).toBe("16384");
   expect(renderEnvFile(env)).toContain("WEBUI_ADMIN_PASSWORD=admin-password\n");
+});
+
+const ttsKey = "invented-elevenlabs-key";
+
+test("the chat host gets the ElevenLabs key only when it is set", () => {
+  const without = chatSettings({ ...chatSecrets, ELEVENLABS_API_KEY: " " });
+  const withKey = chatSettings({ ...chatSecrets, ELEVENLABS_API_KEY: ` ${ttsKey}\n` });
+  if (!without || !withKey) throw new Error("chat settings expected");
+  expect(chatSettings(chatSecrets)).toEqual(without);
+  expect(renderEnvFile(chatEnv(outputs, without))).not.toContain("ELEVENLABS");
+  expect(renderEnvFile(chatEnv(outputs, without))).not.toContain("AUDIO_TTS");
+  const env = chatEnv(outputs, withKey);
+  expect(env.get("ELEVENLABS_API_KEY")).toBe(ttsKey);
+  expect(new Map([...env].filter(([name]) => name !== "ELEVENLABS_API_KEY"))).toEqual(
+    chatEnv(outputs, without),
+  );
 });
 
 test("Caddy serves the chat host on its own subdomain when the chat runs", () => {
@@ -369,6 +386,7 @@ esac
       DEPLOY_CHAT_IMAGE: chatImage,
       DEPLOY_REGISTRY_USER: "user",
       DEPLOY_REGISTRY_TOKEN: "token",
+      ELEVENLABS_API_KEY: ttsKey,
     };
     const localOutputs = { ...outputs, public_base_url: `http://127.0.0.1:${server.port}` };
     expect(await failure(push(localOutputs, settings))).toMatch(/requested repository digest/);
@@ -398,6 +416,7 @@ esac
     expect(installed).toContain(`WEBUI_ADMIN_PASSWORD=${chatSecrets.OPENWEBUI_ADMIN_PASSWORD}`);
     expect(installed).toContain(`OPENAI_API_KEY=${chatSecrets.VERDA_INFERENCE_KEY}`);
     expect(installed).toContain(`MCP_SERVER_URL=${localOutputs.public_base_url}/mcp`);
+    expect(installed).toContain(`ELEVENLABS_API_KEY=${ttsKey}\n`);
 
     process.env["FAKE_CHAT_RUNNING"] = chatId;
     await writeFile(log, "");
@@ -408,6 +427,7 @@ esac
     );
     expect(successfulCommands).not.toMatch(/rsync[^\n]*hosts\/openwebui/);
     expect(successfulCommands).not.toContain("python3");
+    expect(successfulCommands).not.toContain(ttsKey);
     process.env["FAKE_PROVISION_FAIL"] = "1";
     await writeFile(log, "");
     expect(await failure(push(localOutputs, settings))).not.toBe("no error");

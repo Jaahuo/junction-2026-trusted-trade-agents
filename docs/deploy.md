@@ -135,6 +135,7 @@ The presets do not create a buyer account or grant purchasing rights.
 The chat image packages branding, agent assets, scripts and `skills/trusted-trade-ordering` under their checkout-relative paths in `/opt/trusted-trade`. The host does not receive these files through rsync or bind mounts. The service keeps chat data in its existing volume.
 `push` stores the chat digest in `/etc/trusted-trade-chat-image.env` as `TRUSTED_TRADE_CHAT_IMAGE`. After starting the service, it verifies the running container's image ID against the pulled digest. It then uses `docker exec` to run the packaged Python provisioner inside the container. The provisioner uses the packaged ordering skill and configures the inference endpoint, MCP connection and managed presets. Hosted provisioning does not require Python on the operator machine.
 Title, follow-up and tag generation are disabled; voice remains available.
+With the optional `ELEVENLABS_API_KEY`, the provisioner also sets ElevenLabs text to speech, also on an existing chat volume. Speech to text stays local. See [Voice](openwebui.md#voice).
 
 Keep the chat secrets in a fourth operator file, `~/.config/trusted-trade/env.chat`:
 
@@ -147,6 +148,8 @@ OPENWEBUI_SECRET_KEY=
 OPENWEBUI_ADMIN_EMAIL=
 # openssl rand -base64 18
 OPENWEBUI_ADMIN_PASSWORD=
+# Optional. The ElevenLabs key that reads replies aloud. Delete the line to keep text to speech off.
+ELEVENLABS_API_KEY=
 ```
 
 Keep comments on their own lines: the loop below stores everything after `=` as the secret.
@@ -161,7 +164,7 @@ grep -E '^[A-Z_]+=' ~/.config/trusted-trade/env.chat | while IFS='=' read -r nam
 
 With `TF_VAR_domain`, add a DNS A record for `chat.<domain>` as well. The `sslip.io` name resolves without one.
 The chat data lives in the Docker volume `trusted-trade-chat` on the VM; `journalctl -u trusted-trade-chat` shows its log.
-To turn the chat host off, delete the four secrets, deploy, and run `systemctl disable --now trusted-trade-chat && rm /etc/trusted-trade-chat.env` on the VM, because a deploy without the key leaves the chat unit as it is.
+To turn the chat host off, delete the chat secrets, deploy, and run `systemctl disable --now trusted-trade-chat && rm /etc/trusted-trade-chat.env` on the VM, because a deploy without the key leaves the chat unit as it is.
 
 ## Update, inspect and remove
 

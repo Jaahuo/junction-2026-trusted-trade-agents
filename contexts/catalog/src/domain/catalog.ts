@@ -11,7 +11,7 @@ import type {
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import { isContradicted, matchHard } from "./match.ts";
-import { toOrderQuantity } from "./quantity.ts";
+import { type OrderQuantity, toOrderQuantity } from "./quantity.ts";
 
 /** One product of the slim index: only the fields that search and facts need. */
 export interface CatalogProduct {
@@ -34,19 +34,15 @@ export interface CatalogProduct {
 
 const MAX_CANDIDATES = 20;
 
-/**
- * Each term as its lower-case words, split at spaces and hyphens, so "lactose-free" also matches
- * names that write "lactose free". A request with no word in any term is refused.
- */
+/** Unicode words are matched within one name, not as substrings of compounds. */
+const wordsOf = (text: string): string[] =>
+  text
+    .normalize("NFC")
+    .toLowerCase()
+    .match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+
 export const parseTerms = (terms: readonly string[]): Result<string[][], "EMPTY_TERMS"> => {
-  const parsed = terms
-    .map((term) =>
-      term
-        .toLowerCase()
-        .split(/[\s-]+/)
-        .filter((word) => word !== ""),
-    )
-    .filter((words) => words.length > 0);
+  const parsed = terms.map(wordsOf).filter((words) => words.length > 0);
   return parsed.length === 0 ? err("EMPTY_TERMS") : ok(parsed);
 };
 
@@ -55,11 +51,70 @@ const SOFT_VALUES = new Map<string, (product: CatalogProduct) => string | null>(
   ["category", (product) => product.category],
 ]);
 
-const softMatches = (product: CatalogProduct, soft: readonly SoftConstraint[]): number =>
-  soft.filter(
-    ({ attribute, prefer }) =>
-      SOFT_VALUES.get(attribute)?.(product)?.toLowerCase() === prefer.toLowerCase(),
-  ).length;
+export const isSupportedSoftAttribute = (attribute: string): boolean => SOFT_VALUES.has(attribute);
+
+const milkWords = new Set(["milk", "maito"]);
+
+// A word counts if at least one occurrence is not part of "milk-free" or "free from milk".
+const matchesTerm = (line: readonly string[], words: readonly string[]): boolean =>
+  words.every((word, wordIndex) =>
+    line.some(
+      (token, index) =>
+        (token === word || (milkWords.has(word) && milkWords.has(token))) &&
+        (line[index + 1] !== "free" || words[wordIndex + 1] === "free") &&
+        !(line[index - 2] === "free" && line[index - 1] === "from"),
+    ),
+  );
+
+// An explicit non-drink head in any translation qualifies the product, even if that
+// translation does not contain the searched word or adjectives separate the words.
+const secondaryMilkHeads = new Set([
+  "chocolate",
+  "chocolat",
+  "suklaa",
+  "maitosuklaa",
+  "powder",
+  "jauhe",
+  "maitojauhe",
+  "maitokerma",
+  "milkshake",
+  "pirtelö",
+  "maitopirtelö",
+]);
+const headRelevance = (lines: readonly string[][], terms: readonly string[][]): number => {
+  if (
+    !lines.some((line) =>
+      terms.some((term) => term.some((word) => milkWords.has(word)) && matchesTerm(line, term)),
+    )
+  )
+    return 0;
+
+  const secondaryHead = lines.some((line) =>
+    line.some((word, index) => {
+      if (secondaryMilkHeads.has(word)) return true;
+      if (word !== "cream" && word !== "kerma") return false;
+      // "Full cream milk" describes milk, whereas "milk cream" describes cream.
+      return (
+        !milkWords.has(line[index + 1] ?? "") && !(word === "cream" && line[index - 1] === "full")
+      );
+    }),
+  );
+  return secondaryHead ? -1 : 1;
+};
+
+const addSoftMatches = (
+  product: CatalogProduct,
+  soft: readonly SoftConstraint[],
+  match: Record<string, MatchState>,
+): number => {
+  let matched = 0;
+  for (const { attribute, prefer } of soft) {
+    if (SOFT_VALUES.get(attribute)?.(product)?.toLowerCase() !== prefer.toLowerCase()) continue;
+    match[`soft:${attribute}:${encodeURIComponent(prefer.toLowerCase())}`] = "confirmed";
+    matched++;
+  }
+  return matched;
+};
 
 const count = (match: Record<string, MatchState>, state: MatchState): number =>
   Object.values(match).filter((value) => value === state).length;
@@ -69,14 +124,18 @@ interface Ranked {
   match: Record<string, MatchState>;
   confirmed: number;
   soft: number;
+  head: number;
+  quantity: OrderQuantity;
   terms: number;
 }
 
 const byRank = (a: Ranked, b: Ranked): number =>
   b.confirmed - a.confirmed ||
   b.soft - a.soft ||
-  (b.product.deliveryReliability ?? -1) - (a.product.deliveryReliability ?? -1) ||
+  b.head - a.head ||
+  Number(b.quantity.orderQuantity !== null) - Number(a.quantity.orderQuantity !== null) ||
   b.terms - a.terms ||
+  (b.product.deliveryReliability ?? -1) - (a.product.deliveryReliability ?? -1) ||
   a.product.productId.localeCompare(b.product.productId);
 
 const facts = (product: CatalogProduct, match: Record<string, MatchState>): ProductFacts => ({
@@ -97,43 +156,53 @@ const facts = (product: CatalogProduct, match: Record<string, MatchState>): Prod
 /** A catalog over the slim index. `searchCatalog` expects the merged constraints and returns at most 20 candidates. */
 export const createCatalog = (products: readonly CatalogProduct[]): WholesalerCatalog => {
   const byId = new Map(products.map((product) => [product.productId, product]));
+  const indexed = products.map((product) => ({
+    product,
+    lines: product.searchText.split(/\r?\n/).map(wordsOf),
+  }));
   return {
     searchCatalog: (request: SearchRequest): SearchCandidate[] => {
       const terms = parseTerms(request.terms);
       if (!terms.ok) return [];
       const ranked: Ranked[] = [];
-      for (const product of products) {
+      for (const { product, lines } of indexed) {
         const matched = terms.value.filter((words) =>
-          words.every((word) => product.searchText.includes(word)),
+          lines.some((line) => matchesTerm(line, words)),
         ).length;
         if (matched === 0) continue;
         const match = matchHard(product.claims, request.hard);
         if (isContradicted(match)) continue;
+        const confirmed = count(match, "confirmed");
+        const soft = addSoftMatches(product, request.soft, match);
         ranked.push({
           product,
           match,
-          confirmed: count(match, "confirmed"),
-          soft: softMatches(product, request.soft),
+          confirmed,
+          soft,
+          head: headRelevance(lines, terms.value),
+          quantity: toOrderQuantity(request.quantity, product),
           terms: matched,
         });
       }
       return ranked
         .toSorted(byRank)
         .slice(0, MAX_CANDIDATES)
-        .map(({ product, match }) => {
-          const { orderQuantity, equals } = toOrderQuantity(request.quantity, product);
-          return {
+        .map(({ product, match, quantity }) => {
+          const candidate: SearchCandidate = {
             productId: product.productId,
             gtin: product.gtin,
             name: product.name,
             category: product.category,
             match,
-            orderQuantity,
-            equals,
+            orderQuantity: quantity.orderQuantity,
+            equals: quantity.equals,
             deliveryReliability: product.deliveryReliability,
             co2PerKg: product.co2PerKg,
             substitutes: [...product.substitutes],
           };
+          if (quantity.quantityReason !== undefined)
+            candidate.quantityReason = quantity.quantityReason;
+          return candidate;
         });
     },
     facts: (request: FactsRequest): FactsResult => {

@@ -67,26 +67,37 @@ const nutritionalClaims = (raw: RawProduct): Set<string> =>
       .flatMap((value) => (typeof value.id === "string" ? [value.id] : [])),
   );
 
-const WEIGHT_UNITS = new Map([["KG", { value: 1, unit: "KGM" }]]);
+const WEIGHT_UNITS = new Map([
+  ["KG", { value: 1, unit: "KGM" }],
+  ["KGM", { value: 1, unit: "KGM" }],
+]);
 const CASE_UNITS = new Set(["KI", "CS", "KRT", "SK", "KLE"]);
 
 /**
  * Volume of one sales unit, from the first source that applies:
  * 1. a weight base unit: the sales unit's own weight;
- * 2. the consumer-unit volume times consumer units per sales unit;
- * 3. the CASE volume when the sales unit is a case unit.
+ * 2. the CASE volume when the sales unit is a case unit;
+ * 3. the consumer-unit volume times consumer units per sales unit.
  */
 const salesUnitVolume = (raw: RawProduct): Quantity | null => {
-  const unitsPerSalesUnit =
-    raw.units.find((unit) => unit.unitId === raw.salesUnit)?.sizeInBaseUnits ?? 0;
+  const salesSize = raw.units.find((unit) => unit.unitId === raw.salesUnit)?.sizeInBaseUnits;
   const baseWeight = WEIGHT_UNITS.get(raw.baseUnit);
-  if (baseWeight !== undefined) return perSalesUnit(baseWeight, unitsPerSalesUnit);
+  if (baseWeight !== undefined) return perSalesUnit(baseWeight, salesSize ?? 0);
   const volumeOf = (type: string) =>
     raw.synkkaData.unitConversions?.find((conversion) => conversion.synkkaPackagingType === type)
       ?.volume ?? null;
+  const consumerSize =
+    raw.baseUnit === "ST" ? 1 : raw.units.find((unit) => unit.unitId === "ST")?.sizeInBaseUnits;
+  const unitsPerSalesUnit =
+    salesSize !== undefined &&
+    consumerSize !== undefined &&
+    Number.isFinite(consumerSize) &&
+    consumerSize > 0
+      ? salesSize / consumerSize
+      : 0;
   return (
-    perSalesUnit(volumeOf("BASE_UNIT_OR_EACH"), unitsPerSalesUnit) ??
-    (CASE_UNITS.has(raw.salesUnit) ? perSalesUnit(volumeOf("CASE"), 1) : null)
+    (CASE_UNITS.has(raw.salesUnit) ? perSalesUnit(volumeOf("CASE"), 1) : null) ??
+    perSalesUnit(volumeOf("BASE_UNIT_OR_EACH"), unitsPerSalesUnit)
   );
 };
 

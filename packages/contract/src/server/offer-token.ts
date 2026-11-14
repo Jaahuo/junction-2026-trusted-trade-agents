@@ -1,8 +1,8 @@
-import { err, ok, type Result } from "@app/kernel";
+import { err, ok } from "@app/kernel";
 import { env } from "@app/server-kit";
 import { SignJWT } from "jose";
 import { z } from "zod";
-import { type OfferClaims, OfferClaimsSchema } from "../offers.ts";
+import { type OfferClaims, OfferClaimsSchema, type OfferVerification } from "../offers.ts";
 import {
   ALG,
   ES256_PARAMS,
@@ -178,9 +178,7 @@ export const verifyOfferToken = async (
   token: string,
   keys: OfferKeySet,
   now: Date = new Date(),
-): Promise<
-  Result<OfferClaims, { code: "OFFER_INVALID" } | { code: "OFFER_EXPIRED"; claims: OfferClaims }>
-> => {
+): Promise<OfferVerification> => {
   const claims = await verifyTypedJws({
     token,
     typ: OFFER_TYP,

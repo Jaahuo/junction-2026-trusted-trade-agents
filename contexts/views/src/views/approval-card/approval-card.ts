@@ -44,7 +44,6 @@ import {
 } from "../offer-comparison/model.ts";
 import { CARD } from "./card-strings.ts";
 import { productImage } from "./images.ts";
-import { reduceToFit } from "./reduce.ts";
 import {
   amount,
   brandHeader,
@@ -360,7 +359,6 @@ export class ApprovalCard extends LitElement {
     choicesOpen: { state: true },
     picked: { state: true },
     requoting: { state: true },
-    reduced: { state: true },
     rejecting: { state: true },
     remembered: { type: Boolean },
     rules: { attribute: false },
@@ -997,8 +995,6 @@ export class ApprovalCard extends LitElement {
   declare private picked: string | null;
   /** True from Confirm with changed amounts until the new quote arrives. */
   declare private requoting: boolean;
-  /** What "Reduce to fit the limit" last did; null before it is used or after a new order. */
-  declare private reduced: "fitted" | "cannot-fit" | null;
   /** Re-renders the card in the new language when it changes. */
   protected readonly locale = new LocaleController(this);
   /** From the Reject click until the decision comes back: it says "Rejecting…". */
@@ -1027,7 +1023,6 @@ export class ApprovalCard extends LitElement {
     this.choicesOpen = false;
     this.picked = null;
     this.requoting = false;
-    this.reduced = null;
     this.rejecting = false;
     this.remembered = false;
     this.rules = [];
@@ -1044,7 +1039,6 @@ export class ApprovalCard extends LitElement {
     }
     if (changed.has("order")) {
       this.edits = {};
-      this.reduced = null;
       this.picked = null;
       this.handling = {};
       this.requoting = false;
@@ -1332,63 +1326,26 @@ export class ApprovalCard extends LitElement {
           </div>
           ${limitRows}
         </dl>
-        ${within && this.reduced !== "fitted" ? nothing : this.reduceBlock(order)}
+        ${within ? nothing : this.reduceBlock(order)}
       </div>
     </section>`;
   }
 
-  /**
-   * "Reduce to fit the limit": the card, not the agent, lowers the amounts it can change (see
-   * reduce.ts for the rule) and fills the steppers. Nothing is sent: the approver checks the
-   * amounts and confirms, which sends `edit`, and the server prices and checks the order again.
-   */
+  /** Ask the agent for a new offer within the order limit. */
   private reduceBlock(order: Order) {
-    const limit = this.orderLimit;
-    if (limit === null || order.status !== "pending_approval") return nothing;
+    if (!this.canAsk || this.orderLimit === null || order.status !== "pending_approval")
+      return nothing;
     const text = pick(CARD);
-    const note =
-      this.reduced === "fitted"
-        ? text.reducedToFit(money(limit))
-        : this.reduced === "cannot-fit"
-          ? text.cannotFit
-          : null;
     return html`<div class="agent-help" part="reduce">
-      <button type="button" class="btn secondary" @click=${() => this.reduce(order, limit)}>
+      <button
+        type="button"
+        class="btn secondary"
+        @click=${() => this.ask(text.reducePrompt(order.orderId))}
+      >
         ${icon(agent16)}${text.reduceToFit}
       </button>
-      ${note === null ? nothing : html`<p class="body-small" role="status">${note}</p>`}
-      ${
-        (this.overLimit(order) ?? 0) > 0
-          ? this.agentChips(text.reducePrompt(order.orderId), text.reduceChips)
-          : nothing
-      }
+      ${this.agentChips(text.reducePrompt(order.orderId), text.reduceChips)}
     </div>`;
-  }
-
-  /** Fills the steppers of the lines the card can change with amounts that fit `limit`. */
-  private reduce(order: Order, limit: number) {
-    const steppable = new Set(this.steppable(order));
-    const lines = order.lines.map((l) => l.claims);
-    const fitted = reduceToFit({
-      lines: lines
-        .filter((c) => steppable.has(c))
-        .map((c) => ({
-          id: c.offerId,
-          quantity: c.quantity.value,
-          gross: c.total.gross,
-          current: this.quantity(c),
-        })),
-      fixedGross: lines
-        .filter((c) => !steppable.has(c))
-        .reduce((sum, c) => sum + this.lineTotal(c, "gross"), 0),
-      limit,
-    });
-    if (fitted === null) {
-      this.reduced = "cannot-fit";
-      return;
-    }
-    this.edits = { ...this.edits, ...Object.fromEntries(fitted) };
-    this.reduced = "fitted";
   }
 
   /** The decision block of a flagged product: its choices and agent help (v17). */
@@ -1725,11 +1682,6 @@ export class ApprovalCard extends LitElement {
       !isTopUp(order, c) &&
       (substitutionOf(order, c) !== null || c.shortfall !== null || isLate(c))
     );
-  }
-
-  /** The lines whose amount the approver can change with a stepper. */
-  private steppable(order: Order) {
-    return order.lines.map((l) => l.claims).filter((c) => !this.isFlagged(order, c));
   }
 
   /** v17 products: flagged lines first and always shown; ready lines collapse after three. */

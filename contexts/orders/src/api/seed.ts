@@ -2,13 +2,27 @@ import {
   DEMO_ACCOUNT,
   type DemoProducts,
   DemoProductsSchema,
+  type Mandate,
+  type OfferClaims,
   fixtures,
   type Quantity,
 } from "@app/contract";
+import {
+  localOfferKeys,
+  offerSigningKeyFromEnv,
+  signOfferToken,
+  signOrderReceipt,
+} from "@app/contract/server";
 import { type Db, type SeedInputs } from "@app/server-kit";
 import type { HistoryRow } from "../domain/evaluate.ts";
+import { decide } from "../application/approvals.ts";
 import { appendOrderAudit } from "../application/commit-placement.ts";
+import { placeOrder } from "../application/orders.ts";
 import type { StoredOrder } from "../application/ports.ts";
+import { mandateClient } from "../infra/mandate-client.ts";
+import { offerVerifier } from "../infra/offer-verifier.ts";
+import { offersClient } from "../infra/offers-client.ts";
+import { refusingPayment } from "../infra/payment/refusing-payment.ts";
 import { postgresOrderStore } from "../infra/order-store.ts";
 import { history } from "../infra/schema.ts";
 
@@ -23,10 +37,7 @@ const fifth = (quantity: Quantity): Quantity => ({
 /** Approvals of the scenario 3 substitute before the demo; the next one offers a standing rule. */
 const EARLIER_APPROVALS = 2;
 
-/**
- * An approved, placed order of the scenario 3 substitute alone. Its lines name products by id:
- * the seed copies no other value of the dataset (team rules R-23).
- */
+// Earlier approvals must keep the real pair without displaying imported product identifiers.
 const approvedSubstitute = (
   demo: DemoProducts,
   replaces: string,
@@ -43,7 +54,7 @@ const approvedSubstitute = (
     replaces,
     deliveryDate: demo.requestedDate,
     requestedDate: demo.requestedDate,
-    product: { ...fixtures.offerClaims.product, name: productId },
+    product: { ...fixtures.offerClaims.product, name: "Demo earlier approved substitute" },
   };
   return {
     ...fixtures.order,
@@ -116,5 +127,92 @@ export const seedHistory = async (
   );
 };
 
-export const seed = (db: Db, inputs?: SeedInputs): Promise<void> =>
-  seedHistory(db, { demo: inputs?.demoProducts });
+/** Invented activity, independent of the imported catalogue and scenario history. */
+const seedActivity = async (db: Db, mandate: Mandate, fetcher: typeof fetch): Promise<void> => {
+  const now = new Date();
+  const expiry = new Date(now.getTime() + 28 * 86_400_000);
+  const cutoff = new Date(now.getTime() + 29 * 86_400_000).toISOString();
+  const delivery = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const key = await offerSigningKeyFromEnv();
+  const keys = localOfferKeys({ keys: [key.publicJwk] });
+  const deps = {
+    store: postgresOrderStore(db),
+    verifyOffer: offerVerifier(async () => keys),
+    issuedOffers: offersClient,
+    offers: offersClient,
+    mandates: mandateClient("http://seed.local/api", { fetcher }),
+    payment: refusingPayment,
+    signReceipt: ({ idempotencyKey: _key, requested: _requested, ...order }: StoredOrder) =>
+      signOrderReceipt({ ...order, approvalUrl: null }, key, "http://seed.local"),
+    now: () => new Date(),
+  };
+
+  for (const kind of ["placed", "pending"] as const) {
+    const total = kind === "placed" ? 10 : Math.ceil(mandate.limits.maxOrderTotal.value) + 100;
+    const unsigned: Omit<OfferClaims, "iat" | "exp"> = {
+      iss: "http://seed.local",
+      offerId: `off_demo_activity_${kind}`,
+      customer: DEMO_ACCOUNT.customer,
+      agentId: DEMO_ACCOUNT.agentId,
+      productId: `prod_demo_activity_${kind}`,
+      quantity: { value: 1, unit: "ST" },
+      unitPrice: { net: total, vatRate: 0, currency: "EUR" },
+      deposits: 0,
+      total: { net: total, gross: total },
+      deliveryDate: delivery,
+      requestedDate: delivery,
+      nextDeliveryDate: null,
+      stock: "confirmed",
+      paymentTerms: "invoice",
+      cutoffAt: cutoff,
+      replaces: null,
+      shortfall: null,
+      mandateId: mandate.mandateId,
+      mandateVersion: mandate.version,
+      constraints: { hard: [], soft: [] },
+      product: {
+        name: kind === "placed" ? "Demo pantry item" : "Demo bulk item",
+        category: "demo",
+        perSalesUnit: { value: 1, unit: "ST" },
+        countryOfOrigin: null,
+        deliveryReliability: null,
+        co2PerKg: null,
+        match: {},
+      },
+    };
+    const token = await signOfferToken(unsigned, key, expiry);
+    const result = await placeOrder(deps, DEMO_ACCOUNT, {
+      idempotencyKey: `demo-activity-${kind}`,
+      offers: [token],
+    });
+    if (!result.ok || result.value.order.status !== "pending_approval")
+      throw new Error(`The demo ${kind} order could not be sent to approval.`);
+    if (kind === "placed") {
+      const order = result.value.order;
+      const approved = await decide(deps, DEMO_ACCOUNT, order.orderId, {
+        proposalVersion: order.proposalVersion,
+        decision: "approve",
+      });
+      if (!approved.ok || approved.value.status !== "placed")
+        throw new Error("The demo order could not be approved and placed.");
+    }
+  }
+  const refused = await placeOrder(deps, DEMO_ACCOUNT, {
+    idempotencyKey: "demo-activity-forged",
+    offers: ["forged.demo.token"],
+  });
+  if (refused.ok || refused.error.code !== "OFFER_INVALID")
+    throw new Error("The forged demo offer was not refused.");
+};
+
+export const seed = async (db: Db, inputs?: SeedInputs): Promise<void> => {
+  if (inputs?.fetcher === undefined)
+    throw new Error("The orders seed needs the in-process API fetcher.");
+  const current = await mandateClient("http://seed.local/api", { fetcher: inputs.fetcher }).current(
+    DEMO_ACCOUNT.agentId,
+  );
+  if (!current.ok || current.value === null || current.value.iss !== DEMO_ACCOUNT.customer)
+    throw new Error("The orders seed needs the demo customer's current mandate.");
+  await seedHistory(db, { demo: inputs.demoProducts });
+  await seedActivity(db, current.value, inputs.fetcher);
+};

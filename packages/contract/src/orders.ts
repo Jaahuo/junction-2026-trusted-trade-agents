@@ -143,6 +143,14 @@ export const OrderSchema = z.strictObject({
 });
 export type Order = z.infer<typeof OrderSchema>;
 
+export const OrderListSchema = z.strictObject({ orders: z.array(OrderSchema) });
+export type OrderList = z.infer<typeof OrderListSchema>;
+
+export const RefusalListSchema = z.strictObject({
+  refusals: z.array(z.strictObject({ id: z.number(), at: z.string(), code: z.string() })),
+});
+export type RefusalList = z.infer<typeof RefusalListSchema>;
+
 export const OrderReceiptClaimsSchema = z.strictObject({
   iss: z.string(),
   orderId: OrderSchema.shape.orderId,

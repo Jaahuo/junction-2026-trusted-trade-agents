@@ -3,16 +3,21 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./api": "./src/api/index.ts"
+    "./api": "./src/api/index.ts",
+    "./ui": "./src/ui/index.tsx"
   },
   "dependencies": {
     "@app/contract": "workspace:*",
     "@app/kernel": "workspace:*",
     "@app/server-kit": "workspace:*",
+    "@app/ui": "workspace:*",
+    "@app/web-kit": "workspace:*",
     "@ctx/mandates": "workspace:*",
     "@elysia/eden": "catalog:",
+    "@tanstack/react-query": "catalog:",
     "drizzle-orm": "catalog:",
     "elysia": "catalog:",
+    "react": "catalog:",
     "zod": "catalog:"
   }
 }

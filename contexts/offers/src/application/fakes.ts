@@ -45,7 +45,7 @@ export const fakeAvailability = (
 ): AvailabilityQuote => ({
   productId,
   amount: 100,
-  availableDate: "2026-11-19",
+  availableDate: "2026-11-20",
   nextDeliveryDate: null,
   cutoffAt: "2026-11-18T10:00:00+02:00",
   salesBlocked: false,

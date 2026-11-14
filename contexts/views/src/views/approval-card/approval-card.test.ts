@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { DecideApprovalRequestSchema, type Order, OrderSchema } from "@app/contract";
+import { type Order, OrderSchema } from "@app/contract";
 import standingOffer from "../../../fixtures/approval-card/approved-standing-offer.json";
 import declinedSubstitution from "../../../fixtures/approval-card/declined-substitution.json";
 import pendingLate from "../../../fixtures/approval-card/pending-late.json";
@@ -443,39 +443,20 @@ test("the rule offers follow the view language", () => {
   }
 });
 
-test("reduce to fit fills the amounts on the card, sends nothing, and confirm sends the edit", () => {
-  const { card, sent } = cardFor(pending);
-  const order = OrderSchema.parse(pending);
-  card.orderLimit = 1700;
-  expect(visible(card)).toContain("Over your limit");
-  click(card, 'part="reduce"');
-  expect(sent).toEqual([]);
-  const text = visible(card);
-  expect(text).toContain(pick(CARD).reducedToFit(money(1700)));
-  expect(text).toContain("Under your limit");
-
-  click(card, 'part="button approve"');
-  const [only] = sent;
-  if (only?.type !== "tt-confirm-changes") throw new Error("confirm sends the changed amounts");
-  const detail = DecideApprovalRequestSchema.parse(only.detail);
-  if (detail.decision !== "edit") throw new Error("the changed amounts are sent as an edit");
-  expect(detail.changes.length).toBeGreaterThan(0);
-  for (const change of detail.changes) {
-    const was = order.lines.find((l) => l.claims.productId === change.productId)?.claims;
-    const amount = change.quantity?.value ?? 0;
-    expect(amount).toBeGreaterThanOrEqual(1);
-    expect(amount).toBeLessThan(was?.quantity.value ?? 0);
+test("reduce to fit asks the agent without changing amounts, even for a very low limit", () => {
+  for (const limit of [1700, 10]) {
+    const { card, sent } = cardFor(pending);
+    const order = OrderSchema.parse(pending);
+    card.orderLimit = limit;
+    const before = markup(card.render());
+    click(card, 'part="reduce"');
+    expect(sent).toEqual([
+      { type: "tt-ask-agent", detail: pick(CARD).reducePrompt(order.orderId) },
+    ]);
+    expect(markup(card.render())).toBe(before);
+    click(card, 'part="button approve"');
+    expect(sent[1]?.type).toBe("tt-decide");
   }
-});
-
-test("reduce to fit says so when even one of each is over the limit, and changes nothing", () => {
-  const { card, sent } = cardFor(pending);
-  card.orderLimit = 10;
-  click(card, 'part="reduce"');
-  expect(sent).toEqual([]);
-  expect(visible(card)).toContain(pick(CARD).cannotFit);
-  click(card, 'part="button approve"');
-  expect(sent[0]?.type).toBe("tt-decide");
 });
 
 test("over the limit in a chat, each reduce chip asks the agent; under it or outside a chat, none show", () => {
@@ -496,8 +477,9 @@ test("over the limit in a chat, each reduce chip asks the agent; under it or out
 
   card.canAsk = false;
   expect(visible(card)).not.toContain(text.reduceChips[0]);
+  expect(markup(card.render())).not.toContain('part="reduce"');
   card.canAsk = true;
-  click(card, 'part="reduce"');
+  card.orderLimit = 100000;
   expect(visible(card)).not.toContain(text.reduceChips[0]);
 });
 

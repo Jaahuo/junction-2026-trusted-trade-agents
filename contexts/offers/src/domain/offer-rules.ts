@@ -5,6 +5,7 @@ import type {
   Quantity,
   SoftConstraint,
 } from "@app/contract";
+import { shiftHelsinkiDays } from "./helsinki-time.ts";
 
 export interface Constraints {
   hard: HardConstraint[];
@@ -116,19 +117,43 @@ export function availabilityOmitReason(
   return null;
 }
 
-/**
- * True when the product can arrive on or before the requested date and its order cut-off has not
- * passed. Stock is not checked: a product with partial stock still gets an offer with a shortfall.
- */
+/** Advance an earlier available slot to the requested date without asserting future stock. */
+export function deliveryOnRequestedDate(
+  quote: AvailabilityQuote,
+  requestedDate: string,
+): AvailabilityQuote {
+  if (quote.availableDate === null || quote.availableDate >= requestedDate) return quote;
+  const days =
+    (Date.parse(`${requestedDate}T00:00:00Z`) - Date.parse(`${quote.availableDate}T00:00:00Z`)) /
+    86_400_000;
+  return {
+    ...quote,
+    availableDate: requestedDate,
+    nextDeliveryDate:
+      quote.nextDeliveryDate !== null && quote.nextDeliveryDate > requestedDate
+        ? quote.nextDeliveryDate
+        : null,
+    cutoffAt: quote.cutoffAt === null ? null : shiftHelsinkiDays(quote.cutoffAt, days),
+    stock: "unconfirmed",
+  };
+}
+
+// Positive partial stock remains eligible; the quote has no lot size to validate it against.
 export function isDeliverableBy(
   availability: AvailabilityQuote | undefined,
   deliverBy: string,
   now: Date,
 ): boolean {
-  if (availability === undefined || availabilityOmitReason(availability, 0) !== null) return false;
-  if (availability.cutoffAt !== null && new Date(availability.cutoffAt) <= now) return false;
-  // Both are YYYY-MM-DD, so string order is date order.
-  return availability.availableDate !== null && availability.availableDate <= deliverBy;
+  if (availability === undefined) return false;
+  const dated = deliveryOnRequestedDate(availability, deliverBy);
+  if (availabilityOmitReason(dated, 0) !== null) return false;
+  if (dated.stock === "confirmed" && dated.amount <= 0) return false;
+  if (
+    dated.cutoffAt !== null &&
+    new Date(dated.cutoffAt).getTime() <= Math.floor(now.getTime() / 1000) * 1000 + 999
+  )
+    return false;
+  return dated.availableDate !== null && dated.availableDate <= deliverBy;
 }
 
 export function batchIds(ids: readonly string[], max = 1000): string[][] {

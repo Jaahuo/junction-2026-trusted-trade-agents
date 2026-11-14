@@ -2,12 +2,14 @@ import {
   DecideApprovalRequestSchema,
   ErrorEnvelopeSchema,
   type Order,
+  OrderListSchema,
   OrderRefSchema,
   OrderSchema,
   PendingListSchema,
   PlaceOrderRequestSchema,
   PrecheckRequestSchema,
   PrecheckSchema,
+  RefusalListSchema,
   type Principal,
 } from "@app/contract";
 import { principalOf } from "@app/contract/server";
@@ -18,6 +20,7 @@ import {
   publicBaseUrl,
   selfBaseUrl,
 } from "@app/server-kit";
+import { desc, eq, sql } from "drizzle-orm";
 import { Elysia } from "elysia";
 import {
   type ApprovalDeps,
@@ -31,8 +34,9 @@ import type { StoredOrder } from "../application/ports.ts";
 import { mandateClient } from "../infra/mandate-client.ts";
 import { offersClient } from "../infra/offers-client.ts";
 import { processOfferVerifier } from "../infra/offer-verifier.ts";
-import { postgresOrderStore } from "../infra/order-store.ts";
+import { postgresOrderStore, toStored } from "../infra/order-store.ts";
 import { envReceiptSigner } from "../infra/receipt-signer.ts";
+import { orders, refusals as refusalRows } from "../infra/schema.ts";
 import { refusingPayment } from "../infra/payment/refusing-payment.ts";
 import { seed } from "./seed.ts";
 
@@ -145,6 +149,31 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
         return result.value.created ? status(201, order) : order;
       },
     )
+    .get("/", { response: { 200: OrderListSchema } }, async ({ request }) => {
+      const principal = await deps.principal(request);
+      const rows = await db
+        .select()
+        .from(orders)
+        .where(eq(orders.customer, principal.customer))
+        .orderBy(desc(orders.createdAt), desc(orders.orderId));
+      return {
+        orders: rows.map((row) => toOrder(toStored(row), deps.publicBaseUrl)),
+      };
+    })
+    .get("/refusals", { response: { 200: RefusalListSchema } }, async ({ request }) => {
+      const principal = await deps.principal(request);
+      const rows = await db
+        .select({ id: refusalRows.id, event: refusalRows.event })
+        .from(refusalRows)
+        .where(eq(refusalRows.customer, principal.customer))
+        .orderBy(desc(sql`(${refusalRows.event} #>> '{}')::jsonb ->> 'at'`), desc(refusalRows.id));
+      return {
+        refusals: rows.map(({ id, event }) => {
+          if (event.detail === undefined) throw new Error("Refusal event has no code.");
+          return { id, at: event.at, code: event.detail };
+        }),
+      };
+    })
     .get("/pending", { response: { 200: PendingListSchema } }, async ({ request }) => {
       const principal = await deps.principal(request);
       try {

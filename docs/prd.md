@@ -124,23 +124,23 @@ Three roles exist. Through the MCP tools, the agent can never approve its own or
 
 Ten tools cover the flow: seven the model can call and three that only a view calls. Each tool maps to a REST endpoint, published as an OpenAPI document. The MCP binding adds the order retry key before it calls REST (SPEC-003).
 
-| Tool                     | Caller            | Input                                                                                                                                                  | Returns                                                                                                          |
-| ------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `search_products`        | Agent             | Structured need: terms, hard and soft constraints, quantity with unit, deliver-by date                                                                 | Candidate products with a per-constraint match and the quantity converted to sales units. Uses static data only. |
-| `get_offers`             | Agent             | Product IDs, quantities, deliver-by date, payment terms                                                                                                | One signed offer per product, each with a pre-check result                                                       |
-| `place_order`            | Agent             | One or more signed offers (offer ids or tokens), optional alternative offers, optional original request text; the system generates the idempotency key | Order with status: placed, pending approval or rejected, plus reason codes                                       |
-| `get_order_status`       | Agent             | Order ID                                                                                                                                               | Current status and the audit record                                                                              |
-| `get_mandate`            | Agent             | None                                                                                                                                                   | The limits currently in force for this agent, without opening a view during ordering                             |
-| `show_mandate`           | Agent             | None                                                                                                                                                   | The same limits in the mandate settings view, only when the user asks to see them                                |
-| `draft_mandate`          | Agent             | Proposed limits and standing constraints, from the terms the human gave                                                                                | The draft next to the current limits. Nothing is registered: the human registers it in the mandate view          |
-| `register_mandate`       | Approver          | The mandate as JSON; the demo server signs it with the simulated buyer key                                                                             | Mandate ID. The previous mandate is revoked.                                                                     |
-| `revoke_mandate`         | Approver          | Mandate ID                                                                                                                                             | Confirmation                                                                                                     |
-| `list_pending_approvals` | Agent or approver | None                                                                                                                                                   | Orders waiting for a decision                                                                                    |
-| `decide_approval`        | Approver          | Order ID, proposal version and a decision: approve, reject and stop, reject and allow alternatives, edit, pick an alternative, or approve and remember | Updated order                                                                                                    |
+| Tool                     | Caller            | Input                                                                                                                                                  | Returns                                                                                                                                                 |
+| ------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search_products`        | Agent             | Structured need: terms, hard and soft constraints, quantity with unit, deliver-by date                                                                 | Candidate products with a per-constraint match and the quantity converted to sales units. Shortlisted static matches are filtered by live availability. |
+| `get_offers`             | Agent             | Product IDs, quantities, deliver-by date, payment terms                                                                                                | One signed offer per product, each with a pre-check result                                                                                              |
+| `place_order`            | Agent             | One or more signed offers (offer ids or tokens), optional alternative offers, optional original request text; the system generates the idempotency key | Order with status: placed, pending approval or rejected, plus reason codes                                                                              |
+| `get_order_status`       | Agent             | Order ID                                                                                                                                               | Current status and the audit record                                                                                                                     |
+| `get_mandate`            | Agent             | None                                                                                                                                                   | The limits currently in force for this agent, without opening a view during ordering                                                                    |
+| `show_mandate`           | Agent             | None                                                                                                                                                   | The same limits in the mandate settings view, only when the user asks to see them                                                                       |
+| `draft_mandate`          | Agent             | Proposed limits and standing constraints, from the terms the human gave                                                                                | The draft next to the current limits. Nothing is registered: the human registers it in the mandate view                                                 |
+| `register_mandate`       | Approver          | The mandate as JSON; the demo server signs it with the simulated buyer key                                                                             | Mandate ID. The previous mandate is revoked.                                                                                                            |
+| `revoke_mandate`         | Approver          | Mandate ID                                                                                                                                             | Confirmation                                                                                                                                            |
+| `list_pending_approvals` | Agent or approver | None                                                                                                                                                   | Orders waiting for a decision                                                                                                                           |
+| `decide_approval`        | Approver          | Order ID, proposal version and a decision: approve, reject and stop, reject and allow alternatives, edit, pick an alternative, or approve and remember | Updated order                                                                                                                                           |
 
 **Notes**
 
-- `search_products` makes no live calls. `get_offers` is the only tool that calls the wholesaler's price and availability systems, and only for the shortlist.
+- `search_products` reads live availability for its shortlist. If the read fails, it returns unfiltered static matches. Candidates do not guarantee an offer or the requested quantity. `get_offers` reads live price and availability for the selected products.
 - The pre-check on an offer is guidance. `place_order` runs the checks again, because an offer can go stale.
 - The wholesaler's fixed guardrails, supported payment terms and public signing keys are published as a readable resource, so an agent knows the rules before ordering.
 
@@ -375,7 +375,8 @@ The pending list contains only proposals that still need a decision. When the bu
 
 ### Delivery later than requested
 
-- Availability returns the earliest possible date. If it is after the deliver-by date, the offer carries the real date and its pre-check lists `AVAILABILITY_DIFFERS`.
+- Availability returns the earliest possible date. When that date is on or before `deliverBy`, the offer selects `deliverBy` as its delivery date. When the earliest date is earlier, the offer marks stock unconfirmed for the selected date. It shifts the cutoff by the same number of calendar days, keeping the same `Europe/Helsinki` clock time and applying daylight-saving changes. The offer uses the price for its selected delivery date. Its next delivery date is later than the selected date, or null if none is known.
+- If the earliest date is after `deliverBy`, the offer carries that date and its pre-check lists `AVAILABILITY_DIFFERS`.
 - The agent can look for an alternative that arrives on time, or order the late offer, which goes to approval.
 - If the closing time passes between offer and order, the order is rejected with `CUTOFF_PASSED` and the next available date.
 
@@ -406,13 +407,13 @@ The card shows the original request, the proposed order lines, the rules that fi
 | Reject and stop                      | The order is declined; the agent stops and tells the user                                           |
 | Reject, allow alternatives           | The order is declined; the agent may look for alternatives                                          |
 | Change quantity or delivery date     | A new signed offer is issued and every check runs again                                             |
-| Reduce to fit the limit              | The card lowers the amounts to fit the order limit; the approver checks them and confirms the edit  |
-| Pick a different offered alternative | Same as above, on the chosen offer                                                                  |
+| Reduce to fit the limit              | The card declines the order with alternatives allowed and asks the agent for a reduced replacement  |
+| Pick a different offered alternative | A new signed offer is issued and every check runs again on the chosen alternative                   |
 | Approve and remember                 | Pricing only: the approver registers a new mandate with the raised limit, signed by the demo server |
 
 An edit can never bypass a guardrail, because it always produces a new offer and a new check. Build approve and reject first.
 
-Decided: reducing an over-limit order is the approver's action on the card, not the agent's. "Reduce to fit the limit" fills the amount steppers with whole sales-unit amounts that keep the gross total within the limit and sends nothing; the approver confirms, which sends `edit` on the same pending order (`proposalVersion` + 1). The agent's conduct rule is unchanged: it never lowers a quantity to get around a limit, and it sends the user to the card instead.
+Decided: "Reduce to fit the limit" and the agent-help buttons and chips reject the pending order first, with `next: alternatives` and the human's request as the note. The declined order retains its lines and original request. The agent follows the human's requested changes and submits one fresh checked order under the unchanged mandate. The human's revision does not approve the replacement. Direct quantity and date edits on the card still obtain new signed offers and run every check.
 
 ### Views
 
@@ -438,7 +439,7 @@ One skill teaches any agent the flow. It is served through the MCP Skills extens
 - What to do on each result: tell the user and stop on pending approval, read the reason code on a rejection.
 - How to state quantities and units.
 - A reference file with the reason codes.
-- One rule of conduct: never reshape an order to get around a limit.
+- Conduct: preserve the user's request instead of changing it autonomously to avoid approval. Follow explicit human revisions as new checked requests; never split an order to evade a limit.
 
 The skill is guidance and the server is the control. Host support for Skills over MCP is still early, so the same file also lives in the repository and the tool descriptions must be enough on their own.
 

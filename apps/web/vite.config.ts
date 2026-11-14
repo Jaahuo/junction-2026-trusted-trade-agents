@@ -12,6 +12,8 @@ export default defineConfig({
       "/api": `http://127.0.0.1:${process.env["PORT"] ?? "3000"}`,
       "/.well-known": `http://127.0.0.1:${process.env["PORT"] ?? "3000"}`,
       "/skills": `http://127.0.0.1:${process.env["PORT"] ?? "3000"}`,
+      // Order pages open the approval card view, which the API serves.
+      "/views": `http://127.0.0.1:${process.env["PORT"] ?? "3000"}`,
     },
   },
 });

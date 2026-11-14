@@ -1,4 +1,5 @@
 import { Card, CardTitle, PageHeader } from "@app/ui";
+import { brand } from "@app/ui/brand";
 import { Link } from "wouter";
 
 export function Home() {
@@ -6,7 +7,7 @@ export function Home() {
     <>
       <PageHeader
         title="Home"
-        description="Valio Aimo helps food-service buyers' agents order within buyer limits, with human approval for exceptions."
+        description={`${brand.name} helps food-service buyers' agents order within buyer limits, with human approval for exceptions.`}
       />
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>

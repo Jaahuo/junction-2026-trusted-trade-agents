@@ -1,20 +1,46 @@
-@theme {
-  --color-background: oklch(0.985 0.002 250);
-  --color-surface: oklch(1 0 0);
-  --color-foreground: oklch(0.21 0.02 260);
-  --color-muted: oklch(0.52 0.02 260);
-  --color-border: oklch(0.91 0.01 260);
-  --color-primary: oklch(0.5 0.2 265);
-  --color-primary-hover: oklch(0.44 0.2 265);
-  --color-primary-foreground: oklch(0.99 0 0);
-  --color-danger: oklch(0.55 0.21 27);
-  --color-success: oklch(0.55 0.14 155);
-  --color-warning: oklch(0.7 0.15 75);
-  --radius-md: 0.5rem;
-  --radius-xl: 0.75rem;
+@import "tailwindcss/theme.css" layer(theme);
+@import "./skin.css";
+@import "./fonts.css";
+@import "./parts.css";
+
+@theme inline {
+  --color-background: var(--color-bg-subtle);
+  --color-surface: var(--color-white);
+  --color-foreground: var(--color-text);
+  --color-muted: var(--color-text-secondary);
+  --color-border: var(--color-border);
+  --color-primary: var(--color-link);
+  --color-primary-hover: var(--color-text-brand);
+  --color-primary-foreground: var(--color-text-on-brand);
+  --color-danger: var(--color-text-danger);
+  --color-success: var(--color-text-success);
+  --color-warning: var(--color-text-warning);
+  --font-sans: var(--font-family-sans);
+  --font-weight-medium: var(--font-weight-semibold);
+  --text-xs: var(--font-size-2xs);
+  --text-sm: var(--font-size-xs);
+  --text-base: var(--font-size-sm);
+  --text-lg: var(--font-size-md);
+  --text-xl: var(--font-size-lg);
+  --text-2xl: var(--font-size-xl);
+  --text-3xl: var(--font-size-2xl);
+  --spacing: var(--spacing-xs);
+  --radius-md: var(--border-radius-md);
+  --radius-xl: var(--border-radius-square);
 }
 
 body {
-  background: var(--color-background);
-  color: var(--color-foreground);
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+  font-family: var(--font-family-sans);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--color-heading);
+  font-family: var(--font-family-condensed);
 }

@@ -132,6 +132,8 @@ export const ROUTES = [
   {
     key: "requote",
     tool: null,
+    /** Typed stub: always answers 501 NOT_IMPLEMENTED until its hardening issue builds it. */
+    notImplemented: true,
     method: "POST",
     path: "/api/offers/requote",
     context: "offers",
@@ -141,6 +143,8 @@ export const ROUTES = [
   {
     key: "validate",
     tool: null,
+    /** Typed stub: always answers 501 NOT_IMPLEMENTED until its hardening issue builds it. */
+    notImplemented: true,
     method: "POST",
     path: "/api/offers/validate",
     context: "offers",

@@ -12,6 +12,10 @@ Each candidate has its own GitHub Issues and private board. Issues are created u
 
 CI runs the full gate inside an isolated Linux PID and mount namespace. A system helper creates it, then drops to the runner's original user before executing repository code. This keeps protected host processes outside the cleanup tests without changing cleanup permissions or skipping tests.
 
+## Agents draining the backlog
+
+Many agents can work the backlog at once with the `backlog-loop` skill. `bun scripts/backlog.ts next` lists the issues an agent can finish start to end now; `--all` shows why the others wait. `bun scripts/backlog.ts claim <issue>` creates the remote branch `task/<issue>` through the GitHub refs API, which refuses an existing ref, so of two agents that claim at once exactly one wins and is assigned; the other exits 3 and picks the next issue. Unlike assignment, the claim is atomic across machines. An agent that cannot finish runs `bun scripts/backlog.ts release <issue> --reason <text>` when it pushed no work, or opens a draft PR and labels the issue `blocked`.
+
 ## Worktree cleanup after merge
 
 The owner removes the task worktree once its PR merges. `ship --merge` and `task finish` stop current-user processes whose working directories are inside the target worktree before dropping its database. Other users' processes stay untouched. Cleanup sends TERM, then KILL to processes that remain. It reports each signal and keeps the worktree if discovery or termination fails. It then runs `wt remove` and deletes the local branch. Cleanup also keeps the worktree when the command runs inside it, when it has uncommitted changes, when its `HEAD` differs from the merged PR head, or when it is the main worktree. Then commit or discard that work, and clean up by hand as [local runtime](runtime.md) says. Ship runs inside the task worktree, so after a merge it prints the cleanup command. Move to the main checkout, update it with `git pull --ff-only origin main` so it has the current cleanup script, and run that command there. Remove an exploration worktree by hand when you finish with it.

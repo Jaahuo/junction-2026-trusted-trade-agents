@@ -6,10 +6,10 @@ import {
   type ReasonCode,
 } from "@app/contract";
 import { brand } from "@app/ui/brand";
+import { formatOrderNumber, ORDER_ACTIONS, ORDER_STATUS_LABELS } from "@app/ui/format";
 import { css, html, LitElement, nothing, type PropertyValues } from "lit";
 import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
-import clock16 from "../../shared/icons/clock-16.svg?raw";
 import clockIcon from "../../shared/icons/clock.svg?raw";
 import attention from "../../shared/icons/attention.svg?raw";
 import agent16 from "../../shared/icons/agent-16.svg?raw";
@@ -31,10 +31,12 @@ import {
   icon,
   money,
   number,
+  orderName,
   rows,
   stdUnits,
   timeOnly,
   unit,
+  vat,
   when,
 } from "./parts.ts";
 
@@ -195,6 +197,7 @@ export class ApprovalCard extends LitElement {
     picked: { state: true },
     requoting: { state: true },
     rejecting: { state: true },
+    confirming: { state: true },
   };
 
   static override styles = [
@@ -370,14 +373,21 @@ export class ApprovalCard extends LitElement {
       .choice-body {
         display: flex;
         flex: 1;
+        min-width: 0;
         flex-direction: column;
         gap: var(--spacing-xs);
       }
       .choice-top > :not(:first-child) {
         white-space: nowrap;
       }
+      /* At 390px the name keeps two lines: the price wraps below it instead of squeezing it. */
+      .choice-top > :first-child {
+        flex: 1 1 10rem;
+        min-width: 0;
+      }
       .choice-top {
         display: flex;
+        flex-wrap: wrap;
         align-items: flex-start;
         justify-content: space-between;
         gap: var(--spacing-md);
@@ -528,6 +538,11 @@ export class ApprovalCard extends LitElement {
         width: 40px;
         height: 40px;
       }
+      @container (max-width: 479px) {
+        .choice .thumb {
+          display: none;
+        }
+      }
       .thumb img {
         display: block;
         width: 100%;
@@ -574,6 +589,10 @@ export class ApprovalCard extends LitElement {
         padding-top: var(--spacing-lg);
         border-top: 1px solid var(--color-border);
       }
+      .total-row .vat {
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-xs);
+      }
       .total-row .value {
         font-family: var(--font-family-condensed);
         font-size: var(--font-size-xl);
@@ -590,10 +609,10 @@ export class ApprovalCard extends LitElement {
         flex-wrap: wrap;
         gap: var(--spacing-lg);
       }
-      .open-until {
+      .confirm {
         display: flex;
-        align-items: center;
-        gap: var(--spacing-sm);
+        flex-direction: column;
+        gap: var(--spacing-md);
       }
       .group {
         display: flex;
@@ -699,8 +718,10 @@ export class ApprovalCard extends LitElement {
   declare private picked: string | null;
   /** True from Confirm with changed amounts until the new quote arrives. */
   declare private requoting: boolean;
-  /** True from Reject until the decision comes back: Reject says "Rejecting…". */
-  declare private rejecting: boolean;
+  /** The reject picked, from its click until the decision comes back: it says "Rejecting…". */
+  declare private rejecting: "stop" | "alternatives" | null;
+  /** The decision waiting for its second click, which states what happens. */
+  declare private confirming: "approve" | "reject" | null;
 
   constructor() {
     super();
@@ -716,7 +737,8 @@ export class ApprovalCard extends LitElement {
     this.choicesOpen = false;
     this.picked = null;
     this.requoting = false;
-    this.rejecting = false;
+    this.rejecting = null;
+    this.confirming = null;
   }
 
   /** A new order (or a new version of it) starts without changes or picks. */
@@ -724,14 +746,16 @@ export class ApprovalCard extends LitElement {
     // A decision that came back without a new order failed: the buttons are ready again.
     if (changed.has("busy") && !this.busy) {
       this.requoting = false;
-      this.rejecting = false;
+      this.rejecting = null;
+      this.confirming = null;
     }
     if (changed.has("order")) {
       this.edits = {};
       this.picked = null;
       this.handling = "split";
       this.requoting = false;
-      this.rejecting = false;
+      this.rejecting = null;
+      this.confirming = null;
     }
   }
 
@@ -749,7 +773,7 @@ export class ApprovalCard extends LitElement {
   private eyebrow(order: Order) {
     if (order.status === "placed") return "Approved";
     if (order.status === "awaiting_payment") return "Approved · waiting for payment";
-    if (order.status !== "pending_approval") return "Rejected";
+    if (order.status !== "pending_approval") return ORDER_STATUS_LABELS[order.status];
     if (this.busy && this.requoting) return "Getting a new offer";
     // Nothing left to approve after changing amounts (prototype A2): the logo only.
     return this.todos(order).length > 0 ? "Approval required" : "";
@@ -757,13 +781,15 @@ export class ApprovalCard extends LitElement {
 
   /** v16: an order of products, named by its delivery day, with order number and count. */
   private header(order: Order) {
-    const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     const title = html`<div class="headline">
-      <h2 class="name">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</h2>
-      <p aria-live="polite">${money(this.total(order, "net"))}</p>
+      <h2 class="name">${orderName(order)}</h2>
+      <p aria-live="polite">
+        ${money(this.total(order, "net"))}<span class="vat">${vat("net")}</span>
+      </p>
     </div>`;
     const facts = html`<dl class="facts">
-      ${fact("Order no.", order.orderId)} ${fact("Products", String(order.lines.length))}
+      ${fact("Order no.", formatOrderNumber(order.orderId))}
+      ${fact("Products", String(order.lines.length))}
     </dl>`;
     const pill =
       order.status === "pending_approval" &&
@@ -956,7 +982,7 @@ export class ApprovalCard extends LitElement {
       <div class="total-block ${within ? "within" : ""}">
         <dl class="limit-rows body-small" aria-live="polite">
           <div>
-            <dt>Total incl. VAT</dt>
+            <dt>Total ${vat("gross")}</dt>
             <dd>${money(round(this.total(order, "gross")))}</dd>
           </div>
           ${limitRows}
@@ -1231,9 +1257,89 @@ export class ApprovalCard extends LitElement {
     // "Approve order" while the order is over the limit; else "Confirm order".
     const over = this.overLimit(order);
     const confirm = !order.reasons.includes("SPEND_OVER_LIMIT") || (over !== null && over <= 0);
-    if (this.busy && !this.requoting && !this.rejecting)
+    if (this.busy && !this.requoting && this.rejecting === null)
       return confirm ? "Confirming…" : "Approving…";
     return confirm ? "Confirm order" : "Approve order";
+  }
+
+  /** Approve (or Confirm) and Reject; each asks its question before anything is sent. */
+  private actions(order: Order) {
+    // The question takes focus, so a keyboard user hears it and lands on its first answer.
+    const ask = (question: "approve" | "reject") => () => {
+      if (this.busy) return;
+      this.confirming = question;
+      void this.updateComplete.then(() =>
+        this.renderRoot.querySelector<HTMLElement>(".confirm button")?.focus(),
+      );
+    };
+    return html`<div class="actions" part="actions">
+      <button
+        part="button approve"
+        class="btn primary"
+        aria-busy=${this.busy ? "true" : "false"}
+        @click=${ask("approve")}
+      >
+        ${this.approveLabel(order)}
+      </button>
+      <button part="button reject" class="btn brand" @click=${ask("reject")}>Reject</button>
+    </div>`;
+  }
+
+  /**
+   * The second click: Approve states the total it commits to; Reject offers to stop or to let
+   * the agent look for alternatives. Cancel goes back to the buttons.
+   */
+  private confirmation(order: Order, confirm: () => void) {
+    const cancel = html`<button
+      type="button"
+      part="button cancel"
+      class="btn ghost"
+      @click=${() => (this.busy ? undefined : (this.confirming = null))}
+    >
+      Cancel
+    </button>`;
+    if (this.confirming === "approve")
+      return html`<div
+        class="confirm"
+        part="confirm"
+        role="group"
+        aria-labelledby="confirm-question"
+      >
+        <p id="confirm-question" class="strong">
+          Approve order of ${money(round(this.total(order, "gross")))} ${vat("gross")}?
+        </p>
+        <div class="actions">
+          <button
+            part="button approve-confirm"
+            class="btn primary"
+            aria-busy=${this.busy ? "true" : "false"}
+            @click=${() => (this.busy ? undefined : confirm())}
+          >
+            ${this.approveLabel(order)}
+          </button>
+          ${cancel}
+        </div>
+      </div>`;
+    const reject = (next: "stop" | "alternatives", label: string) =>
+      html`<button
+        part="button reject-${next}"
+        class="btn ${next === "stop" ? "brand" : "secondary"}"
+        aria-busy=${this.busy && this.rejecting === next ? "true" : "false"}
+        @click=${() => {
+          if (this.busy) return;
+          this.rejecting = next;
+          this.decide({ decision: "reject", next, proposalVersion: order.proposalVersion });
+        }}
+      >
+        ${this.busy && this.rejecting === next ? "Rejecting…" : label}
+      </button>`;
+    return html`<div class="confirm" part="confirm" role="group" aria-labelledby="confirm-question">
+      <p id="confirm-question" class="strong">Reject this order?</p>
+      <div class="actions">
+        ${reject("stop", ORDER_ACTIONS.rejectStop)}
+        ${reject("alternatives", ORDER_ACTIONS.rejectAlternatives)} ${cancel}
+      </div>
+    </div>`;
   }
 
   private pendingBody(order: Order) {
@@ -1262,7 +1368,7 @@ export class ApprovalCard extends LitElement {
           : nothing
       }
       <p class="total-row">
-        <span>Order total</span
+        <span>Order total <span class="vat">${vat("net")}</span></span
         ><span class="value" aria-live="polite">${money(this.total(order, "net"))}</span>
       </p>
       ${
@@ -1270,33 +1376,7 @@ export class ApprovalCard extends LitElement {
           ? nothing
           : html`<p class="message danger" role="alert" part="decision-error">${this.error}</p>`
       }
-      <div class="actions" part="actions">
-        <button
-          part="button approve"
-          class="btn primary"
-          aria-busy=${this.busy && !this.rejecting ? "true" : "false"}
-          @click=${() => (this.busy ? undefined : confirm())}
-        >
-          ${this.approveLabel(order)}
-        </button>
-        <button
-          part="button reject"
-          class="btn brand"
-          aria-busy=${this.busy && this.rejecting ? "true" : "false"}
-          @click=${() => {
-            if (this.busy) return;
-            // Just reject: no reason form yet, and the agent does not try again.
-            this.rejecting = true;
-            this.decide({
-              decision: "reject",
-              next: "stop",
-              proposalVersion: order.proposalVersion,
-            });
-          }}
-        >
-          ${this.busy && this.rejecting ? "Rejecting…" : "Reject"}
-        </button>
-      </div>
+      ${this.confirming === null ? this.actions(order) : this.confirmation(order, confirm)}
       ${
         this.canAsk
           ? html`<button
@@ -1450,19 +1530,17 @@ export class ApprovalCard extends LitElement {
 
   private decidedBody(order: Order) {
     const decision = order.decision;
+    // Only the approver decides on the card; `decision.by` is their account id.
     const by =
-      decision === null
-        ? null
-        : `${decision.by === "approver" ? "You" : decision.by}, ${when(new Date(decision.at)).replace("Today", "today")}`;
+      decision === null ? null : `You, ${when(new Date(decision.at)).replace("Today", "today")}`;
     const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
-    const delivery = earliest === undefined ? "" : `Delivery ${day(earliest)}. `;
     const result =
       order.status === "placed"
         ? {
             tone: "success",
             svg: checkCircle,
             title: `Order sent to ${brand.name}`,
-            text: `${delivery}Confirmation also on the approval page.`,
+            text: earliest === undefined ? "" : `Delivery ${day(earliest)}.`,
           }
         : order.status === "awaiting_payment"
           ? {
@@ -1475,14 +1553,14 @@ export class ApprovalCard extends LitElement {
             ? {
                 tone: "",
                 svg: search,
-                title: "Rejected. The agent looks for a better option",
+                title: "Declined. The agent looks for a better option",
                 text: "A new approval request comes here if the agent finds one.",
               }
             : decision?.next === "stop"
               ? {
                   tone: "",
                   svg: xCircle,
-                  title: "Rejected. No order placed.",
+                  title: "Declined. No order placed.",
                   text: "Nothing is ordered unless you ask the agent again.",
                 }
               : {
@@ -1512,32 +1590,19 @@ export class ApprovalCard extends LitElement {
             ${
               order.status === "placed"
                 ? rows([
-                    ["Order no.", order.orderId],
+                    ["Order no.", formatOrderNumber(order.orderId)],
                     ["Delivery", earliest === undefined ? null : day(earliest)],
-                    ["Total", money(order.total.net)],
+                    ["Total", `${money(order.total.net)} ${vat("net")}`],
                     ["Confirmed by", decision === null ? null : "You"],
                     ["Confirmed at", decision === null ? null : timeOnly(new Date(decision.at))],
                   ])
                 : nothing
             }
-            ${this.changeUntil(order)} ${this.products(order)}`
+            ${this.products(order)}`
           : decision?.next === "stop"
             ? nothing
             : rows([["Your note", note === "" ? null : `“${note}”`]])
       }`;
-  }
-
-  /** Prototype P7: "You can still change or cancel it until … on the approval page." */
-  private changeUntil(order: Order) {
-    const cutoff = order.lines
-      .map((l) => l.claims.cutoffAt)
-      .filter((c): c is string => c !== null)
-      .toSorted()[0];
-    if (cutoff === undefined) return nothing;
-    return html`<p class="open-until body-small">
-      ${icon(clock16)}You can still change or cancel it until ${when(new Date(cutoff))} on the
-      approval page.
-    </p>`;
   }
 
   /** v17 "More details": a disclosure at the bottom of every card, collapsed by default. */
@@ -1563,6 +1628,7 @@ export class ApprovalCard extends LitElement {
           <h3 class="section-title">Your request</h3>
           ${order.originalRequest === null ? nothing : html`<p>“${order.originalRequest}”</p>`}
           ${rows([
+            ["Order id", order.orderId],
             ["Sent", when(new Date(order.createdAt))],
             ["Sent by", order.agentId],
           ])}

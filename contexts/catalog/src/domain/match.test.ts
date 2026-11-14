@@ -12,10 +12,44 @@ describe("hard constraint match", () => {
     expect(matchHard(new Set(), lactoseFree)).toEqual({ lactose: "unknown" });
   });
 
-  test("an attribute without a data rule is unknown", () => {
-    expect(
-      matchHard(new Set(["FREE_FROM_GLUTEN"]), [{ attribute: "gluten", is: "free_from" }]),
-    ).toEqual({ gluten: "unknown" });
+  const eggFree = [{ attribute: "egg", is: "free_from" }] as const;
+
+  test("CONTAINS or MAY_CONTAIN of the allergen is contradicted", () => {
+    expect(matchHard(new Set(["CONTAINS:AE"]), eggFree)).toEqual({ egg: "contradicted" });
+    expect(matchHard(new Set(["MAY_CONTAIN:AE"]), eggFree)).toEqual({ egg: "contradicted" });
+  });
+
+  test("FREE_FROM or the free-from claim is confirmed; no data or data on other allergens is unknown", () => {
+    expect(matchHard(new Set(["FREE_FROM:AE"]), eggFree)).toEqual({ egg: "confirmed" });
+    expect(matchHard(new Set(["FREE_FROM_EGGS"]), eggFree)).toEqual({ egg: "confirmed" });
+    expect(matchHard(new Set(), eggFree)).toEqual({ egg: "unknown" });
+    expect(matchHard(new Set(["FREE_FROM:AW", "UNDECLARED:AE"]), eggFree)).toEqual({
+      egg: "unknown",
+    });
+  });
+
+  test("a contradicting allergen fact wins over a free-from claim", () => {
+    expect(matchHard(new Set(["FREE_FROM_LACTOSE", "MAY_CONTAIN:ML"]), lactoseFree)).toEqual({
+      lactose: "contradicted",
+    });
+    expect(matchHard(new Set(["FREE_FROM:AE", "CONTAINS:AE"]), eggFree)).toEqual({
+      egg: "contradicted",
+    });
+  });
+
+  test("a claim-only attribute is confirmed by its claim and contradicted by its low claim", () => {
+    const fatFree = [{ attribute: "fat", is: "free_from" }] as const;
+    expect(matchHard(new Set(["FREE_FROM_FAT"]), fatFree)).toEqual({ fat: "confirmed" });
+    expect(matchHard(new Set(["LOW_FAT"]), fatFree)).toEqual({ fat: "contradicted" });
+  });
+
+  test("vegan is confirmed by the VEGAN claim and contradicted by an animal allergen, not by traces", () => {
+    const vegan = [{ attribute: "vegan", is: "yes" }] as const;
+    expect(matchHard(new Set(["VEGAN", "MAY_CONTAIN:AM"]), vegan)).toEqual({ vegan: "confirmed" });
+    expect(matchHard(new Set(["VEGAN", "CONTAINS:AE"]), vegan)).toEqual({
+      vegan: "contradicted",
+    });
+    expect(matchHard(new Set(["CONTAINS:AW"]), vegan)).toEqual({ vegan: "unknown" });
   });
 
   test("only a contradicted match counts as contradicted", () => {

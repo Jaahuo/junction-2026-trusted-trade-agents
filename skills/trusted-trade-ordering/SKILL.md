@@ -13,7 +13,7 @@ Do the steps in order. Each step ends when its output is in hand.
 
 1. **Read the mandate.** Call `get_mandate`. Done when you know the limits in force: spend per order (EUR, gross), allowed categories, substitution policy, payment terms. A 404 means no mandate exists. Tell the user that an approver must register one, and stop.
 2. **Search.** Call `search_products` with the user's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words). Done when you hold a shortlist of candidates.
-   - Put a requirement the user cannot waive in `hard`. Only `{ attribute: "lactose", is: "free_from" }` is supported. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
+   - Put a requirement the user cannot waive in `hard`. Supported: `{ attribute: <allergen or free-from claim>, is: "free_from" }`, for example `gluten`, `egg`, `lactose`, `peanut`, and `{ attribute: "vegan", is: "yes" }`. The tool input schema lists every attribute. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
    - Put a preference in `soft`. It only changes the ranking.
    - Read `match` on each candidate: `confirmed`, `contradicted` or `unknown`. Missing data is `unknown`, never `confirmed`. An `unknown` match sends the order to approval, unless the mandate allows missing allergen data (`allergenData.ifNoData: auto`).
 3. **Request offers.** Call `get_offers` for the shortlist only. Done when every candidate is an offer or is listed in `omitted` with a reason.

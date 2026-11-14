@@ -5,6 +5,7 @@ import { plainPageUrl, type ViewData, type ViewEntryOf, viewEntry } from "../../
 import { lang, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
+import { required } from "../search-results/search-results.ts";
 import { loadMandate } from "./loader.ts";
 import {
   categoriesText,
@@ -246,7 +247,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
             hard.length === 0
               ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${hard.map(() => html`<li>${text.freeFromLactose}</li>`)}
+                  ${hard.map((item) => html`<li>${required(item.attribute)}</li>`)}
                 </ul>`
           }
           <p class="strong">${text.preferred}</p>

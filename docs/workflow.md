@@ -68,6 +68,8 @@ The `gate` workflow keeps one aggregate `gate` check for required-check consumer
 
 Gate jobs use `[self-hosted, linux, x64, junction-ci]` to select four repository-scoped Vultr runners. Each runner has a separate Docker daemon and network namespace, so concurrent jobs can reuse service ports and container names. The separate `vultr-github-runners` OpenTofu project owns the host. This repository contains no runner infrastructure.
 
+The test job stores its disposable PostgreSQL data in a 2 GiB `tmpfs`. This avoids network-backed boot-disk latency without changing database durability settings or test timeouts. Docker discards the data when the job removes the service container.
+
 These persistent runners are privileged and accept trusted code only. Do not approve untrusted fork jobs on them. PR, main-push and scheduled gates run code checks without production credentials.
 
 Deployment jobs stay on GitHub-hosted `ubuntu-24.04` runners. Only a successful main-push gate can enable automatic deployment. Scheduled gates do not deploy.

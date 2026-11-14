@@ -1,4 +1,9 @@
-import type { DecideApprovalRequest, Order, PendingList } from "@app/contract";
+import {
+  type DecideApprovalRequest,
+  type Order,
+  type PendingList,
+  REASON_TEXT,
+} from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { css, html, nothing } from "lit";
 import {
@@ -14,7 +19,7 @@ import warningLarge from "../../shared/icons/warning-32.svg?raw";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { defineApprovalCard, reasonSummaries } from "./approval-card.ts";
-import { brandHeader, cardStyles, day, icon, money, when } from "./parts.ts";
+import { brandHeader, cardStyles, icon, money, orderName, vat, when } from "./parts.ts";
 
 /**
  * Loads the tool result from `source` and shows each view state: loading, error, the empty
@@ -218,9 +223,15 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     });
   }
 
-  /** Reads the order limit once, when the first order is shown; without it the block shows no limit. */
+  /**
+   * Reads the order limit once, when an over-limit order is shown; without it the block shows no
+   * limit. Other orders need no limit, so the host shows no tool call for them.
+   */
   override updated() {
-    if (this.limitAsked || this.source === null || this.state.kind !== "done") return;
+    const state = this.state;
+    if (this.limitAsked || this.source === null || state.kind !== "done") return;
+    const orders = "orders" in state.data ? state.data.orders : [state.data];
+    if (!orders.some((o) => o.reasons.includes("SPEND_OVER_LIMIT"))) return;
     this.limitAsked = true;
     void callAction(this.source, "get_mandate", {}, null).then((result) => {
       if (result.kind === "done" && result.data.status === "active")
@@ -264,8 +275,20 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       updated.reasons.every((r) => order.reasons.includes(r))
     )
       await this.decide(updated, { decision: "approve", proposalVersion: updated.proposalVersion });
-    // The model learns the decision made on the card, so it does not say the order still waits.
-    if (updated.status !== "pending_approval") void this.source.context?.(decisionContext(updated));
+    if (updated.status !== "pending_approval") await this.tell(updated);
+  }
+
+  /**
+   * The model learns the decision made on the card, with the order id, so it does not say the
+   * order still waits. Only "Reject, allow alternatives" leaves the agent work to do: that one is
+   * also said in the chat, which starts the agent's turn. A host that refuses it changes nothing
+   * on the card; the agent reads the context with the user's next message.
+   */
+  private async tell(order: Order) {
+    const text = decisionText(order);
+    await this.source?.context?.(`${text} Order id: ${order.orderId}.`).catch(() => undefined);
+    if (order.status === "declined" && order.decision?.next === "alternatives")
+      await this.source?.message?.(text).catch(() => undefined);
   }
 
   /** Opens an order from the list (or goes back with null) at the top of the view. */
@@ -321,11 +344,10 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   /** Prototype P4: the collapsed card while the agent works on the order. */
   private updating(order: Order) {
-    const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     return html`<article class="updating" part="updating" role="status">
       <img src=${brand.logo} alt=${brand.name} />
       <div class="updating-text">
-        <p class="strong">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</p>
+        <p class="strong">${orderName(order)}</p>
         <p class="body-small">The agent is updating this order</p>
       </div>
       <span class="shimmer load-bar strip-bar" aria-hidden="true"></span>
@@ -369,28 +391,6 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     </article>`;
   }
 
-  private error(approvalUrl: string | null) {
-    return html`<article class="card" part="error" role="alert">
-      ${brandHeader(`${brand.name} approvals`)}
-      <div class="body center">
-        ${icon(warningLarge)}
-        <p class="headline">This approval can't be shown here</p>
-        <p class="secondary">Open it on the approval page to review and decide.</p>
-        <div class="actions">
-          ${
-            approvalUrl === null
-              ? nothing
-              : html`<a class="btn primary" href=${approvalUrl} target="_blank" rel="noreferrer"
-                  >Open approval page</a
-                >`
-          }
-          <button class="btn ghost" @click=${() => this.reload()}>Try again</button>
-        </div>
-        ${approvalUrl === null ? nothing : html`<p class="label-small secondary">Opens in a new tab</p>`}
-      </div>
-    </article>`;
-  }
-
   private empty() {
     return html`<article class="card" part="empty">
       ${brandHeader(`${brand.name} approvals`, html`<h2 class="title">Approvals</h2>`)}
@@ -416,13 +416,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
           <ul class="list">
             ${orders.map((order) => {
               const claims = order.lines.map((l) => l.claims);
-              const delivery = claims.map((c) => c.deliveryDate).toSorted()[0];
               const decideBy = Math.min(...claims.map((c) => c.exp));
               return html`<li class="item">
                 <p class="item-name">
-                  <span class="name"
-                    >${delivery === undefined ? "Order" : `Order for ${day(delivery)}`}</span
-                  ><span>${money(order.total.net)}</span>
+                  <span class="name">${orderName(order)}</span
+                  ><span>${money(order.total.net)} ${vat("net")}</span>
                 </p>
                 <ul class="item-reasons body-small">
                   ${reasonSummaries(order).map(
@@ -456,7 +454,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   override render() {
     const state = this.state;
     if (state.kind === "loading") return this.loading();
-    if (state.kind === "error") return this.error(state.plainUrl);
+    if (state.kind === "error") return errorCard(state.plainUrl, () => this.reload());
     if (state.kind === "empty") return this.empty();
     return this.renderDone(state.data);
   }
@@ -506,11 +504,46 @@ const decisionFailure = (result: { kind: string; message?: string }) => {
   );
 };
 
-/** What the model is told after a decision on the card. */
-const decisionContext = (order: Order) =>
-  order.status === "placed" || order.status === "awaiting_payment"
-    ? `The approver confirmed order ${order.orderId} on the approval card. It was sent to ${brand.name}.`
-    : `The approver rejected order ${order.orderId} on the approval card. Nothing is ordered. Do not ask for its approval again unless the user asks for a new order.`;
+/** The decision made on the card and what the agent does next, in the approver's words, without ids. */
+export const decisionText = (order: Order) => {
+  const name = orderName(order);
+  if (order.status === "placed") return `${name} approved. It is placed with ${brand.name}.`;
+  if (order.status === "awaiting_payment")
+    return `${name} approved. It goes to ${brand.name} when the payment is confirmed.`;
+  if (order.status === "rejected")
+    return `${name} was not placed: ${order.reasons.map((r) => REASON_TEXT[r]).join(" ")}`;
+  return order.decision?.next === "alternatives"
+    ? `${name} rejected. Look for alternatives and send me a new order to approve.`
+    : `${name} rejected. Order nothing for it, and do not ask again unless I ask for a new order.`;
+};
+
+/** The error state: the approval page when there is one, and Try again. */
+export const errorCard = (approvalUrl: string | null, retry: () => void) =>
+  html`<article class="card" part="error" role="alert">
+    ${brandHeader(`${brand.name} approvals`)}
+    <div class="body center">
+      ${icon(warningLarge)}
+      <p class="headline">This approval can't be shown here</p>
+      <p class="secondary">
+        ${
+          approvalUrl === null
+            ? "Try again in a moment."
+            : "Open it on the approval page to review and decide."
+        }
+      </p>
+      <div class="actions">
+        ${
+          approvalUrl === null
+            ? nothing
+            : html`<a class="btn primary" href=${approvalUrl} target="_blank" rel="noreferrer"
+                >Open approval page</a
+              >`
+        }
+        <button class="btn ghost" @click=${retry}>Try again</button>
+      </div>
+      ${approvalUrl === null ? nothing : html`<p class="label-small secondary">Opens in a new tab</p>`}
+    </div>
+  </article>`;
 
 /** Puts a decided order back into the tool result it came from. */
 const replace = (data: Order | PendingList, updated: Order) =>

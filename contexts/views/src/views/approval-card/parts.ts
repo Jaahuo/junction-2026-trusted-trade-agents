@@ -1,4 +1,4 @@
-import type { OfferClaims } from "@app/contract";
+import type { OfferClaims, Order } from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
@@ -59,6 +59,13 @@ export const day = (date: string) =>
   new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" }).format(
     new Date(date),
   );
+/** "Order for Mon 16 Nov": an order named by its earliest delivery day. */
+export const orderName = (order: Order) => {
+  const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
+  return earliest === undefined ? "Order" : `Order for ${day(earliest)}`;
+};
+/** The VAT label that goes after a total: net totals exclude VAT, gross ones include it. */
+export const vat = (basis: "net" | "gross") => (basis === "net" ? "excl. VAT" : "incl. VAT");
 const clock = (at: Date) =>
   new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(at);
 /** "Today 21:40", or "14 Nov, 21:40" on another day. */
@@ -175,6 +182,14 @@ export const cardStyles = css`
   .headline .name {
     flex: 1;
     min-width: 0;
+  }
+  .headline .vat {
+    display: block;
+    color: var(--color-text-on-brand-subtle);
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    text-align: right;
   }
   .facts {
     display: flex;

@@ -1,10 +1,11 @@
 import { intlLocale, pick } from "./locale.ts";
+import { FI_ALLERGENS } from "./trust.ts";
 
-// Labels for a preferred (soft) constraint, shared by search results and agent settings:
-// "Country of origin: Finland", "Pakkausmateriaali: palautettava lasi".
+// Constraint labels, shared by search results and agent settings:
+// "Gluten free", "Vegan", "Country of origin: Finland", "Pakkausmateriaali: palautettava lasi".
 
 /** "packagingMaterial", "invented_drinks" → "Packaging material", "Invented drinks". */
-export const words = (key: string) => {
+const words = (key: string) => {
   const spaced = key
     .replace(/([a-z\d])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
@@ -58,3 +59,23 @@ export const preferred = (attribute: string, prefer: string) =>
       ? country(prefer)
       : (pick(NAMES).values[prefer] ?? words(prefer))
   }`;
+
+const REQUIRED: Record<
+  "en" | "fi",
+  { labels: Record<string, string>; free: (attribute: string) => string }
+> = {
+  en: { labels: { vegan: "Vegan" }, free: (attribute) => `${attributeName(attribute)} free` },
+  fi: {
+    labels: { lactose: "Laktoositon", vegan: "Vegaaninen" },
+    free: (attribute) => {
+      const name = FI_ALLERGENS[attribute];
+      return name === undefined ? `${attributeName(attribute)}: ei sisällä` : `Ei ${name}`;
+    },
+  },
+};
+
+/** "Gluten free", "Vegan": a required (hard) constraint as the approver reads it (SPEC-004). */
+export const required = (attribute: string) => {
+  const text = pick(REQUIRED);
+  return text.labels[attribute] ?? text.free(attribute);
+};

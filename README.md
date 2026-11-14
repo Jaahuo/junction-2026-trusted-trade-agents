@@ -100,7 +100,7 @@ These results do not establish support in other hosts or for the complete curren
 - Add the first Valio Aimo skin as a wholesaler theme when [#73](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/73) is complete.
 - Harden offers: add comparison prices and deposits, identify unconfirmed stock, and refresh availability ([#120](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/120)).
 - Consider the proposed trust chain: verify signatures in views ([#68](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/68)), and add signed receipts and a hash-chained audit record ([#70](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/70)).
-- Consider the proposed support for all GS1 allergens and free-from claims ([#71](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/71)) and agent rationale on order lines ([#72](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/72)).
+- Consider agent rationale on order lines ([#72](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/72)).
 - Demonstrate only attacks the first build stops; measure the host flow and rogue-agent scenarios ([#19](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19)).
 
 ## Setup

@@ -105,7 +105,7 @@ describe("POST /offers", () => {
     const fake = offers();
     const response = await post(
       createApi(fake.deps),
-      request({ hard: [{ attribute: "gluten", is: "free_from" }] }),
+      request({ hard: [{ attribute: "unicorn", is: "free_from" }] }),
     );
     const { status, body } = await errorOf(response);
     expect(status).toBe(400);

@@ -21,9 +21,12 @@ export const createApp = async (
   }
   if (webDist !== undefined) {
     const root = resolve(webDist);
-    app.get("/*", async ({ path, set }) => {
+    app.get("/*", async ({ path, set, status }) => {
       const file = Bun.file(resolve(root, `.${path}`));
       const isAsset = file.name?.startsWith(`${root}/`) === true && (await file.exists());
+      if (!isAsset && path.startsWith("/views/")) {
+        return status(404, "Not Found");
+      }
       if (isAsset && path.startsWith("/assets/")) {
         set.headers["cache-control"] = "public, max-age=31536000, immutable";
       }

@@ -140,12 +140,24 @@ describe("tools/list", () => {
     expect(() => viewToolsMode("hidden")).toThrow("MCP_VIEW_TOOLS");
   });
 
-  test("every tool's inputSchema is TOOL_INPUT[tool] and its outputSchema is TOOL_OUTPUT[tool]", async () => {
+  test("every tool's inputSchema is TOOL_INPUT[tool], plus language on a tool with a view, and its outputSchema is TOOL_OUTPUT[tool]", async () => {
     for (const tool of await mcp().listTools()) {
       const name = z.enum([...MODEL_TOOLS, ...VIEW_TOOLS]).parse(tool.name);
+      const input = z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" });
+      const hasView = VIEWS.some(
+        (view) => !VIEWS_NOT_IN_CHAT.has(view.view) && view.tools.some((entry) => entry === name),
+      );
       expect({ name, input: tool.inputSchema, output: tool.outputSchema }).toEqual({
         name,
-        input: z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" }),
+        input: hasView
+          ? {
+              ...input,
+              properties: {
+                ...input["properties"],
+                language: { type: "string", description: expect.any(String) },
+              },
+            }
+          : input,
         output: z.toJSONSchema(TOOL_OUTPUT[name], { target: "draft-7", io: "output" }),
       });
     }
@@ -181,6 +193,13 @@ describe("tools/call", () => {
     const { callTool, calls } = mcp();
     const result = await callTool("search_products", fixtures.searchRequest);
     expect(result.structuredContent).toEqual(fixtures.searchResult);
+    expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
+  });
+
+  test("language reaches no REST route: search_products sends the request without it", async () => {
+    const { callTool, calls } = mcp();
+    const result = await callTool("search_products", { ...fixtures.searchRequest, language: "fi" });
+    expect(result.isError).toBeUndefined();
     expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
   });
 

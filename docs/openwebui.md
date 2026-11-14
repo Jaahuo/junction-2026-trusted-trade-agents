@@ -29,7 +29,7 @@ The MCP server must be reachable from the container.
 `bun scripts/openwebui.ts setup` runs the host Python provisioner to refresh models, tools, embedded skills and persisted inference settings from the local checkout.
 The system prompt embeds this checkout's `skills/trusted-trade-ordering/SKILL.md` and `reason-codes.md`.
 Run setup again after a base prompt or local skill changes. Run `up` again to rebuild the image and package those changes for a production-like runtime.
-`OPENWEBUI_MAX_TOKENS` defaults to 4096.
+`OPENWEBUI_MAX_TOKENS` defaults to 16384.
 `bun scripts/openwebui.ts down` stops the container and preserves its data volume.
 
 ## Existing data

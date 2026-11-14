@@ -13,7 +13,7 @@ import provision_agent as agent
 
 
 class ProvisionAgentTests(unittest.TestCase):
-    def provision(self, permission="False", existing=None, max_tokens="4096"):
+    def provision(self, permission="False", existing=None, max_tokens="16384"):
         self.models = copy.deepcopy(existing or {})
         self.writes = []
 

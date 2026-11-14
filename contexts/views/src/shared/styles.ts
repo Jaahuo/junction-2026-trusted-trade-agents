@@ -70,6 +70,12 @@ export const base = css`
   dd {
     margin: 0;
   }
+  /* Headings take their size from the type classes, not the browser's 1.5em default. */
+  h2,
+  h3 {
+    font-size: inherit;
+    font-weight: inherit;
+  }
   .label-small {
     font-size: var(--font-size-2xs);
     font-weight: 600;

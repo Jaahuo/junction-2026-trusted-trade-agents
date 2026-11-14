@@ -5,10 +5,13 @@ import {
   REASON_TEXT,
   type ReasonCode,
 } from "@app/contract";
-import { css, html, LitElement, nothing, type TemplateResult } from "lit";
+import { css, html, LitElement, nothing } from "lit";
 import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
+import clock16 from "../../shared/icons/clock-16.svg?raw";
 import clockIcon from "../../shared/icons/clock.svg?raw";
+import info16 from "../../shared/icons/info-16.svg?raw";
+import info from "../../shared/icons/info.svg?raw";
 import search from "../../shared/icons/search.svg?raw";
 import warning from "../../shared/icons/warning.svg?raw";
 import xCircle from "../../shared/icons/x-circle.svg?raw";
@@ -22,74 +25,70 @@ import {
   icon,
   money,
   number,
-  price,
   rows,
   stdUnits,
-  unit,
   when,
 } from "./parts.ts";
 
-// Figma: Junction 2026 › Screens › "Approval request — v8". Single column (chat) below
+// Figma: Junction 2026 › Screens › "Approval request — v16 (multi-product orders)", with
+// the v11–v15 style. Every approval is an order of products. Single column (chat) below
 // 760px, two columns (desktop) from 760px. Fields the order does not carry (order limit,
-// kitchen, on behalf of, choice) follow the "no limit, kitchen or on behalf of" variants.
+// kitchen, on behalf of) and per-product actions (replace, ask the agent, edit products)
+// are left out until the contract has them.
 
-type Reason = { title: string; detail: string | null };
+type Reason = { title: string; detail: string | null; tone: "warning" | "info" };
 
-/** Headline and one-line explanation per reason, from the v8 copy list. */
+const warn = (title: string, detail: string | null = null): Reason => ({
+  title,
+  detail,
+  tone: "warning",
+});
+
+/** Banner headline and short explanation per reason, from the v8 and v16 copy. */
 function reasonCopy(code: ReasonCode, order: Order, claims: OfferClaims | undefined): Reason {
   const p = claims?.product;
   switch (code) {
     case "SPEND_OVER_LIMIT":
-      return { title: "Over your order limit", detail: "Above the agent's spending limit." };
+      return warn("Over your order limit");
     case "NEW_PRODUCT":
       return {
         title: "New product",
-        detail: `${order.customer} has not ordered this product before.`,
-      };
-    case "CATEGORY_NOT_ALLOWED":
-      return {
-        title: "Category not allowed",
-        detail: p === undefined ? null : `${p.category} is outside the agent's allowed categories.`,
-      };
-    case "RELIABILITY_BELOW_MIN":
-      return {
-        title: "Delivery reliability below minimum",
-        detail:
-          p?.deliveryReliability == null
-            ? null
-            : `On-time delivery ${Math.round(p.deliveryReliability * 100)}%.`,
-      };
-    case "CO2_ABOVE_MAX":
-      return {
-        title: "CO₂ above maximum",
-        detail: p?.co2PerKg == null ? null : `${number(p.co2PerKg)} kg CO₂e per kg.`,
-      };
-    case "UNCONFIRMED_ALLERGEN":
-      return {
-        title: "Allergen information not confirmed",
-        detail: "Allergens for this product are not confirmed.",
-      };
-    case "UNCONFIRMED_STOCK":
-      return {
-        title: "Stock not confirmed",
-        detail:
-          claims === undefined ? null : `Stock for ${day(claims.deliveryDate)} is not confirmed.`,
-      };
-    case "QUANTITY_UNUSUAL":
-      return { title: "Unusually large quantity", detail: null };
-    case "PAYMENT_TERMS":
-      return {
-        title: "Payment terms need approval",
-        detail: order.paymentTerms === "pay_on_order" ? "Prepayment instead of invoice." : null,
+        detail: `${order.customer} has not ordered a product in this order before`,
+        tone: "info",
       };
     case "SUBSTITUTION":
-      return { title: "The requested product is out of stock", detail: REASON_TEXT[code] };
-    case "PRICE_CHANGED":
-      return { title: "Price changed since the offer", detail: null };
-    case "AVAILABILITY_DIFFERS":
-      return { title: "Delivery changed since the offer", detail: null };
+      return {
+        title: "Substitute proposed",
+        detail: "a product in this order is out of stock",
+        tone: "info",
+      };
+    case "CATEGORY_NOT_ALLOWED":
+      return warn("Category not allowed", p === undefined ? null : `${p.category} is not allowed`);
+    case "RELIABILITY_BELOW_MIN":
+      return warn(
+        "Delivery reliability below minimum",
+        p?.deliveryReliability == null
+          ? null
+          : `on-time delivery ${Math.round(p.deliveryReliability * 100)}%`,
+      );
+    case "CO2_ABOVE_MAX":
+      return warn(
+        "CO₂ above maximum",
+        p?.co2PerKg == null ? null : `${number(p.co2PerKg)} kg CO₂e per kg`,
+      );
+    case "UNCONFIRMED_ALLERGEN":
+      return warn("Allergen information not confirmed");
+    case "UNCONFIRMED_STOCK":
+      return warn("Stock not confirmed");
+    case "QUANTITY_UNUSUAL":
+      return warn("Unusually large quantity");
+    case "PAYMENT_TERMS":
+      return warn(
+        "Payment terms need approval",
+        order.paymentTerms === "pay_on_order" ? "prepayment instead of invoice" : null,
+      );
     default:
-      return { title: REASON_TEXT[code], detail: null };
+      return warn(REASON_TEXT[code]);
   }
 }
 
@@ -112,6 +111,13 @@ const REJECT_REASONS = [
 
 const REQUOTE: ReadonlySet<ReasonCode> = new Set(["PRICE_CHANGED", "AVAILABILITY_DIFFERS"]);
 const isApproved = (o: Order) => o.status === "placed" || o.status === "awaiting_payment";
+const signed = (value: number) => `${value >= 0 ? "+" : "−"}${money(Math.abs(value))}`;
+const daysBetween = (from: string, to: string) =>
+  Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000);
+const dayShift = (days: number) =>
+  `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ${days > 0 ? "later" : "earlier"}`;
+/** Products shown before "Show N more products". */
+const SHOWN = 3;
 
 /**
  * One order for a human decision. Framework-agnostic: set `order` and `busy`, listen for
@@ -125,6 +131,7 @@ export class ApprovalCard extends LitElement {
     rejecting: { state: true },
     rejectReason: { state: true },
     detailsOpen: { state: true },
+    allProducts: { state: true },
   };
 
   static override styles = [
@@ -135,78 +142,105 @@ export class ApprovalCard extends LitElement {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
       }
-      .reason-headline {
+      .section-title {
+        color: var(--color-heading);
+        font-family: var(--font-family-condensed);
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.1;
+      }
+      .banner {
         display: flex;
-        align-items: center;
+        flex-direction: column;
         gap: var(--spacing-sm);
-        color: var(--color-text-warning);
-        font-weight: 600;
-      }
-      .reason {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-md);
-      }
-      .reason-list {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-md);
         padding: 0;
         list-style: none;
       }
-      .reason-list li {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: var(--spacing-2xs) var(--spacing-sm);
-        align-items: center;
+      .banner li {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--spacing-sm);
+        color: var(--color-text-warning);
       }
-      .reason-list .detail {
-        grid-column: 2;
-      }
-      .compare {
-        display: grid;
-        grid-template-columns: 40px 1fr auto;
-        gap: var(--spacing-sm) var(--spacing-md);
-        align-items: center;
-        padding: var(--spacing-lg);
-        border-radius: 0;
-        background: var(--color-bg-brand-subtle);
-      }
-      .compare.two {
-        grid-template-columns: 40px 1fr 1fr;
-      }
-      .compare .was {
-        color: var(--color-text-secondary);
-      }
-      .compare .now-label {
+      .banner li.info {
         color: var(--color-heading);
       }
-      .compare .num {
-        text-align: right;
-      }
-      .badges {
-        display: flex;
-        flex-wrap: wrap;
-        grid-column: 1 / -1;
-        gap: var(--spacing-sm);
-      }
-      .badge {
-        padding: var(--spacing-2xs) var(--spacing-sm);
-        border-radius: var(--radius-full);
-        background: var(--color-bg-warning);
-        color: var(--color-text-warning);
-      }
-      .lines {
+      .changes {
         display: flex;
         flex-direction: column;
         gap: var(--spacing-md);
+      }
+      .change {
+        display: grid;
+        grid-template-columns: 90px 1fr auto;
+        gap: var(--spacing-md);
+      }
+      .change .delta {
+        color: var(--color-text-warning);
+      }
+      .product-list {
+        margin-top: var(--spacing-sm);
         padding: 0;
         list-style: none;
       }
-      .lines li {
+      .product {
         display: flex;
-        justify-content: space-between;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+        padding: var(--spacing-md) 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+      .product-top {
+        display: flex;
         gap: var(--spacing-lg);
+        font-weight: 600;
+      }
+      .product-name {
+        flex: 1;
+        min-width: 0;
+        color: var(--color-heading);
+      }
+      .product-amounts {
+        display: flex;
+        gap: var(--spacing-lg);
+      }
+      .product-note {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-xs);
+        color: var(--color-heading);
+        font-size: var(--font-size-2xs);
+      }
+      .more-products {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-md) 0;
+        border: 0;
+        background: none;
+        color: var(--color-link);
+        font: inherit;
+        font-size: var(--font-size-xs);
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .more-products[aria-expanded="true"] .icon {
+        transform: rotate(180deg);
+      }
+      .ordered-for {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+        padding: var(--spacing-lg);
+        background: var(--color-bg-brand-subtle);
+      }
+      .ordered-for dt {
+        color: var(--color-text);
+      }
+      .open-until {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
       }
       .group {
         display: flex;
@@ -220,7 +254,6 @@ export class ApprovalCard extends LitElement {
         display: flex;
         gap: var(--spacing-md);
         padding: var(--spacing-lg);
-        border-radius: 0;
         background: var(--color-bg-brand-subtle);
       }
       .result .title {
@@ -239,7 +272,7 @@ export class ApprovalCard extends LitElement {
       .result.danger .title {
         color: var(--color-text-danger);
       }
-      /* v8 "Sending": the busy primary button stays solid; only the others fade. */
+      /* "Sending": the busy primary button stays solid; only the others fade. */
       .btn.primary[aria-busy="true"]:disabled {
         background: var(--color-button);
         color: var(--color-button-text);
@@ -262,7 +295,7 @@ export class ApprovalCard extends LitElement {
         padding: var(--spacing-lg) var(--spacing-xl);
         border: 0;
         background: none;
-        font: inherit;
+        font-family: inherit;
         text-align: left;
         cursor: pointer;
       }
@@ -310,6 +343,7 @@ export class ApprovalCard extends LitElement {
   declare private rejecting: boolean;
   declare private rejectReason: (typeof REJECT_REASONS)[number] | null;
   declare private detailsOpen: boolean;
+  declare private allProducts: boolean;
 
   constructor() {
     super();
@@ -318,6 +352,7 @@ export class ApprovalCard extends LitElement {
     this.rejecting = false;
     this.rejectReason = null;
     this.detailsOpen = false;
+    this.allProducts = false;
   }
 
   private decide(request: DecideApprovalRequest) {
@@ -342,190 +377,202 @@ export class ApprovalCard extends LitElement {
     if (order.status === "awaiting_payment") return "Approved · waiting for payment";
     if (order.status !== "pending_approval") return "Rejected";
     if (this.rejecting) return "Rejecting";
-    if (order.reasons.includes("SUBSTITUTION")) return "Substitute needs your approval";
     if (order.reasons.some((r) => REQUOTE.has(r))) return "Offer changed · needs your approval";
     return "Needs your approval";
   }
 
-  /** v15: the order is named by its delivery day; the product moves into the facts. */
+  /** v16: an order of products, named by its delivery day, with order number and count. */
   private header(order: Order) {
-    const first = order.lines[0]?.claims;
     const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     const title = html`<div class="headline">
       <h2 class="name">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</h2>
       <p>${money(order.total.net)}</p>
     </div>`;
-    if (first === undefined) return brandHeader(this.eyebrow(order), title);
-    const std = stdUnits(first);
-    const pack = first.product.perSalesUnit;
-    const facts =
-      order.lines.length > 1
-        ? fact("Products", String(order.lines.length))
-        : order.reasons.includes("SUBSTITUTION")
-          ? html`${fact("Product", first.product.name, true)} ${fact("Quantity", amount(std))}
-            ${fact("Unit price", `${price(first.total.net / std.value)} / ${unit(std.unit)}`)}`
-          : html`${fact("Product", first.product.name, true)} ${fact("Quantity", amount(std))}
-            ${pack === null ? nothing : fact("Packs", `${number(first.quantity.value)} × ${amount(pack)}`)}`;
-    return brandHeader(this.eyebrow(order), title, html`<dl class="facts">${facts}</dl>`);
+    const facts = html`<dl class="facts">
+      ${fact("Order no.", order.orderId)} ${fact("Products", String(order.lines.length))}
+    </dl>`;
+    return brandHeader(this.eyebrow(order), title, facts);
   }
 
-  private requoteBlock(order: Order) {
+  /** The requote, if any: the summed change of total and delivery. */
+  private change(order: Order) {
     const last = order.requotes.at(-1);
-    if (last === undefined) return nothing;
-    const before = last.previous;
-    const now = last.current;
-    const diff = now.total.net - before.total.net;
-    const days = Math.round(
-      (new Date(now.deliveryDate).getTime() - new Date(before.deliveryDate).getTime()) / 86_400_000,
-    );
-    const pct = before.total.net === 0 ? 0 : Math.round((diff / before.total.net) * 100);
-    return html`<div class="compare two">
-        <span></span><span class="label-small secondary">Total</span
-        ><span class="label-small secondary">Delivery</span> <span class="label-small was">Was</span
-        ><span class="was">${money(before.total.net)}</span
-        ><span class="was">${day(before.deliveryDate)}</span>
-        <span class="label-small now-label">Now</span
-        ><span class="strong">${money(now.total.net)}</span
-        ><span class="strong">${day(now.deliveryDate)}</span>
-        <div class="badges label-small">
-          ${
-            diff === 0
-              ? nothing
-              : html`<span class="badge"
-                  >${diff > 0 ? "+" : "−"}${money(Math.abs(diff))}
-                  (${diff > 0 ? "+" : ""}${pct}%)</span
-                >`
-          }
-          ${
-            days === 0
-              ? nothing
-              : html`<span class="badge"
-                  >${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"}
-                  ${days > 0 ? "later" : "earlier"}</span
-                >`
-          }
-        </div>
-      </div>
-      ${
-        before.offerId === now.offerId
-          ? nothing
-          : html`<p class="body-small">New offer ${now.offerId} replaces ${before.offerId}.</p>`
-      }`;
-  }
-
-  private substitutionBlock(claims: OfferClaims) {
-    if (claims.replaces === null) return nothing;
-    const std = stdUnits(claims);
-    return html`<div class="compare">
-      <span></span><span class="label-small secondary">Product</span
-      ><span class="label-small secondary num">Price / ${unit(std.unit)}</span>
-      <span class="label-small was">Was</span><span class="was">${claims.replaces}</span
-      ><span></span> <span class="label-small now-label">Now</span
-      ><span class="strong">${claims.product.name}</span
-      ><span class="strong num">${price(claims.total.net / std.value)}</span>
-      ${
-        claims.shortfall === null
-          ? nothing
-          : html`<div class="badges label-small">
-              <span class="badge">${amount(claims.shortfall)} short</span>
-            </div>`
-      }
-    </div>`;
-  }
-
-  private requoteTitle(order: Order): Reason {
-    const changedPrice = order.reasons.includes("PRICE_CHANGED");
-    const changedDelivery = order.reasons.includes("AVAILABILITY_DIFFERS");
+    if (last === undefined) return null;
+    const total = order.total.net;
+    const before = total - last.current.total.net + last.previous.total.net;
     return {
-      title:
-        changedPrice && changedDelivery
-          ? "Price and delivery changed since the offer"
-          : changedDelivery
-            ? "Delivery changed since the offer"
-            : "Price changed since the offer",
-      detail: null,
+      total,
+      before,
+      days: daysBetween(last.previous.deliveryDate, last.current.deliveryDate),
+      deliveryBefore: last.previous.deliveryDate,
+      deliveryNow: last.current.deliveryDate,
     };
   }
 
-  private reasons(order: Order) {
+  /** Order-level reasons as "Title: detail" lines (v16 "Approval reasons"). */
+  private banner(order: Order) {
     const claims = order.lines[0]?.claims;
-    const codes = order.reasons.filter((r) => !REQUOTE.has(r));
-    const requoted = order.reasons.some((r) => REQUOTE.has(r));
-    const items: Reason[] = [
-      ...(requoted ? [this.requoteTitle(order)] : []),
-      ...codes.map((c) => reasonCopy(c, order, claims)),
-    ];
-    const only = items[0];
-    if (only === undefined) return nothing;
-    if (items.length > 1)
-      return html`<div class="reason" part="reason">
-        <p class="strong">${items.length} reasons need your approval</p>
-        <ul class="reason-list">
-          ${items.map(
-            (r) =>
-              html`<li>
-                ${icon(warning)}<span class="strong">${r.title}</span>
-                ${
-                  r.detail === null
-                    ? nothing
-                    : html`<span class="detail body-small secondary">${r.detail}</span>`
-                }
-              </li>`,
-          )}
-        </ul>
-      </div>`;
-    const body: TemplateResult | typeof nothing = requoted
-      ? this.requoteBlock(order)
-      : codes[0] === "SUBSTITUTION" && claims !== undefined
-        ? this.substitutionBlock(claims)
-        : codes[0] === "SPEND_OVER_LIMIT"
-          ? html`<p>This order is above the agent's spending limit, so it needs your approval.</p>`
-          : only.detail === null
-            ? nothing
-            : html`<p>${only.detail}</p>`;
-    return html`<div class="reason" part="reason">
-      <p class="reason-headline">${icon(warning)}${only.title}</p>
-      ${body}
-    </div>`;
+    const change = this.change(order);
+    const items: Reason[] = order.reasons
+      .filter((r) => !REQUOTE.has(r))
+      .map((r) => reasonCopy(r, order, claims));
+    if (order.reasons.some((r) => REQUOTE.has(r)))
+      items.unshift({
+        title: "Price and delivery changed",
+        detail:
+          change === null
+            ? null
+            : [
+                change.total === change.before ? null : signed(change.total - change.before),
+                change.days === 0 ? null : `delivery ${dayShift(change.days)}`,
+              ]
+                .filter(Boolean)
+                .join(", "),
+        tone: "warning",
+      });
+    if (items.length === 0) return nothing;
+    return html`<ul class="banner" part="reason">
+      ${items.map(
+        (r) =>
+          html`<li class=${r.tone}>
+            ${icon(r.tone === "info" ? info : warning)}
+            <p>
+              <span class="strong">${r.title}${r.detail ? ":" : ""}</span>${
+                r.detail ? ` ${r.detail}` : nothing
+              }
+            </p>
+          </li>`,
+      )}
+    </ul>`;
   }
 
-  private orderLines(order: Order) {
-    if (order.lines.length < 2) return nothing;
-    return html`<div class="group">
-      <p class="body-small secondary">Order lines</p>
-      <ul class="lines">
-        ${order.lines.map(
-          ({ claims }) =>
-            html`<li>
-              <div>
-                <p class="strong">${claims.product.name}</p>
-                <p class="body-small secondary">
-                  ${
-                    claims.product.perSalesUnit === null
-                      ? amount(claims.quantity)
-                      : `${number(claims.quantity.value)} × ${amount(claims.product.perSalesUnit)}`
-                  }
-                </p>
-              </div>
-              <p class="strong">${price(claims.total.net)}</p>
-            </li>`,
-        )}
+  /** One sentence on what approving means for the first reason. */
+  private guidance(order: Order) {
+    const reasons = order.reasons;
+    const text = reasons.includes("SUBSTITUTION")
+      ? "Confirm the order to accept the substitute, or reject it."
+      : reasons.includes("NEW_PRODUCT")
+        ? "Confirm the order to include the new product, or reject it."
+        : reasons.includes("SPEND_OVER_LIMIT")
+          ? "Approve the order as it is, or reject it so the agent can change it."
+          : null;
+    return text === null ? nothing : html`<p class="body-small">${text}</p>`;
+  }
+
+  /** v16 "What changed" for a re-quoted order: total and delivery, then and now. */
+  private whatChanged(order: Order) {
+    const c = this.change(order);
+    if (c === null) return nothing;
+    return html`<section class="changes">
+      <h3 class="section-title">What changed</h3>
+      <div class="change">
+        <span>Total</span>
+        <span
+          >${money(c.total)}<br /><span class="body-small secondary"
+            >was ${money(c.before)}</span
+          ></span
+        >
+        <span class="delta">${c.total === c.before ? "" : signed(c.total - c.before)}</span>
+      </div>
+      <div class="change">
+        <span>Delivery</span>
+        <span
+          >${day(c.deliveryNow)}<br /><span class="body-small secondary"
+            >was ${day(c.deliveryBefore)}</span
+          ></span
+        >
+        <span class="delta">${c.days === 0 ? "" : dayShift(c.days)}</span>
+      </div>
+    </section>`;
+  }
+
+  /** The note under a product that something applies to (v16 product line states). */
+  private lineNote(order: Order, c: OfferClaims): string | null {
+    if (c.replaces !== null) return `Substitute proposed · replaces ${c.replaces}`;
+    const requote = order.requotes.find((r) => r.current.offerId === c.offerId);
+    if (requote !== undefined)
+      return `Price changed · was ${money(requote.previous.total.net)} (${signed(c.total.net - requote.previous.total.net)})`;
+    if (c.shortfall !== null)
+      return `${amount(c.shortfall)} short${c.nextDeliveryDate === null ? "" : ` · rest from ${day(c.nextDeliveryDate)}`}`;
+    if (c.stock === "unconfirmed") return "Stock not confirmed";
+    return null;
+  }
+
+  private products(order: Order) {
+    const all = order.lines.map((l) => l.claims);
+    const visible = this.allProducts ? all : all.slice(0, SHOWN);
+    const hidden = all.length - SHOWN;
+    return html`<section part="products">
+      <h3 class="section-title">Products</h3>
+      <ul class="product-list">
+        ${visible.map((c) => {
+          const note = this.lineNote(order, c);
+          const pack = c.product.perSalesUnit;
+          return html`<li class="product">
+            <p class="product-top">
+              <span class="product-name">${c.product.name}</span><span>${money(c.total.net)}</span>
+            </p>
+            <p class="product-amounts body-small">
+              <span>${amount(stdUnits(c))}</span>
+              ${
+                pack === null
+                  ? nothing
+                  : html`<span class="secondary"
+                      >${number(c.quantity.value)} × ${amount(pack)}</span
+                    >`
+              }
+            </p>
+            ${note === null ? nothing : html`<p class="product-note">${icon(info16)}${note}</p>`}
+          </li>`;
+        })}
       </ul>
-    </div>`;
+      ${
+        hidden > 0
+          ? html`<button
+              class="more-products"
+              aria-expanded=${this.allProducts ? "true" : "false"}
+              @click=${() => (this.allProducts = !this.allProducts)}
+            >
+              ${
+                this.allProducts
+                  ? "Show fewer products"
+                  : `Show ${hidden} more product${hidden === 1 ? "" : "s"}`
+              }${icon(chevronDown)}
+            </button>`
+          : nothing
+      }
+    </section>`;
+  }
+
+  private orderedFor(order: Order) {
+    return html`<section class="ordered-for">
+      <h3 class="section-title">Ordered for</h3>
+      ${rows([["Customer", order.customer]])}
+    </section>`;
+  }
+
+  /** "Open until 23:32 today. Prices are fixed until then." from the first offer to expire. */
+  private openUntil(order: Order) {
+    const exp = Math.min(...order.lines.map((l) => l.claims.exp));
+    if (!Number.isFinite(exp)) return nothing;
+    const at = when(new Date(exp * 1000));
+    const until = at.startsWith("Today ") ? `${at.slice(6)} today` : at;
+    return html`<p class="open-until body-small">
+      ${icon(clock16)}Open until ${until}. Prices are fixed until then.
+    </p>`;
   }
 
   private approveLabel(order: Order) {
     if (this.busy) return "Approving…";
-    const [only, ...more] = order.reasons;
     if (order.reasons.some((r) => REQUOTE.has(r))) return "Approve new price";
-    if (more.length === 0 && only === "SUBSTITUTION") return "Use substitute";
-    if (more.length === 0 && only === "NEW_PRODUCT") return "Approve new product";
+    if (order.reasons.includes("SUBSTITUTION") || order.reasons.includes("NEW_PRODUCT"))
+      return "Confirm order";
     return "Approve order";
   }
 
   private pendingBody(order: Order) {
-    return html`${this.reasons(order)} ${this.orderLines(order)}
-      ${rows([["Customer", order.customer]])}
+    return html`${this.banner(order)} ${this.guidance(order)} ${this.whatChanged(order)}
+      ${this.products(order)} ${this.orderedFor(order)} ${this.openUntil(order)}
       <div class="actions" part="actions">
         <button
           part="button approve"
@@ -568,7 +615,7 @@ export class ApprovalCard extends LitElement {
         <label class="field-label" for="reject-note">Note to agent (optional)</label>
         <input id="reject-note" class="field" placeholder="Find a cheaper brand" />
       </div>
-      ${rows([["Customer", order.customer]])}
+      ${this.orderedFor(order)}
       <div class="actions">
         <button
           part="button send-back"
@@ -592,8 +639,8 @@ export class ApprovalCard extends LitElement {
       decision === null
         ? null
         : `${decision.by === "approver" ? "You" : decision.by}, ${when(new Date(decision.at)).replace("Today", "today")}`;
-    const claims = order.lines[0]?.claims;
-    const delivery = claims === undefined ? "" : ` Delivery ${day(claims.deliveryDate)}.`;
+    const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
+    const delivery = earliest === undefined ? "" : ` Delivery ${day(earliest)}.`;
     const result =
       order.status === "placed"
         ? {
@@ -652,7 +699,7 @@ export class ApprovalCard extends LitElement {
               ["Rejected by", by],
             ])
       }
-      ${rows([["Customer", order.customer]])}`;
+      ${this.products(order)} ${this.orderedFor(order)}`;
   }
 
   private details(order: Order) {
@@ -669,9 +716,7 @@ export class ApprovalCard extends LitElement {
         @click=${() => (this.detailsOpen = !this.detailsOpen)}
       >
         <span class="more">More details</span>${icon(chevronDown)}
-        <span class="hint"
-          >${pending ? "Why this option, offer and signature" : "Order, offer and signature"}</span
-        >
+        <span class="hint">Offer and signature</span>
       </button>
       <div id="details-body" class="details-body ${this.detailsOpen ? "open" : ""}">
         <div class="group">
@@ -687,10 +732,10 @@ export class ApprovalCard extends LitElement {
           ])}
         </div>
         <div class="group">
-          <h3 class="body-small strong">Request</h3>
+          <h3 class="body-small strong">Offer and signature</h3>
           ${rows([
             ["Requested by", order.agentId],
-            ["Offer ID", order.offerIds.join(", ")],
+            ["Offer IDs", order.offerIds.join(", ")],
             [
               "Replaces",
               replaced !== undefined && !order.offerIds.includes(replaced) ? replaced : null,

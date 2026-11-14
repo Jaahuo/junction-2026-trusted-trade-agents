@@ -111,3 +111,34 @@ export function requireMergeEvidence(input: {
         : "Impact requires an independent current-head GitHub approval or agent review report.",
     );
 }
+
+export type Worktree = { path: string; branch: string | null; head: string };
+
+export function parseWorktrees(porcelain: string): Worktree[] {
+  return porcelain.split(/\n\s*\n/).flatMap((block) => {
+    const line = (key: string) =>
+      block
+        .split("\n")
+        .find((entry) => entry.startsWith(`${key} `))
+        ?.slice(key.length + 1);
+    const path = line("worktree");
+    const head = line("HEAD");
+    if (!path || !head) return [];
+    const ref = line("branch");
+    return [{ path, head, branch: ref?.replace(/^refs\/heads\//, "") ?? null }];
+  });
+}
+
+export function worktreeCleanup(input: {
+  worktree: Worktree;
+  mainPath: string;
+  dirty: boolean;
+  mergedHead: string;
+}): { remove: true } | { remove: false; reason: string } {
+  if (input.worktree.path === input.mainPath)
+    return { remove: false, reason: "it is the main worktree" };
+  if (input.dirty) return { remove: false, reason: "it has uncommitted changes" };
+  if (input.worktree.head !== input.mergedHead)
+    return { remove: false, reason: "its HEAD differs from the merged PR head" };
+  return { remove: true };
+}

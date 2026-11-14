@@ -4,8 +4,10 @@ import {
   agentReviewMarker,
   parseAgentReview,
   parseRisk,
+  parseWorktrees,
   requireMergeEvidence,
   type Review,
+  worktreeCleanup,
 } from "./workflow-policy.ts";
 
 const approval: Review = {
@@ -104,5 +106,43 @@ describe("PR merge policy", () => {
       }),
     ).toThrow();
     expect(() => requireMergeEvidence({ ...lockIn, reviews: [approval] })).not.toThrow();
+  });
+});
+
+describe("merged worktree cleanup", () => {
+  const porcelain = [
+    "worktree /repo\nHEAD aaa\nbranch refs/heads/main",
+    "worktree /repo.task-7\nHEAD bbb\nbranch refs/heads/task/7",
+    "worktree /repo.detached\nHEAD ccc\ndetached",
+  ].join("\n\n");
+  const [main, task, detached] = parseWorktrees(`${porcelain}\n`);
+  const input = (overrides: Partial<Parameters<typeof worktreeCleanup>[0]> = {}) => ({
+    worktree: task ?? { path: "", head: "", branch: null },
+    mainPath: "/repo",
+    dirty: false,
+    mergedHead: "bbb",
+    ...overrides,
+  });
+
+  test("parses worktree paths, heads and branches", () => {
+    expect(main).toEqual({ path: "/repo", head: "aaa", branch: "main" });
+    expect(task).toEqual({ path: "/repo.task-7", head: "bbb", branch: "task/7" });
+    expect(detached).toEqual({ path: "/repo.detached", head: "ccc", branch: null });
+  });
+
+  test("removes a clean worktree at the merged head", () => {
+    expect(worktreeCleanup(input())).toEqual({ remove: true });
+  });
+
+  test("keeps the main worktree", () => {
+    expect(worktreeCleanup(input({ mainPath: "/repo.task-7" })).remove).toBe(false);
+  });
+
+  test("keeps a worktree with uncommitted changes", () => {
+    expect(worktreeCleanup(input({ dirty: true })).remove).toBe(false);
+  });
+
+  test("keeps a worktree with commits after the merged head", () => {
+    expect(worktreeCleanup(input({ mergedHead: "zzz" })).remove).toBe(false);
   });
 });

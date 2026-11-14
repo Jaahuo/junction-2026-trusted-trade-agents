@@ -36,10 +36,27 @@ describe("issue text", () => {
     expect(dependencies(body("`a`"))).toEqual([]);
   });
 
+  test("dependencies also reads a Merge after section and inline Depends on lines", () => {
+    expect(dependencies(`${body("`a`")}\n## Merge after\n\n#9\n`)).toEqual([9]);
+    expect(dependencies("## Goal\n\nDepends on: #7 and #8.\n- Blocked by #6\n")).toEqual([7, 8, 6]);
+  });
+
   test("ownedPaths reads the backticked paths and drops trailing globs", () => {
     expect(
       ownedPaths(body("`contexts/offers/**` except package.json, `scripts/demo-smoke.ts`")),
     ).toEqual(["contexts/offers", "scripts/demo-smoke.ts"]);
+  });
+
+  test("ownedPaths reads bullet lines, drops trailing slashes and skips Keep out of", () => {
+    const owns =
+      "## Owns\n\nOwned paths:\n- `scripts/`\n- `docs/workflow.md` (one section)\n\nKeep out of: `contexts/**`\n\n## Acceptance\n";
+    expect(ownedPaths(owns)).toEqual(["scripts", "docs/workflow.md"]);
+    expect(overlaps(ownedPaths(owns) ?? [], ["scripts/backlog.ts"])).toBe(true);
+  });
+
+  test("ownedPaths is null when the Owns section is missing or names no path", () => {
+    expect(ownedPaths("## Goal\n\nx\n")).toBeNull();
+    expect(ownedPaths("## Owns\n\nOwned paths: the views lane\n")).toBeNull();
   });
 
   test("overlaps compares whole path segments", () => {
@@ -76,6 +93,10 @@ describe("blockers", () => {
     }
     const mentor = issue(2, { title: "Mentor question: may we?" });
     expect(blockers(mentor, board([mentor]))).toEqual(["needs a person"]);
+    const decision = issue(4, { title: "Decision: choose a provider" });
+    expect(blockers(decision, board([decision]))).toEqual(["needs a person"]);
+    const unowned = issue(5, { body: "## Acceptance\n\n1. gate.\n" });
+    expect(blockers(unowned, board([unowned]))).toEqual(["no owned paths"]);
     const vague = issue(3, { body: "## Owns\n\nOwned paths: `a`\n" });
     expect(blockers(vague, board([vague]))).toEqual(["no acceptance criteria"]);
   });
@@ -119,13 +140,13 @@ describe("blockers", () => {
 });
 
 describe("plan", () => {
-  test("picks demo-critical first, stretch last, then lower wave, then oldest", () => {
+  test("picks demo-critical first, then lower wave, then non-stretch, then oldest (R-04)", () => {
     const issues = [
       issue(5, { labels: ["wave:2"], body: body("`e`") }),
       issue(4, { labels: ["wave:4", "demo-critical"], body: body("`d`") }),
       issue(3, { labels: ["wave:1", "stretch"], body: body("`c`") }),
       issue(2, { labels: ["wave:2"], body: body("`b`") }),
     ];
-    expect(plan(board(issues)).ready.map((entry) => entry.number)).toEqual([4, 2, 5, 3]);
+    expect(plan(board(issues)).ready.map((entry) => entry.number)).toEqual([4, 3, 2, 5]);
   });
 });

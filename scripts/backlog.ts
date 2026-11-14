@@ -5,6 +5,7 @@ import {
   decodeBacklogIssues,
   decodeIssueStates,
   decodeOpenPrs,
+  decodeProjectTitles,
   decodeUser,
 } from "./workflow-decode.ts";
 
@@ -17,7 +18,7 @@ const BLOCKING_LABELS = new Set([
   "question",
 ]);
 /** Titles of issues that only a person can close: mentor questions and team decisions. */
-const PERSON_ONLY_TITLE = /^(mentor question|decide|ask the mentors|status:)/i;
+const PERSON_ONLY_TITLE = /^(mentor question|decide|decision|ask the mentors|status:)/i;
 /** Exit code of `claim` when another agent holds the issue: pick the next one. */
 export const TAKEN_EXIT = 3;
 
@@ -50,21 +51,43 @@ export function section(body: string, heading: string): string | null {
   return lines.slice(start + 1, end < 0 ? undefined : end).join("\n");
 }
 
-/** Every `#<n>` reference in the "Depends on" section, "Merge after" included. */
+const INLINE_DEPENDENCY = /^\W*(depends on|merge after|blocked by)\b.*$/gim;
+
+/**
+ * Every `#<n>` an issue waits for: the "Depends on" and "Merge after" sections, and any line that
+ * starts with "Depends on", "Merge after" or "Blocked by".
+ */
 export function dependencies(body: string): number[] {
-  const text = section(body, "depends on") ?? "";
+  const text = [
+    section(body, "depends on") ?? "",
+    section(body, "merge after") ?? "",
+    ...[...body.matchAll(INLINE_DEPENDENCY)].map((match) => match[0]),
+  ].join("\n");
   return [...new Set([...text.matchAll(/#(\d+)/g)].map((match) => Number(match[1])))];
 }
 
-/** The backticked paths on the "Owned paths:" line, without trailing globs. */
-export function ownedPaths(body: string): string[] {
-  const line = (section(body, "owns") ?? "")
-    .split(/\r?\n/)
-    .find((entry) => /^owned paths:/i.test(entry.trim()));
-  if (line === undefined) return [];
-  return [...line.matchAll(/`([^`]+)`/g)]
-    .map((match) => (match[1] ?? "").replace(/(\/\*\*?)+$/, "").replace(/\*+$/, ""))
+const PATH = /^[\w.@-]+(\/[\w.@*-]+)*\/?$/;
+
+/**
+ * The backticked paths of the "Owns" section, from its "Owned paths:" line and bullet lines,
+ * without trailing globs or slashes; the "Keep out of" line is not ownership. Null when the
+ * section is missing or names no path, so the caller can refuse to guess.
+ */
+export function ownedPaths(body: string): string[] | null {
+  const owns = section(body, "owns");
+  if (owns === null) return null;
+  const lines = owns.split(/\r?\n/).filter((line) => !/^\W*keep out of\b/i.test(line));
+  const paths = lines
+    .flatMap((line) => [...line.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? ""))
+    .filter((path) => PATH.test(path))
+    .map((path) =>
+      path
+        .replace(/(\/\*\*?)+$/, "")
+        .replace(/\*+$/, "")
+        .replace(/\/+$/, ""),
+    )
     .filter((path) => path.length > 0);
+  return paths.length > 0 ? [...new Set(paths)] : null;
 }
 
 const within = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
@@ -108,23 +131,32 @@ export function blockers(issue: BacklogIssue, board: Board): string[] {
       reasons.push(`depends on open #${dependency}`);
   }
   const paths = ownedPaths(issue.body);
-  for (const other of board.open) {
-    if (other.number === issue.number || !active(other, board)) continue;
-    if (overlaps(paths, ownedPaths(other.body)))
+  if (paths === null) reasons.push("no owned paths");
+  else
+    for (const other of overlapping(issue, paths, board))
       reasons.push(`owned paths overlap active #${other.number}`);
-  }
   return reasons;
+}
+
+/** Active issues whose owned paths overlap these paths. */
+function overlapping(issue: BacklogIssue, paths: readonly string[], board: Board): BacklogIssue[] {
+  return board.open.filter(
+    (other) =>
+      other.number !== issue.number &&
+      active(other, board) &&
+      overlaps(paths, ownedPaths(other.body) ?? []),
+  );
 }
 
 const waveOf = (issue: BacklogIssue) =>
   Number(issue.labels.find((label) => label.startsWith("wave:"))?.slice(5) ?? 99);
 
-/** Demo-critical first, then lower wave, then stretch last, then oldest. */
+/** Demo-critical first, then lower wave (R-04), then stretch last, then oldest. */
 export function rank(issues: readonly BacklogIssue[]): BacklogIssue[] {
   const key = (issue: BacklogIssue) => [
     issue.labels.includes("demo-critical") ? 0 : 1,
-    issue.labels.includes("stretch") ? 1 : 0,
     waveOf(issue),
+    issue.labels.includes("stretch") ? 1 : 0,
     issue.number,
   ];
   return issues.toSorted((a, b) => {
@@ -154,8 +186,28 @@ async function run(program: string, ...args: string[]) {
   return { code, text: `${out}${err}` };
 }
 
+/** The title of the one project board linked to the repository. */
+async function linkedProject(repo: { owner: { login: string }; name: string }): Promise<string> {
+  const titles = await ghJson(
+    decodeProjectTitles,
+    "api",
+    "graphql",
+    "-f",
+    "query=query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){projectsV2(first:5){nodes{title}}}}",
+    "-f",
+    `owner=${repo.owner.login}`,
+    "-f",
+    `repo=${repo.name}`,
+  );
+  const [title] = titles;
+  if (titles.length !== 1 || title === undefined)
+    fail("Repository must be linked to exactly one project board.");
+  return title;
+}
+
 async function loadBoard(): Promise<Board> {
-  const [open, states, prs, heads] = await Promise.all([
+  const project = await linkedProject(await repository());
+  const [issues, states, prs, heads] = await Promise.all([
     ghJson(
       decodeBacklogIssues,
       "issue",
@@ -194,6 +246,14 @@ async function loadBoard(): Promise<Board> {
   const claimed = new Set(
     [...heads.matchAll(/refs\/heads\/task\/(\d+)$/gm)].map((match) => Number(match[1])),
   );
+  const open = issues.map(({ number, title, body, labels, assignees, projects }): BacklogIssue => ({
+    number,
+    title,
+    body,
+    labels,
+    assignees,
+    status: projects.find((item) => item.title === project)?.status ?? null,
+  }));
   return { open, closed: new Set(states.map((entry) => entry.number)), prs, claimed };
 }
 
@@ -218,8 +278,43 @@ async function next(args: string[]) {
     console.log(`  #${issue.number} ${issue.title}\n      ${reasons.join("; ")}`);
 }
 
+type Repo = Awaited<ReturnType<typeof repository>>;
+
+/**
+ * Deletes the remote `task/<n>` only while it still points at `expected`: a push in between makes
+ * the lease fail, so pushed work is never deleted.
+ */
+async function dropClaim(number: number, expected: string): Promise<boolean> {
+  const ref = `refs/heads/task/${number}`;
+  const pushed = await run(
+    "git",
+    "push",
+    `--force-with-lease=${ref}:${expected}`,
+    "origin",
+    `:${ref}`,
+  );
+  return pushed.code === 0;
+}
+
+/** Undoes a reservation this run created when a later claim step fails; never returns. */
+async function unwind(number: number, main: string, why: string): Promise<never> {
+  const dropped = await dropClaim(number, main);
+  fail(
+    `${why}\n${
+      dropped
+        ? `The reservation task/${number} was removed; the issue is free again.`
+        : `Remove the reservation by hand once you checked it holds no work: git push origin :refs/heads/task/${number}`
+    }`,
+  );
+}
+
 async function claim(number: number, args: string[]) {
-  const board = await loadBoard();
+  const agent = option(args, "--agent") ?? "backlog-loop agent";
+  const [repo, user, board] = await Promise.all([
+    repository(),
+    ghJson(decodeUser, "api", "user"),
+    loadBoard(),
+  ]);
   const issue = board.open.find((entry) => entry.number === number);
   if (!issue) fail(`#${number} is not an open issue.`);
   const reasons = blockers(issue, board);
@@ -227,7 +322,6 @@ async function claim(number: number, args: string[]) {
     console.error(`#${number} is not ready: ${reasons.join("; ")}`);
     process.exit(TAKEN_EXIT);
   }
-  const repo = await repository();
   const main = (await command("git", "ls-remote", "origin", "refs/heads/main")).split(/\s/)[0];
   if (!main) fail("Could not read origin/main.");
   // The refs API refuses an existing ref, so of two agents that claim at once exactly one wins.
@@ -241,56 +335,67 @@ async function claim(number: number, args: string[]) {
     `sha=${main}`,
   );
   if (created.code !== 0) {
-    if (/Reference already exists|HTTP 422/.test(created.text)) {
+    if (/Reference already exists/.test(created.text)) {
       console.error(`#${number} was claimed by another agent; pick the next issue.`);
       process.exit(TAKEN_EXIT);
     }
     fail(`Claim of #${number} failed:\n${created.text.trim()}`);
   }
-  const user = await ghJson(decodeUser, "api", "user");
-  const agent = option(args, "--agent") ?? "backlog-loop agent";
-  await command("gh", "issue", "edit", String(number), "--add-assignee", user.login);
-  await command(
-    "gh",
-    "issue",
-    "comment",
-    String(number),
-    "--body",
-    `Claimed by ${agent} for @${user.login} through the backlog loop (remote branch \`task/${number}\`).`,
+  // Claims of different issues do not serialize: when another agent claimed an issue with
+  // overlapping owned paths at the same time, the higher issue number gives way.
+  const after = await loadBoard();
+  const paths = ownedPaths(issue.body) ?? [];
+  const rival = overlapping(issue, paths, after).find(
+    (other) => other.number < number && after.claimed.has(other.number),
   );
+  if (rival) {
+    const dropped = await dropClaim(number, main);
+    console.error(
+      `#${rival.number} was claimed at the same time and owns overlapping paths; ${
+        dropped ? `gave #${number} back` : `remove task/${number} by hand`
+      }. Pick the next issue.`,
+    );
+    process.exit(TAKEN_EXIT);
+  }
+  const assigned = await run("gh", "issue", "edit", String(number), "--add-assignee", user.login);
+  if (assigned.code !== 0)
+    await unwind(number, main, `Assigning #${number} failed:\n${assigned.text.trim()}`);
+  const note = `Claimed by ${agent} for @${user.login} through the backlog loop (remote branch \`task/${number}\`).`;
+  const commented = await run("gh", "issue", "comment", String(number), "--body", note);
+  if (commented.code !== 0)
+    console.error(`Claimed, but the claim comment failed:\n${commented.text.trim()}`);
   console.log(`Claimed #${number}. Next: bun scripts/task.ts start ${number}`);
 }
 
 async function release(number: number, args: string[]) {
   const reason = option(args, "--reason");
   if (!reason) fail("Provide --reason with what is done and what blocks the issue.");
-  const repo = await repository();
-  const user = await ghJson(decodeUser, "api", "user");
-  const board = await loadBoard();
+  const blocked = args.includes("--blocked");
+  const [repo, user, board]: [Repo, { login: string }, Board] = await Promise.all([
+    repository(),
+    ghJson(decodeUser, "api", "user"),
+    loadBoard(),
+  ]);
   const issue = board.open.find((entry) => entry.number === number);
   if (!issue) fail(`#${number} is not an open issue.`);
   if (!issue.assignees.some((login) => login.toLowerCase() === user.login.toLowerCase()))
     fail(`#${number} is not assigned to you; release only your own claim.`);
   const pr = prFor(board, number);
   if (pr) fail(`#${number} has open PR #${pr.number}; close or hand over the PR first.`);
-  await command("git", "fetch", "origin", "main", `task/${number}`);
-  const pushed = await run(
-    "git",
-    "merge-base",
-    "--is-ancestor",
-    `origin/task/${number}`,
-    "origin/main",
-  );
-  if (pushed.code !== 0)
-    fail(`origin/task/${number} holds commits that are not on main; open a draft PR instead.`);
-  await command(
-    "gh",
-    "api",
-    "-X",
-    "DELETE",
-    `repos/${repo.nameWithOwner}/git/refs/heads/task/${number}`,
-  );
+  if (board.claimed.has(number)) {
+    const head = (await command("git", "ls-remote", "origin", `refs/heads/task/${number}`)).split(
+      /\s/,
+    )[0];
+    if (!head) fail(`Could not read origin task/${number}.`);
+    await command("git", "fetch", "origin", "main", head);
+    const merged = await run("git", "merge-base", "--is-ancestor", head, "origin/main");
+    if (merged.code !== 0)
+      fail(`task/${number} holds commits that are not on main; open a draft PR instead.`);
+    if (!(await dropClaim(number, head)))
+      fail(`task/${number} moved while releasing; someone pushed work. Nothing was deleted.`);
+  }
   await command("gh", "issue", "edit", String(number), "--remove-assignee", user.login);
+  if (blocked) await command("gh", "issue", "edit", String(number), "--add-label", "blocked");
   await projectStatus(repo, number, "Todo", true);
   await command(
     "gh",
@@ -298,7 +403,7 @@ async function release(number: number, args: string[]) {
     "comment",
     String(number),
     "--body",
-    `Released by the backlog loop: ${reason}`,
+    `Released by the backlog loop${blocked ? " and labelled blocked until a person clears it" : ""}:\n\n${reason}`,
   );
   console.log(`Released #${number}. Remove the local worktree with: wt remove task/${number}`);
 }
@@ -310,7 +415,7 @@ if (import.meta.main) {
     console.log(`Usage:
   bun scripts/backlog.ts next [--all] [--json]
   bun scripts/backlog.ts claim <issue> [--agent <label>]
-  bun scripts/backlog.ts release <issue> --reason <text>
+  bun scripts/backlog.ts release <issue> --reason <text> [--blocked]
 
 next lists the open issues an agent can finish start to end now, in pick order:
 unassigned, Todo or off the board, no remote task/<n> branch, no open PR, no
@@ -319,9 +424,12 @@ every "Depends on" and "Merge after" issue closed, and owned paths clear of ever
 active issue. --all also lists the others with their blockers.
 claim creates the remote branch task/<issue> through the GitHub refs API. GitHub
 refuses an existing ref, so one agent wins; the others exit ${TAKEN_EXIT} and pick the next
-issue. The winner is assigned. Then run: bun scripts/task.ts start <issue>.
-release gives back your claim with no pushed work: it deletes the remote branch,
-unassigns you, moves the issue to Todo and comments the reason.`);
+issue. A claim that races an issue with overlapping owned paths gives way when its
+number is higher. The winner is assigned. Then run: bun scripts/task.ts start <issue>.
+release gives back your claim with no pushed work: it deletes the remote branch
+only while it holds no new commits, unassigns you, moves the issue to Todo and
+comments the reason. --blocked also labels it blocked, so no agent picks it until a
+person removes the label.`);
     process.exit(0);
   }
   if (action === "next") await next(args);

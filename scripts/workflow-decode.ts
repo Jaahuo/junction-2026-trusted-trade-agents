@@ -136,12 +136,14 @@ export const decodeBacklogIssues = (value: unknown) =>
     body: text(field(entry, "body")),
     labels: list(field(entry, "labels"), name),
     assignees: list(field(entry, "assignees"), (user) => login(user).login),
-    status:
-      list(field(entry, "projectItems"), (item) => {
-        const status = field(item, "status");
-        const label = status === null || status === undefined ? null : field(status, "name");
-        return typeof label === "string" && label.length > 0 ? label : null;
-      })[0] ?? null,
+    projects: list(field(entry, "projectItems"), (item) => {
+      const status = field(item, "status");
+      const label = status === null || status === undefined ? null : field(status, "name");
+      return {
+        title: text(field(item, "title")),
+        status: typeof label === "string" && label.length > 0 ? label : null,
+      };
+    }),
   }));
 export const decodeIssueStates = (value: unknown) =>
   list(value, (entry) => ({
@@ -156,3 +158,7 @@ export const decodeOpenPrs = (value: unknown) =>
       number(field(issue, "number")),
     ),
   }));
+export const decodeProjectTitles = (value: unknown) =>
+  list(field(field(field(field(value, "data"), "repository"), "projectsV2"), "nodes"), (node) =>
+    text(field(node, "title")),
+  );

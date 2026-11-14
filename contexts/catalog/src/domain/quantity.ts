@@ -11,10 +11,21 @@ const STD_UNITS = new Map<string, { unit: "LTR" | "KGM"; factor: number }>([
 // Removes binary noise such as 0.1 * 3 = 0.30000000000000004.
 const tidy = (value: number): number => Math.round(value * 1e6) / 1e6;
 
-/** The quantity in a std unit (`LTR` or `KGM`), or null when the unit has no std conversion. */
+/** The quantity in a std unit (`LTR` or `KGM`), unrounded, or null when the unit has no std conversion. */
 const toStdQuantity = (quantity: Quantity): Quantity | null => {
   const std = STD_UNITS.get(quantity.unit);
-  return std === undefined ? null : { value: tidy(quantity.value * std.factor), unit: std.unit };
+  return std === undefined ? null : { value: quantity.value * std.factor, unit: std.unit };
+};
+
+/** A search or order quantity must be above 0. */
+export const isPositiveQuantity = (quantity: Quantity): boolean =>
+  Number.isFinite(quantity.value) && quantity.value > 0;
+
+// Ceil that ignores float noise only: 100.00000000000001 lots is 100, 100.000000004 is 101.
+const ceilLots = (lots: number): number => {
+  const nearest = Math.round(lots);
+  const noise = Math.abs(lots - nearest) <= 1e-12 * Math.max(1, Math.abs(lots));
+  return Math.max(1, noise ? nearest : Math.ceil(lots));
 };
 
 /** Consumer-unit volume times consumer units per sales unit, in a std unit. */
@@ -52,7 +63,7 @@ export const toOrderQuantity = (requested: Quantity, product: SalesUnitInfo): Or
     salesUnits = std.value / per.value;
   }
   const lot = product.allowedLotSize > 0 ? product.allowedLotSize : 1;
-  const value = tidy(Math.ceil(tidy(salesUnits / lot)) * lot);
+  const value = tidy(ceilLots(salesUnits / lot) * lot);
   return {
     orderQuantity: { value, unit: product.salesUnit },
     equals: { value: tidy(value * per.value), unit: per.unit },

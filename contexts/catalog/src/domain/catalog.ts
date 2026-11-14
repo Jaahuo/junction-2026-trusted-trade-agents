@@ -72,8 +72,8 @@ interface Ranked {
 const byRank = (a: Ranked, b: Ranked): number =>
   b.confirmed - a.confirmed ||
   b.soft - a.soft ||
-  b.terms - a.terms ||
   (b.product.deliveryReliability ?? -1) - (a.product.deliveryReliability ?? -1) ||
+  b.terms - a.terms ||
   a.product.productId.localeCompare(b.product.productId);
 
 const facts = (product: CatalogProduct, match: Record<string, MatchState>): ProductFacts => ({

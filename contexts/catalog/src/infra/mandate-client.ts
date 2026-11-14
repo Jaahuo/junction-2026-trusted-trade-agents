@@ -8,12 +8,12 @@ type Fetcher = NonNullable<Parameters<typeof treaty>[1]>["fetcher"];
 /** Reads the current mandate through the mandates API (SPEC-001). 404 or 501 means no mandate. */
 export const edenMandateSource = (apiBaseUrl: () => string, fetcher?: Fetcher): MandateSource => ({
   current: async () => {
-    const api = treaty<Api>(apiBaseUrl(), {
-      parseDate: false,
-      ...(fetcher === undefined ? {} : { fetcher }),
-    });
     let response;
     try {
+      const api = treaty<Api>(apiBaseUrl(), {
+        parseDate: false,
+        ...(fetcher === undefined ? {} : { fetcher }),
+      });
       response = await api.mandates.current.get();
     } catch (error) {
       console.error(`catalog: mandates call failed: ${String(error)}`);

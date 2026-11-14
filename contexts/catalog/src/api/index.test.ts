@@ -47,7 +47,7 @@ const fakeMandate = (value: Result<CurrentMandate | null, "UPSTREAM_FAILED">): M
 });
 
 const deps = (overrides: Partial<CatalogDeps> = {}): CatalogDeps => ({
-  catalog: async () => createCatalog(products),
+  catalog: async () => ok(createCatalog(products)),
   mandates: noMandate,
   ...overrides,
 });
@@ -212,20 +212,34 @@ describe("POST /catalog/search", () => {
     expect(loads).toBe(1);
   });
 
-  test("a failed load is retried on the next request", async () => {
+  test("a failed index load answers 502 with the error envelope and is retried on the next request", async () => {
     let loads = 0;
     const catalog = lazyCatalog(async () => {
       loads += 1;
-      if (loads === 1) throw new Error("disk not ready");
+      if (loads <= 2) throw new Error("disk not ready");
       return createCatalog(products);
     });
-    const failure = await catalog().then(
-      () => null,
-      (error: unknown) => error,
-    );
-    expect(failure).toEqual(new Error("disk not ready"));
-    expect((await catalog()).facts({ productIds: ["free"], hard: [] }).products).toHaveLength(1);
-    expect(loads).toBe(2);
+    const app = createApi(deps({ catalog }));
+    const failed = [
+      await post(app, "/search", searchBody),
+      await post(app, "/facts", { productIds: ["free"], hard: [] }),
+    ];
+    expect(failed).toEqual([
+      {
+        status: 502,
+        body: {
+          error: { code: "UPSTREAM_FAILED", message: "The product index could not be loaded." },
+        },
+      },
+      {
+        status: 502,
+        body: {
+          error: { code: "UPSTREAM_FAILED", message: "The product index could not be loaded." },
+        },
+      },
+    ]);
+    expect((await post(app, "/facts", { productIds: ["free"], hard: [] })).status).toBe(200);
+    expect(loads).toBe(3);
   });
 
   test("empty terms gives 400", async () => {
@@ -234,7 +248,7 @@ describe("POST /catalog/search", () => {
       deps({
         catalog: async () => {
           loads += 1;
-          return createCatalog(products);
+          return ok(createCatalog(products));
         },
       }),
     );
@@ -247,6 +261,27 @@ describe("POST /catalog/search", () => {
       });
     }
     expect(loads).toBe(0);
+  });
+
+  test("a zero or negative quantity gives 400", async () => {
+    for (const value of [0, -5]) {
+      const { status, body } = await post(createApi(deps()), "/search", {
+        ...searchBody,
+        quantity: { value, unit: "LTR" },
+      });
+      expect({ value, status, body }).toEqual({
+        value,
+        status: 400,
+        body: { error: { code: "BAD_REQUEST", message: "quantity.value: must be above 0." } },
+      });
+    }
+  });
+
+  test("a mandates base URL that throws gives 502 UPSTREAM_FAILED", async () => {
+    const source = edenMandateSource(() => {
+      throw new Error("Set PORT or INTERNAL_BASE_URL.");
+    });
+    expect(await source.current()).toEqual(err("UPSTREAM_FAILED"));
   });
 
   test("an unsupported hard constraint gives 400 naming the attribute", async () => {

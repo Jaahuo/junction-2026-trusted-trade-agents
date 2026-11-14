@@ -57,6 +57,40 @@ const records = [
       unitConversions: [{ synkkaPackagingType: "CASE", volume: { unit: "LTR", value: 6 } }],
     },
   ),
+  raw(
+    "kg",
+    {
+      salesUnit: "KG",
+      baseUnit: "KG",
+      allowedLotSize: 4.4,
+      units: [
+        { unitId: "KG", sizeInBaseUnits: 1 },
+        { unitId: "ST", sizeInBaseUnits: 4.4 },
+      ],
+    },
+    baseVolume("GRM", 4400),
+  ),
+  raw(
+    "ki-of-kg",
+    {
+      baseUnit: "KG",
+      units: [
+        { unitId: "KG", sizeInBaseUnits: 1 },
+        { unitId: "KI", sizeInBaseUnits: 2 },
+      ],
+    },
+    baseVolume("GRM", 500),
+  ),
+  raw(
+    "cs",
+    { salesUnit: "CS", baseUnit: "CS", units: [{ unitId: "CS", sizeInBaseUnits: 1 }] },
+    { unitConversions: [{ synkkaPackagingType: "CASE", volume: { unit: "GRM", value: 6000 } }] },
+  ),
+  raw(
+    "st",
+    { salesUnit: "ST", units: [{ unitId: "ST", sizeInBaseUnits: 1 }] },
+    { unitConversions: [{ synkkaPackagingType: "CASE", volume: { unit: "LTR", value: 6 } }] },
+  ),
   { id: "broken" },
 ];
 
@@ -76,7 +110,16 @@ afterAll(async () => {
 
 test("the slim index maps names, claims, volume per sales unit, reliability, CO2 and substitutes", async () => {
   const products = await loadProductFile(dir);
-  expect(products.map((product) => product.productId)).toEqual(["1", "2", "3", "4"]);
+  expect(products.map((product) => product.productId)).toEqual([
+    "1",
+    "2",
+    "3",
+    "4",
+    "kg",
+    "ki-of-kg",
+    "cs",
+    "st",
+  ]);
   const [first, second, third, fourth] = products;
   expect(first).toEqual({
     productId: "1",
@@ -112,4 +155,16 @@ test("CSV values parse with CRLF line ends and skip blank or out-of-range values
   expect(parseValueCsv("id,v\r\na,0.5\r\nb,\r\nc,2\r\n", { min: 0, max: 1 })).toEqual(
     new Map([["a", 0.5]]),
   );
+});
+
+test("the volume per sales unit comes from the unit's own weight, then the consumer unit, then the case", async () => {
+  const volumes = Object.fromEntries(
+    (await loadProductFile(dir)).map((product) => [product.productId, product.perSalesUnit]),
+  );
+  expect(volumes).toMatchObject({
+    kg: { value: 1, unit: "KGM" },
+    "ki-of-kg": { value: 2, unit: "KGM" },
+    cs: { value: 6, unit: "KGM" },
+    st: null,
+  });
 });

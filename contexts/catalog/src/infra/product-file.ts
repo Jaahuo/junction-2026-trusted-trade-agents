@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import type { Quantity } from "@app/contract";
 import { contextsDir } from "@app/server-kit";
 import { z } from "zod";
 import type { CatalogProduct } from "../domain/catalog.ts";
@@ -66,19 +67,34 @@ const nutritionalClaims = (raw: RawProduct): Set<string> =>
       .flatMap((value) => (typeof value.id === "string" ? [value.id] : [])),
   );
 
+const WEIGHT_UNITS = new Map([["KG", { value: 1, unit: "KGM" }]]);
+const CASE_UNITS = new Set(["KI", "CS", "KRT", "SK", "KLE"]);
+
+/**
+ * Volume of one sales unit, from the first source that applies:
+ * 1. a weight base unit: the sales unit's own weight;
+ * 2. the consumer-unit volume times consumer units per sales unit;
+ * 3. the CASE volume when the sales unit is a case unit.
+ */
+const salesUnitVolume = (raw: RawProduct): Quantity | null => {
+  const unitsPerSalesUnit =
+    raw.units.find((unit) => unit.unitId === raw.salesUnit)?.sizeInBaseUnits ?? 0;
+  const baseWeight = WEIGHT_UNITS.get(raw.baseUnit);
+  if (baseWeight !== undefined) return perSalesUnit(baseWeight, unitsPerSalesUnit);
+  const volumeOf = (type: string) =>
+    raw.synkkaData.unitConversions?.find((conversion) => conversion.synkkaPackagingType === type)
+      ?.volume ?? null;
+  return (
+    perSalesUnit(volumeOf("BASE_UNIT_OR_EACH"), unitsPerSalesUnit) ??
+    (CASE_UNITS.has(raw.salesUnit) ? perSalesUnit(volumeOf("CASE"), 1) : null)
+  );
+};
+
 const toProduct = (
   raw: RawProduct,
   reliability: ReadonlyMap<string, number>,
   co2: ReadonlyMap<string, number>,
 ): CatalogProduct => {
-  const volumeOf = (type: string) =>
-    raw.synkkaData.unitConversions?.find((conversion) => conversion.synkkaPackagingType === type)
-      ?.volume ?? null;
-  const unitsPerSalesUnit =
-    raw.units.find((unit) => unit.unitId === raw.salesUnit)?.sizeInBaseUnits ?? 0;
-  const consumerVolume = volumeOf("BASE_UNIT_OR_EACH");
-  // A CASE volume is the volume of one sales unit when the sales unit is not the base unit.
-  const caseVolume = raw.salesUnit === raw.baseUnit ? null : volumeOf("CASE");
   return {
     productId: raw.id,
     gtin: raw.salesUnitGtin ?? raw.synkkaData.gtin ?? null,
@@ -87,7 +103,7 @@ const toProduct = (
     category: raw.category,
     salesUnit: raw.salesUnit,
     allowedLotSize: raw.allowedLotSize,
-    perSalesUnit: perSalesUnit(consumerVolume, unitsPerSalesUnit) ?? perSalesUnit(caseVolume, 1),
+    perSalesUnit: salesUnitVolume(raw),
     countryOfOrigin: raw.countryOfOrigin ?? null,
     deliveryReliability: reliability.get(raw.id) ?? null,
     co2PerKg: co2.get(raw.id) ?? null,

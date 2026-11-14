@@ -46,7 +46,7 @@ describe("search ranking", () => {
     expect(ids(products, request({ terms: ["mjölk", "luomu"] }))).toEqual(["b", "c"]);
   });
 
-  test("confirmed hard matches rank first, then soft matches, then matched terms, then reliability", () => {
+  test("confirmed hard matches rank first, then soft matches, then reliability, then matched terms", () => {
     const products = [
       product("unknown-fi", { searchText: "maito", countryOfOrigin: "fi", deliveryReliability: 1 }),
       product("confirmed-se", {
@@ -74,8 +74,8 @@ describe("search ranking", () => {
     ).toEqual([
       "confirmed-se",
       "unknown-fi",
-      "unknown-se-both",
       "unknown-se-reliable",
+      "unknown-se-both",
       "unknown-se",
     ]);
   });

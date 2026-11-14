@@ -49,4 +49,20 @@ describe("constraint merge", () => {
   test("no standing constraints keeps the request", () => {
     expect(mergeConstraints(request, null)).toEqual(request);
   });
+
+  test("dedupes by attribute and value, whatever the key order or the case of a soft preference", () => {
+    const reordered = { is: "free_from", attribute: "lactose" } as const;
+    expect(
+      mergeConstraints(
+        {
+          hard: [{ attribute: "lactose", is: "free_from" }],
+          soft: [{ attribute: "countryOfOrigin", prefer: "FI" }],
+        },
+        { hard: [reordered], soft: [{ attribute: "countryOfOrigin", prefer: "fi" }] },
+      ),
+    ).toEqual({
+      hard: [{ attribute: "lactose", is: "free_from" }],
+      soft: [{ attribute: "countryOfOrigin", prefer: "FI" }],
+    });
+  });
 });

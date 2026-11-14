@@ -24,18 +24,26 @@ export const matchHard = (
 export const isContradicted = (match: Record<string, MatchState>): boolean =>
   Object.values(match).includes("contradicted");
 
-const union = <T>(first: readonly T[], second: readonly T[]): T[] => {
+const union = <T>(first: readonly T[], second: readonly T[], key: (item: T) => string): T[] => {
   const seen = new Set<string>();
   return [...first, ...second].filter((item) => {
-    const key = JSON.stringify(item);
-    if (seen.has(key)) return false;
-    seen.add(key);
+    const itemKey = key(item);
+    if (seen.has(itemKey)) return false;
+    seen.add(itemKey);
     return true;
   });
 };
 
-/** hard = request ∪ standing, soft = request ∪ standing. */
-export const mergeConstraints = (request: Constraints, standing: Constraints | null): Constraints =>
-  standing === null
-    ? { hard: union(request.hard, []), soft: union(request.soft, []) }
-    : { hard: union(request.hard, standing.hard), soft: union(request.soft, standing.soft) };
+const hardKey = (constraint: Constraints["hard"][number]) =>
+  `${constraint.attribute}|${constraint.is}`;
+const softKey = (constraint: Constraints["soft"][number]) =>
+  `${constraint.attribute}|${constraint.prefer.toLowerCase()}`;
+
+/** hard = request ∪ standing, soft = request ∪ standing; soft preferences compare case-insensitively. */
+export const mergeConstraints = (
+  request: Constraints,
+  standing: Constraints | null,
+): Constraints => ({
+  hard: union(request.hard, standing?.hard ?? [], hardKey),
+  soft: union(request.soft, standing?.soft ?? [], softKey),
+});

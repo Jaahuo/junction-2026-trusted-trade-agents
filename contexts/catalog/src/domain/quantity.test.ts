@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { perSalesUnit, toOrderQuantity } from "./quantity.ts";
+import { isPositiveQuantity, perSalesUnit, toOrderQuantity } from "./quantity.ts";
 
 describe("quantity conversion", () => {
   test("1000 LTR of a 1 l item, 10 per sales unit, gives 100 sales units", () => {
@@ -75,5 +75,32 @@ describe("quantity conversion", () => {
       orderQuantity: { value: 8, unit: "KI" },
       equals: { value: 48, unit: "LTR" },
     });
+  });
+
+  test("a request just above a lot boundary rounds up and never underfills", () => {
+    const product = {
+      salesUnit: "KI",
+      allowedLotSize: 1,
+      perSalesUnit: { value: 10, unit: "LTR" },
+    };
+    expect(toOrderQuantity({ value: 1000.000004, unit: "LTR" }, product)).toEqual({
+      orderQuantity: { value: 101, unit: "KI" },
+      equals: { value: 1010, unit: "LTR" },
+    });
+    expect(toOrderQuantity({ value: 0.000004, unit: "LTR" }, product).orderQuantity).toEqual({
+      value: 1,
+      unit: "KI",
+    });
+    const noisy = { salesUnit: "ST", allowedLotSize: 0.1, perSalesUnit: { value: 1, unit: "LTR" } };
+    expect(toOrderQuantity({ value: 0.3, unit: "LTR" }, noisy).orderQuantity).toEqual({
+      value: 0.3,
+      unit: "ST",
+    });
+  });
+
+  test("only a finite quantity above 0 is positive", () => {
+    expect(isPositiveQuantity({ value: 0.001, unit: "LTR" })).toBe(true);
+    expect(isPositiveQuantity({ value: 0, unit: "LTR" })).toBe(false);
+    expect(isPositiveQuantity({ value: -1, unit: "LTR" })).toBe(false);
   });
 });

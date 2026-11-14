@@ -2,18 +2,20 @@ import { expect, test } from "bun:test";
 import { ok } from "@app/kernel";
 import { lazyCatalog } from "../application/catalog.ts";
 import { createCatalog } from "../domain/catalog.ts";
+import { toOrderQuantity } from "../domain/quantity.ts";
 import { defaultDataDir, loadProductFile } from "../infra/product-file.ts";
 import { createApi } from "./index.ts";
 
-// The request of issue #13 acceptance 7, against the tracked data files.
+const app = createApi({
+  catalog: lazyCatalog(async () => createCatalog(await loadProductFile(defaultDataDir()))),
+  mandates: { current: async () => ok(null) },
+});
+
+// The request of issue #13 acceptance 7, against the tracked data files. Runs first, so it measures the load.
 test("the real data file yields lactose-free maito candidates in sales units", async () => {
   Bun.gc(true);
   const rssBefore = process.memoryUsage().rss;
   const started = performance.now();
-  const app = createApi({
-    catalog: lazyCatalog(async () => createCatalog(await loadProductFile(defaultDataDir()))),
-    mandates: { current: async () => ok(null) },
-  });
   const response = await app.handle(
     new Request("http://localhost/catalog/search", {
       method: "POST",
@@ -48,3 +50,45 @@ test("the real data file yields lactose-free maito candidates in sales units", a
     }),
   );
 }, 30_000);
+
+test("weight and case products of the real data convert to their own sales units", async () => {
+  const cases = [
+    { productId: "461587", requested: 44, orderQuantity: { value: 44, unit: "KG" }, equals: 44 },
+    { productId: "460916", requested: 10, orderQuantity: { value: 10, unit: "KG" }, equals: 10 },
+    {
+      productId: "461411",
+      requested: 15.68,
+      orderQuantity: { value: 16.8, unit: "KG" },
+      equals: 16.8,
+    },
+    { productId: "460675", requested: 20, orderQuantity: { value: 20, unit: "KG" }, equals: 20 },
+    { productId: "460301", requested: 6, orderQuantity: { value: 1, unit: "CS" }, equals: 6 },
+  ];
+  const response = await app.handle(
+    new Request("http://localhost/catalog/facts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ productIds: cases.map((entry) => entry.productId), hard: [] }),
+    }),
+  );
+  const body: {
+    products: {
+      productId: string;
+      salesUnit: string;
+      allowedLotSize: number;
+      perSalesUnit: { value: number; unit: string } | null;
+    }[];
+  } = await response.json();
+  const actual = body.products.map((product) => {
+    const requested = cases.find((entry) => entry.productId === product.productId)?.requested ?? 0;
+    const { orderQuantity, equals } = toOrderQuantity({ value: requested, unit: "KGM" }, product);
+    return { productId: product.productId, orderQuantity, equals };
+  });
+  expect(actual).toEqual(
+    cases.map(({ productId, orderQuantity, equals }) => ({
+      productId,
+      orderQuantity,
+      equals: { value: equals, unit: "KGM" },
+    })),
+  );
+});

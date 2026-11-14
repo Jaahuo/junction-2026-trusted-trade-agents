@@ -8,6 +8,7 @@ import type {
 import { err, ok, type Result } from "@app/kernel";
 import { parseTerms } from "../domain/catalog.ts";
 import { type Constraints, mergeConstraints } from "../domain/match.ts";
+import { isPositiveQuantity } from "../domain/quantity.ts";
 
 export interface CurrentMandate {
   id: string;
@@ -20,22 +21,30 @@ export interface MandateSource {
   current(): Promise<Result<CurrentMandate | null, "UPSTREAM_FAILED">>;
 }
 
+/** Reads the product data; throws when it cannot. */
 export type CatalogLoader = () => Promise<WholesalerCatalog>;
 
+export type CatalogSource = () => Promise<Result<WholesalerCatalog, "CATALOG_UNAVAILABLE">>;
+
 export interface CatalogDeps {
-  catalog: CatalogLoader;
+  catalog: CatalogSource;
   mandates: MandateSource;
 }
 
-export type SearchError = "EMPTY_TERMS" | "UPSTREAM_FAILED";
+export type SearchError =
+  | "EMPTY_TERMS"
+  | "INVALID_QUANTITY"
+  | "UPSTREAM_FAILED"
+  | "CATALOG_UNAVAILABLE";
 
-/** Loads once; parallel first calls share one load. A failed load is retried on the next call. */
-export const lazyCatalog = (load: CatalogLoader): CatalogLoader => {
-  let pending: Promise<WholesalerCatalog> | undefined;
+/** Loads once; parallel first calls share one load. A failed load gives an error and is retried on the next call. */
+export const lazyCatalog = (load: CatalogLoader): CatalogSource => {
+  let pending: Promise<Result<WholesalerCatalog, "CATALOG_UNAVAILABLE">> | undefined;
   return () => {
-    pending ??= load().catch((error: unknown) => {
+    pending ??= load().then(ok, (error: unknown) => {
+      console.error(`catalog: product index load failed: ${String(error)}`);
       pending = undefined;
-      throw error;
+      return err("CATALOG_UNAVAILABLE" as const);
     });
     return pending;
   };
@@ -46,6 +55,7 @@ export const searchProducts = async (
   request: SearchRequest,
 ): Promise<Result<SearchResult, SearchError>> => {
   if (!parseTerms(request.terms).ok) return err("EMPTY_TERMS");
+  if (!isPositiveQuantity(request.quantity)) return err("INVALID_QUANTITY");
   const mandate = await deps.mandates.current();
   if (!mandate.ok) return mandate;
   const constraints = mergeConstraints(
@@ -53,8 +63,9 @@ export const searchProducts = async (
     mandate.value?.standingConstraints ?? null,
   );
   const catalog = await deps.catalog();
+  if (!catalog.ok) return catalog;
   return ok({
-    candidates: [...catalog.searchCatalog({ ...request, ...constraints })],
+    candidates: [...catalog.value.searchCatalog({ ...request, ...constraints })],
     constraints,
     mandate:
       mandate.value === null ? null : { id: mandate.value.id, version: mandate.value.version },
@@ -62,6 +73,9 @@ export const searchProducts = async (
 };
 
 export const productFacts = async (
-  catalog: CatalogLoader,
+  source: CatalogSource,
   request: FactsRequest,
-): Promise<FactsResult> => (await catalog()).facts(request);
+): Promise<Result<FactsResult, "CATALOG_UNAVAILABLE">> => {
+  const catalog = await source();
+  return catalog.ok ? ok(catalog.value.facts(request)) : catalog;
+};

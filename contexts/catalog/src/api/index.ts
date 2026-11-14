@@ -8,10 +8,22 @@ import {
 } from "@app/contract";
 import { badRequestEnvelope, type ContextModule } from "@app/server-kit";
 import { Elysia } from "elysia";
-import { type CatalogDeps, productFacts, searchProducts } from "../application/catalog.ts";
+import {
+  type CatalogDeps,
+  productFacts,
+  type SearchError,
+  searchProducts,
+} from "../application/catalog.ts";
 import { catalogAdapters } from "./adapters.ts";
 
 const envelope = <C extends ErrorCode>(code: C, message: string) => ({ error: { code, message } });
+
+const MESSAGES: Record<SearchError, string> = {
+  EMPTY_TERMS: "terms: give at least one non-empty search term.",
+  INVALID_QUANTITY: "quantity.value: must be above 0.",
+  UPSTREAM_FAILED: "The current mandate could not be read.",
+  CATALOG_UNAVAILABLE: "The product index could not be loaded.",
+};
 
 export const createApi = (deps: CatalogDeps = catalogAdapters()) =>
   new Elysia({ prefix: "/catalog" })
@@ -25,15 +37,24 @@ export const createApi = (deps: CatalogDeps = catalogAdapters()) =>
       async ({ body, status }) => {
         const result = await searchProducts(deps, body);
         if (result.ok) return result.value;
-        return result.error === "EMPTY_TERMS"
-          ? status(400, envelope("BAD_REQUEST", "terms: give at least one non-empty search term."))
-          : status(502, envelope("UPSTREAM_FAILED", "The current mandate could not be read."));
+        const message = MESSAGES[result.error];
+        return result.error === "EMPTY_TERMS" || result.error === "INVALID_QUANTITY"
+          ? status(400, envelope("BAD_REQUEST", message))
+          : status(502, envelope("UPSTREAM_FAILED", message));
       },
     )
     .post(
       "/facts",
-      { body: FactsRequestSchema, response: { 200: FactsResultSchema, 400: ErrorEnvelopeSchema } },
-      async ({ body }) => productFacts(deps.catalog, body),
+      {
+        body: FactsRequestSchema,
+        response: { 200: FactsResultSchema, 400: ErrorEnvelopeSchema, 502: ErrorEnvelopeSchema },
+      },
+      async ({ body, status }) => {
+        const result = await productFacts(deps.catalog, body);
+        return result.ok
+          ? result.value
+          : status(502, envelope("UPSTREAM_FAILED", MESSAGES[result.error]));
+      },
     );
 
 export type Api = ReturnType<typeof createApi>;

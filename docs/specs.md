@@ -160,7 +160,7 @@ export const TOOL_INPUT = {
 - `DecideApprovalInput` is flat because a tool input schema is one object. The MCP binding drops `orderId`, keeps the fields that belong to `decision`, and the REST route validates the result as `DecideApprovalRequest`; a field that does not belong to the decision → 400.
 - No tool input has a customer, account, agent, password or passcode field.
 - Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not in `HARD_CONSTRAINT_VALUES` for that attribute, → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` (`standingConstraints.hard`) and the `facts` route.
-- Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
+- Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` and `GET /skills/trusted-trade-ordering/:file` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
 
 Verification: a contract test that `ROUTES` keys, tools, `TOOL_INPUT` and `TOOL_OUTPUT` match this table and that every `TOOL_INPUT` schema is a JSON object schema.
 
@@ -588,7 +588,7 @@ PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 - Every tool of SPEC-003 is registered with `inputSchema` = `TOOL_INPUT[tool]` and `outputSchema` = `TOOL_OUTPUT[tool]`. The result has `content` (a text summary) and `structuredContent` (the REST 2xx body). Text of a pending order includes its `approvalUrl`. A REST error → `isError: true`, the error code in the text, the envelope as `structuredContent`. Hosts without Apps complete the flow from text, structured content and the approval page.
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
 - Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
-- Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. docs/host-support.md has the details.
+- Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
 
 ## SPEC-013 Views
 
@@ -662,7 +662,7 @@ export const VIEWS = [
 
 PRD: [Open contract and adapters](prd.md#open-contract-and-adapters).
 
-- `GET /.well-known/trusted-trade.json` → `{ endpoint, mcp, jwksUri, openapi, authorization: null, guardrails: GUARDRAILS, paymentTerms: PAYMENT_TERMS, reasonCodes, tools: { model, view }, views }`. `authorization` is null while the build has no authentication (SPEC-002).
+- `GET /.well-known/trusted-trade.json` → `{ endpoint, mcp, jwksUri, openapi, skill?, authorization: null, guardrails: GUARDRAILS, paymentTerms: PAYMENT_TERMS, reasonCodes, tools: { model, view }, views }`. `skill` is the optional absolute URL of `/skills/trusted-trade-ordering/SKILL.md`. `authorization` is null while the build has no authentication (SPEC-002).
 - `GET /api/discovery/openapi.json`: OpenAPI 3.1 with every `/api` route of `ROUTES`, request and response schemas generated from the contract schemas.
 
 ## SPEC-015 Demo seed values

@@ -67,6 +67,21 @@ The host fetches each file with the standard `resources/read` method and the fil
 
 The example is synthetic. The values are placeholders.
 
+### Without the Skills extension
+
+A host without the extension downloads the files over plain HTTP from the discovery context. Both URLs are relative to the public base URL:
+
+- `/skills/trusted-trade-ordering/SKILL.md`
+- `/skills/trusted-trade-ordering/reason-codes.md`
+
+The responses are `text/markdown; charset=utf-8` attachments. Keep both files in one folder: `SKILL.md` links `reason-codes.md` by relative path.
+
+```sh
+mkdir -p trusted-trade-ordering
+curl -fsS "$BASE_URL/skills/trusted-trade-ordering/SKILL.md" -o trusted-trade-ordering/SKILL.md
+curl -fsS "$BASE_URL/skills/trusted-trade-ordering/reason-codes.md" -o trusted-trade-ordering/reason-codes.md
+```
+
 ### Errors
 
 | Code     | Cause          |

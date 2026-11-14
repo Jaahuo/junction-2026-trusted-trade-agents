@@ -72,6 +72,8 @@ export function requireMergeEvidence(input: {
   base: string;
   currentMain: string;
   baseIsAncestor: boolean;
+  mergeable: boolean | null;
+  equivalentHeads?: string[];
   author: string;
   reviews: Review[];
   agentReviews?: AgentReview[];
@@ -79,7 +81,12 @@ export function requireMergeEvidence(input: {
 }): void {
   if (input.head !== input.localHead)
     throw new Error("PR head changed; fetch and inspect before retrying.");
-  if (input.base !== input.currentMain || !input.baseIsAncestor)
+  if (input.risk === "ordinary") {
+    if (input.mergeable === null)
+      throw new Error("GitHub is still computing whether the PR merges cleanly; retry shortly.");
+    if (!input.mergeable)
+      throw new Error("PR conflicts with main; merge origin/main, resolve conflicts and retry.");
+  } else if (input.base !== input.currentMain || !input.baseIsAncestor)
     throw new Error("PR is not based on current main; update the branch first.");
   const gates = input.checks.filter((check) => check.name === "gate");
   if (
@@ -89,6 +96,7 @@ export function requireMergeEvidence(input: {
     throw new Error("The gate check for this exact head must be green.");
   }
   if (input.risk === "ordinary") return;
+  const current = new Set([input.head, ...(input.equivalentHeads ?? [])]);
   const latest = new Map<string, Review>();
   for (const review of input.reviews) {
     if (review.user && review.state !== "COMMENTED" && review.state !== "PENDING")
@@ -99,11 +107,12 @@ export function requireMergeEvidence(input: {
       review.user &&
       review.user.login.toLowerCase() !== input.author.toLowerCase() &&
       review.state === "APPROVED" &&
-      review.commit_id === input.head &&
+      review.commit_id !== null &&
+      current.has(review.commit_id) &&
       (input.risk !== "lock-in" || review.user.type === "User"),
   );
   const agentApproval =
-    input.risk === "impact" && input.agentReviews?.some((review) => review.head === input.head);
+    input.risk === "impact" && input.agentReviews?.some((review) => current.has(review.head));
   if (!approval && !agentApproval)
     throw new Error(
       input.risk === "lock-in"

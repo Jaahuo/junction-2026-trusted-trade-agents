@@ -269,6 +269,7 @@ export interface PriceQuote {
   productId: string;
   unitPrice: { net: number; vatRate: number; currency: "EUR" };
   deposit: number /* per sales unit */;
+  depositKnown?: boolean /* false: no deposit amount in the source, deposit is 0; absent = true */;
   comparisonPrice: { value: number; unit: "LTR" | "KGM" } | null;
   validTo: string;
 }
@@ -303,9 +304,10 @@ export interface WholesalerCatalog {
 
 - Mapping from the mock's availability response (`ProductAvailability` with `closingTime`, `salesBlock` and `scheduleLines[]` of `availableAmount`, `availableDate`, `salesBlock`): `availableDate` = the first schedule line with an amount above 0 and no sales block; `amount` = that line's amount; `cutoffAt` = `closingTime`; `salesBlocked` = the product's or that line's block.
 - `nextDeliveryDate` = the first schedule line date later than `availableDate`. When the response has none, the adapter makes one further availability query with the requested date set to `availableDate` + 1 day, at most one per product per call, and takes its `availableDate`. A failed or empty further query gives `null`.
-- An amount of `999999` means `stock: "unconfirmed"`. Order submission is the order store itself (SPEC-010).
+- `logisticModel: "Terminal"` (supplied from the supplier's warehouse, amount unknown) means `stock: "unconfirmed"`; an amount of `999999` with no `logisticModel` also does. A `Stock` product is `confirmed` at any amount, including the large amounts the mock returns for plentiful stock. Order submission is the order store itself (SPEC-010).
+- Deposits: the price response has no deposit amount, and the product data names deposit materials without a price, so the mock adapter sets `deposit: 0` and `depositKnown: false`.
 - Live adapter choice for offers: `WHOLESALER_LIVE=mock`, with the wholesaler API key set. With any other value or no API key, `get_offers` returns HTTP 200 and omits every line with reason `NO_PRICE`. The omission detail states that no live price source is configured. No offer is signed, and offers never invent a price. Catalog choice: `WHOLESALER_CATALOG=file|json`; `json` is the second, portable catalog adapter. Each context selects its adapters in one file, `src/api/adapters.ts`.
-- Quotes are cached per customer, date and product until `validTo`. The cache serves offer issuance only: `validate` (at placement and at approval) always sends a fresh availability request and never reads availability from the cache.
+- Prices are cached per customer, pricing date and product until the earliest of `validTo`, `cutoffAt` and 5 minutes after the lookup. Availability is never cached: every `get_offers` and every `validate` sends a fresh availability request.
 
 Failure paths: transport error or non-2xx upstream → `UPSTREAM_FAILED` (route answers 502).
 
@@ -321,7 +323,8 @@ Later hardening: `requote`, `validate` and the live-amount rule. This part is bu
 export interface OffersRequest { lines: { productId: string; quantity: Quantity /* sales unit */ }[]; deliverBy: string;
   paymentTerms: PaymentTerms; hard: HardConstraint[]; soft: SoftConstraint[] }
 export interface OfferClaims { iss: string; offerId: string; customer: string; agentId: string; productId: string;
-  quantity: Quantity; unitPrice: PriceQuote["unitPrice"]; deposits: number; total: { net: number; gross: number };
+  quantity: Quantity; unitPrice: PriceQuote["unitPrice"]; deposits: number; depositsIncluded?: boolean;
+  total: { net: number; gross: number }; pricePerStandardUnit?: { gross: number; unit: "LTR" | "KGM" } | null;
   deliveryDate: string; requestedDate: string; nextDeliveryDate: string | null; stock: "confirmed" | "unconfirmed";
   paymentTerms: PaymentTerms; cutoffAt: string | null; replaces: string | null;
   shortfall: Quantity | null /* std units; sales units when perSalesUnit is null */;
@@ -363,7 +366,8 @@ Steps of `get_offers`:
 7. Pre-check each offer through `POST /api/orders/precheck`; on failure `precheck` is null and the offer still returns. `get_offers` writes no order, credit or audit record.
 
 - Verification of a token checks the signature (by `kid`), `alg`, `typ` and `exp`. It does not compare `iss` with the current public URL, so a tunnel restart with a new URL keeps issued offers valid.
-- Totals: gross = (net × (1 + vatRate/100) + deposit) × quantity value, rounded to cents.
+- Totals: gross = (net × (1 + vatRate/100) + deposit) × quantity value, rounded to cents. `depositsIncluded: false` when the price quote has `depositKnown: false`: the total then leaves deposits out.
+- `pricePerStandardUnit`: gross price (VAT, no deposit) per `LTR` or `KGM`, rounded to cents. The wholesaler's comparison price wins; without it, the unit price divided by `product.perSalesUnit` when that is in litres or kilograms; otherwise `null`.
 - Keys: `OFFER_SIGNING_JWK` (private ES256 JWK) and `OFFER_SIGNING_KID`. With both set, a restart keeps every issued offer valid. When they are unset and `NODE_ENV` is not `production`, `offerSigningKeyFromEnv` generates a key for the process and logs one warning; in `production` it throws and the server does not start. `GET /.well-known/jwks.json` publishes the public key only.
 - `requote`: re-issues offers for the same product, quantity and date (or the given changes) of the given tokens, under the current mandate of the token's `agentId`.
 - `validate`: re-reads live availability of the tokens' products with a fresh availability request (SPEC-005) and reports a sales block, a lost date or a passed cut-off. It also reports the live confirmed amount per product in `products[].liveAmount`, `null` when stock is unconfirmed.
@@ -498,6 +502,7 @@ export interface AuditEvent {
   detail?: string;
   hash?: string; // lowercase SHA-256 hex
   previousHash?: string | null; // null at genesis
+  productId?: string; // the product a check applies to, for a reason about one product
 }
 export interface OrderLine {
   offerId: string;
@@ -629,7 +634,7 @@ PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 - `ALL /mcp`: stateless streamable HTTP, a new server and transport per request, JSON responses. No authentication in the first build (SPEC-002).
 - Every tool of SPEC-003 is registered with `inputSchema` = `TOOL_INPUT[tool]` and `outputSchema` = `TOOL_OUTPUT[tool]`. The result has `content` (a text summary) and `structuredContent` (the REST 2xx body). Text of a pending order includes its `approvalUrl`. A REST error, or input that `TOOL_INPUT[tool]` refuses (`BAD_REQUEST`), → `isError: true` and no `structuredContent`; the text has the error code, the message and the envelope as JSON. Reason: an MCP SDK client validates any `structuredContent` against `outputSchema`, also when `isError` is set. So every result with `structuredContent` parses with `TOOL_OUTPUT[tool]`. Hosts without Apps complete the flow from text, structured content and the approval page.
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
-- Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
+- Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
 - Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
 
 ## SPEC-013 Views
@@ -653,8 +658,9 @@ export const VIEWS = [
     view: "approval-card",
     uri: "ui://trusted-trade/approval-card",
     tools: ["place_order", "list_pending_approvals"],
-    plainQuery: null,
-    plainLoad: null,
+    plainQuery: "order",
+    plainLoad: "status",
+    plainList: "pending",
     actions: ["decide_approval"],
   },
   {
@@ -663,6 +669,7 @@ export const VIEWS = [
     tools: ["get_offers"],
     plainQuery: null,
     plainLoad: null,
+    plainList: null,
     actions: [],
   },
   {
@@ -671,6 +678,7 @@ export const VIEWS = [
     tools: ["get_order_status"],
     plainQuery: "order",
     plainLoad: "status",
+    plainList: null,
     actions: [],
   },
   {
@@ -679,6 +687,7 @@ export const VIEWS = [
     tools: ["search_products"],
     plainQuery: null,
     plainLoad: null,
+    plainList: null,
     actions: [],
   },
   {
@@ -687,6 +696,7 @@ export const VIEWS = [
     tools: ["get_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
+    plainList: null,
     actions: ["register_mandate", "revoke_mandate"],
   },
 ] as const; // priority order
@@ -694,18 +704,18 @@ export const VIEWS = [
 
 - The `structuredContent` of a tool is the only input of its view. A view parses it with `TOOL_OUTPUT`; a failed parse, or a result with `isError: true` and no `structuredContent` (SPEC-012), shows the error state.
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
-- Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. The approval card has no plain mode; its plain counterpart is the approval page.
+- Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. Without the query, a view with a `plainList` route loads that list instead (`/views/approval-card` lists the open orders). The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
 - The approval card shows a link to `approvalUrl` in every pending state.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
 - Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
-- The approval page is the screen `/approvals/<orderId>` of the orders context: one plain page with the approval actions, for unattended runs and hosts without Apps. The Apps approval card is the in-chat view; both call the same decision route (SPEC-011).
+- The approval page is the screen `/approvals` of the orders context, for unattended runs and hosts without Apps. It forwards to the approval card's plain page: the list of open orders (`/views/approval-card`), or one order with `?order=<id>` (the `approvalUrl`). The card calls the same decision route in the chat and on its page (SPEC-011).
 
 ## SPEC-014 Discovery and OpenAPI
 
 PRD: [Open contract and adapters](prd.md#open-contract-and-adapters).
 
 - `GET /.well-known/trusted-trade.json` → `{ endpoint, mcp, jwksUri, openapi, skill?, authorization: null, guardrails: GUARDRAILS, paymentTerms: PAYMENT_TERMS, reasonCodes, tools: { model, view }, views }`. `skill` is the optional absolute URL of `/skills/trusted-trade-ordering/SKILL.md`. `authorization` is null while the build has no authentication (SPEC-002).
-- `GET /api/discovery/openapi.json`: OpenAPI 3.1 with every `/api` route of `ROUTES`, request and response schemas generated from the contract schemas.
+- `GET /api/discovery/openapi.json`: OpenAPI 3.1 with every `/api` route of `ROUTES`, request and response schemas generated from the contract schemas. A route marked `notImplemented` in `ROUTES` carries `summary: "Not implemented"`, a description that it always answers 501, and `x-not-implemented: true`.
 
 ## SPEC-015 Demo seed values
 

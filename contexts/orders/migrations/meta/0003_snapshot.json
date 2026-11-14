@@ -1,6 +1,6 @@
 {
-  "id": "cffb2961-4218-4e67-b472-280b6a4d9923",
-  "prevId": "ef729809-05d5-43a5-b4c8-b74bf9038442",
+  "id": "621a7999-c523-4edb-be2c-ba2b93ed494b",
+  "prevId": "de6b92e3-b446-4b83-84f5-a8d2f8286a31",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -39,7 +39,29 @@
           "notNull": true
         }
       },
-      "indexes": {},
+      "indexes": {
+        "orders_history_customer_product": {
+          "name": "orders_history_customer_product",
+          "columns": [
+            {
+              "expression": "customer",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "productId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

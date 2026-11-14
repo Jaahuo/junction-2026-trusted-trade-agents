@@ -43,6 +43,8 @@ export const AuditEventSchema = z.strictObject({
     .regex(/^[0-9a-f]{64}$/)
     .nullable()
     .optional(),
+  /** The product a check applies to, for a reason about one product (a new product, CO₂ …). */
+  productId: z.string().optional(),
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 

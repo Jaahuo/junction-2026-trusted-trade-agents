@@ -1,4 +1,5 @@
 import type { DecideApprovalRequest, Order, PendingList } from "@app/contract";
+import { brand } from "@app/ui/brand";
 import { css, html, nothing } from "lit";
 import {
   callAction,
@@ -8,14 +9,12 @@ import {
   viewEntry,
 } from "../../shared/bridge.ts";
 import checkCircle from "../../shared/icons/check-circle-32.svg?raw";
-import loadingIcon from "../../shared/icons/loading.svg?raw";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 import warningSmall from "../../shared/icons/warning-16.svg?raw";
 import warningLarge from "../../shared/icons/warning-32.svg?raw";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
-import { defineApprovalCard, reasonTitle } from "./approval-card.ts";
-import { amount, brandHeader, cardStyles, day, icon, money, stdUnits, timeOnly } from "./parts.ts";
+import { defineApprovalCard, reasonSummaries } from "./approval-card.ts";
+import { brandHeader, cardStyles, day, icon, money, when } from "./parts.ts";
 
 /**
  * Loads the tool result from `source` and shows each view state: loading, error, the empty
@@ -29,6 +28,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     busyId: { state: true },
     updatingId: { state: true },
     orderLimit: { state: true },
+    decisionError: { state: true },
+    pending: { state: true },
   };
 
   static override styles = [
@@ -38,12 +39,17 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       .skeleton {
         display: block;
         height: 14px;
-        border-radius: 0;
-        background: var(--color-bg-subtle);
+      }
+      .loading-text {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
       }
       .header .skeleton {
+        --shimmer-base: color-mix(in srgb, var(--color-text-on-brand) 18%, transparent);
+        --shimmer-sweep: color-mix(in srgb, var(--color-silver) 40%, transparent);
+        --shimmer-edge: color-mix(in srgb, var(--color-pink-soft) 25%, transparent);
         height: 18px;
-        background: color-mix(in srgb, var(--color-text-on-brand) 25%, transparent);
       }
       .w-60 {
         width: 60%;
@@ -63,14 +69,6 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       }
       .skeleton.button.small {
         width: 96px;
-      }
-      .loading-title {
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-sm);
-      }
-      .loading-title .icon {
-        animation: spin 1s linear infinite;
       }
       .center {
         display: flex;
@@ -96,6 +94,14 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         padding: var(--spacing-lg);
         border: 1px solid var(--color-border);
         border-radius: 0;
+      }
+      .item-reasons {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+        margin: 0;
+        padding: 0;
+        list-style: none;
       }
       .item-reason {
         display: flex;
@@ -126,6 +132,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         text-decoration: none;
       }
       .updating {
+        position: relative;
         display: flex;
         align-items: center;
         gap: var(--spacing-lg);
@@ -133,12 +140,35 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         background: var(--color-bg-brand);
         color: var(--color-text-on-brand);
       }
+      .updating img {
+        width: 56px;
+        height: auto;
+        flex-shrink: 0;
+      }
       .updating-text {
         flex: 1;
       }
+      .strip-bar {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+      }
+      /* The row above the card: the back link in an order, kept empty in the list. */
+      .top-row {
+        display: flex;
+        align-items: center;
+        min-height: 2.75rem;
+      }
       .back {
-        margin-bottom: var(--spacing-sm);
-        padding-left: 0;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--color-link);
+        font: inherit;
+        font-size: var(--font-size-xs);
+        font-weight: 600;
+        cursor: pointer;
       }
       @container (min-width: 760px) {
         .item {
@@ -162,7 +192,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   declare private updatingId: string | null;
   /** The mandate's order limit (gross EUR) for the Order total block; null when unknown. */
   declare private orderLimit: number | null;
+  /** Why the last decision on an order failed, shown in its card. */
+  declare private decisionError: { orderId: string; message: string } | null;
   private limitAsked = false;
+  /** What the tool is doing, from its arguments, while the result is on its way. */
+  declare private pending: { placing: boolean; request: string | null };
 
   constructor() {
     super();
@@ -170,6 +204,18 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     this.busyId = null;
     this.updatingId = null;
     this.orderLimit = null;
+    this.decisionError = null;
+    this.pending = { placing: false, request: null };
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    void this.source?.input?.then((args) => {
+      this.pending = {
+        placing: Array.isArray(args["offers"]),
+        request: typeof args["originalRequest"] === "string" ? args["originalRequest"] : null,
+      };
+    });
   }
 
   /** Reads the order limit once, when the first order is shown; without it the block shows no limit. */
@@ -202,10 +248,12 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       order.approvalUrl,
     );
     this.busyId = null;
+    // A failed decision keeps the card and says why there (an expired offer, a conflict …).
     if (result.kind !== "done") {
-      this.state = result;
+      this.decisionError = { orderId: order.orderId, message: decisionFailure(result) };
       return;
     }
+    this.decisionError = null;
     const state = this.state;
     if (state.kind === "done")
       this.state = { kind: "done", data: replace(state.data, result.data) };
@@ -216,18 +264,49 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       updated.reasons.every((r) => order.reasons.includes(r))
     )
       await this.decide(updated, { decision: "approve", proposalVersion: updated.proposalVersion });
-    // The agent answers in the chat: it confirms a placed order and will not place a rejected one.
-    if (request.decision === "reject" && updated.status !== "pending_approval")
-      void this.source.message?.(`I rejected order ${order.orderId}. Do not place it.`);
-    if (request.decision !== "reject" && updated.status === "placed")
-      void this.source.message?.(`I confirmed order ${order.orderId}.`);
+    // The model learns the decision made on the card, so it does not say the order still waits.
+    if (updated.status !== "pending_approval") void this.source.context?.(decisionContext(updated));
   }
 
-  /** Sends the card's message to the agent in the chat; with `update` the card waits for it. */
+  /** Opens an order from the list (or goes back with null) at the top of the view. */
+  private open(orderId: string | null) {
+    this.openId = orderId;
+    this.decisionError = null;
+    window.scrollTo({ top: 0 });
+  }
+
+  /**
+   * Sends the card's message to the agent in the chat. With `update` (agent help) the order is
+   * rejected first, with `next: "alternatives"` and the prompt as its note, so only the agent's
+   * new offer stays open; the card then waits for it. A failed rejection sends nothing.
+   */
   private async ask(order: Order, text: string, update: boolean) {
-    const message = this.source?.message;
-    if (message === undefined) return;
-    if (update) this.updatingId = order.orderId;
+    const source = this.source;
+    const message = source?.message;
+    if (source === null || message === undefined) return;
+    if (update) {
+      this.updatingId = order.orderId;
+      const rejected = await callAction(
+        source,
+        "decide_approval",
+        {
+          orderId: order.orderId,
+          proposalVersion: order.proposalVersion,
+          decision: "reject",
+          next: "alternatives",
+          note: text,
+        },
+        order.approvalUrl,
+      );
+      if (rejected.kind !== "done") {
+        this.updatingId = null;
+        this.decisionError = { orderId: order.orderId, message: decisionFailure(rejected) };
+        return;
+      }
+      void source.context?.(
+        `Order ${order.orderId} was rejected on the approval card because the approver asked for a new offer. Place the new order for approval when you have it.`,
+      );
+    }
     try {
       await message(text);
     } catch (cause) {
@@ -244,28 +323,47 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   private updating(order: Order) {
     const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     return html`<article class="updating" part="updating" role="status">
-      ${icon(logo, "Valio Aimo")}
+      <img src=${brand.logo} alt=${brand.name} />
       <div class="updating-text">
         <p class="strong">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</p>
         <p class="body-small">The agent is updating this order</p>
       </div>
-      <span class="spinner" aria-hidden="true"></span>
+      <span class="shimmer load-bar strip-bar" aria-hidden="true"></span>
     </article>`;
   }
 
+  /**
+   * While the tool runs: what it is doing (from its arguments when the host sends them) and
+   * shimmering placeholders. The server reports no steps, so this names them.
+   */
   private loading() {
+    const { placing, request } = this.pending;
+    const title = placing ? "Checking your order…" : "Loading approvals…";
     return html`<article class="card" part="loading" aria-busy="true">
       ${brandHeader(
-        "Loading approval…",
-        html`<span class="skeleton w-60"></span>`,
-        html`<span class="skeleton w-45"></span>`,
+        title,
+        html`<span class="skeleton shimmer w-60" aria-hidden="true"></span>`,
+        html`<span class="skeleton shimmer w-45" aria-hidden="true"></span>`,
       )}
+      <span class="shimmer load-bar" aria-hidden="true"></span>
       <div class="body">
-        <p class="loading-title strong" role="status">${icon(loadingIcon)} Loading approval…</p>
-        <span class="skeleton w-80"></span><span class="skeleton w-60"></span
-        ><span class="skeleton w-75"></span>
+        <div class="loading-text" role="status">
+          <p class="strong">${title}</p>
+          ${
+            placing
+              ? html`<p class="body-small secondary">
+                  Verifying the signed offers and checking them against your limits.
+                </p>`
+              : nothing
+          }
+          ${request === null ? nothing : html`<p class="body-small">“${request}”</p>`}
+        </div>
+        <span class="skeleton shimmer w-80" aria-hidden="true"></span
+        ><span class="skeleton shimmer w-60" aria-hidden="true"></span
+        ><span class="skeleton shimmer w-75" aria-hidden="true"></span>
         <div class="actions">
-          <span class="skeleton button"></span><span class="skeleton button small"></span>
+          <span class="skeleton shimmer button" aria-hidden="true"></span
+          ><span class="skeleton shimmer button small" aria-hidden="true"></span>
         </div>
       </div>
     </article>`;
@@ -273,7 +371,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   private error(approvalUrl: string | null) {
     return html`<article class="card" part="error" role="alert">
-      ${brandHeader("Valio Aimo approvals")}
+      ${brandHeader(`${brand.name} approvals`)}
       <div class="body center">
         ${icon(warningLarge)}
         <p class="headline">This approval can't be shown here</p>
@@ -295,7 +393,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   private empty() {
     return html`<article class="card" part="empty">
-      ${brandHeader("Valio Aimo approvals", html`<h2 class="title">Approvals</h2>`)}
+      ${brandHeader(`${brand.name} approvals`, html`<h2 class="title">Approvals</h2>`)}
       <div class="body center">
         ${icon(checkCircle)}
         <p class="headline">No orders wait for approval</p>
@@ -306,56 +404,53 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   private list(orders: Order[]) {
     const pending = orders.filter((o) => o.status === "pending_approval").length;
-    return html`<article class="card" part="list">
-      ${brandHeader(
-        "Valio Aimo approvals",
-        html`<h2 class="title">
-          ${pending === 0 ? "Approvals" : `${pending} order${pending === 1 ? "" : "s"} wait for approval`}
-        </h2>`,
-      )}
-      <div class="body">
-        <ul class="list">
-          ${orders.map((order) => {
-            const claims = order.lines[0]?.claims;
-            return html`<li class="item">
-              <p class="item-reason body-small strong">
-                ${icon(warningSmall)}${reasonTitle(order)}
-              </p>
-              <p class="item-name">
-                <span class="name"
-                  >${
-                    order.lines.length === 1 && claims !== undefined
-                      ? claims.product.name
-                      : `Order of ${order.lines.length} products`
-                  }</span
-                ><span>${money(order.total.net)}</span>
-              </p>
-              ${
-                claims === undefined
-                  ? nothing
-                  : html`<dl class="item-facts body-small">
-                      <div>
-                        <dt class="label-small">Quantity</dt>
-                        <dd>${amount(stdUnits(claims))}</dd>
-                      </div>
-                      <div>
-                        <dt class="label-small">Delivery</dt>
-                        <dd>${day(claims.deliveryDate)}</dd>
-                      </div>
-                      <div>
-                        <dt class="label-small">Valid until</dt>
-                        <dd>${timeOnly(new Date(claims.exp * 1000))}</dd>
-                      </div>
-                    </dl>`
-              }
-              <button class="btn secondary" @click=${() => (this.openId = order.orderId)}>
-                Review
-              </button>
-            </li>`;
-          })}
-        </ul>
-      </div>
-    </article>`;
+    return html`<div class="top-row" aria-hidden="true"></div>
+      <article class="card" part="list">
+        ${brandHeader(
+          `${brand.name} approvals`,
+          html`<h2 class="title">
+            ${pending === 0 ? "Approvals" : `${pending} order${pending === 1 ? "" : "s"} wait for approval`}
+          </h2>`,
+        )}
+        <div class="body">
+          <ul class="list">
+            ${orders.map((order) => {
+              const claims = order.lines.map((l) => l.claims);
+              const delivery = claims.map((c) => c.deliveryDate).toSorted()[0];
+              const decideBy = Math.min(...claims.map((c) => c.exp));
+              return html`<li class="item">
+                <p class="item-name">
+                  <span class="name"
+                    >${delivery === undefined ? "Order" : `Order for ${day(delivery)}`}</span
+                  ><span>${money(order.total.net)}</span>
+                </p>
+                <ul class="item-reasons body-small">
+                  ${reasonSummaries(order).map(
+                    (reason) => html`<li class="item-reason">${icon(warningSmall)}${reason}</li>`,
+                  )}
+                </ul>
+                <dl class="item-facts body-small">
+                  <div>
+                    <dt class="label-small">Products</dt>
+                    <dd>${claims.length}</dd>
+                  </div>
+                  ${
+                    Number.isFinite(decideBy)
+                      ? html`<div>
+                          <dt class="label-small">Decide by</dt>
+                          <dd>${when(new Date(decideBy * 1000))}</dd>
+                        </div>`
+                      : nothing
+                  }
+                </dl>
+                <button class="btn secondary" @click=${() => this.open(order.orderId)}>
+                  Review
+                </button>
+              </li>`;
+            })}
+          </ul>
+        </div>
+      </article>`;
   }
 
   override render() {
@@ -371,11 +466,12 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const open = orders.length === 1 ? orders[0] : orders.find((o) => o.orderId === this.openId);
     if (open === undefined) return orders.length === 0 ? this.empty() : this.list(orders);
     if (this.updatingId === open.orderId) return this.updating(open);
+    // The back link sits in a row the list keeps too, so the card does not move.
     return html`${
         orders.length > 1
-          ? html`<button class="btn ghost back" @click=${() => (this.openId = null)}>
-              ← All approvals
-            </button>`
+          ? html`<div class="top-row">
+              <button class="back" @click=${() => this.open(null)}>← All approvals</button>
+            </div>`
           : nothing
       }
       <tt-approval-card
@@ -383,6 +479,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         ?busy=${this.busyId === open.orderId}
         ?can-ask=${this.source?.message !== undefined}
         .orderLimit=${this.orderLimit}
+        .error=${this.decisionError?.orderId === open.orderId ? this.decisionError.message : null}
         @tt-decide=${(e: CustomEvent<DecideApprovalRequest>) => this.decide(open, e.detail)}
         @tt-confirm-changes=${(e: CustomEvent<DecideApprovalRequest>) =>
           this.decide(open, e.detail, true)}
@@ -391,6 +488,29 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       ></tt-approval-card>`;
   }
 }
+
+/** Plain words for a failed decision, by the server's error code ("CODE: message"). */
+const FAILURES: Record<string, string> = {
+  OFFER_EXPIRED: "An offer in this order has expired. Ask the agent for new offers.",
+  STALE_OFFER: "The mandate changed after the offers were made. Ask the agent for new offers.",
+  CONFLICT: "This order was already decided or changed. Reload to see it.",
+  NOT_FOUND: "This order no longer exists.",
+  UPSTREAM_FAILED: "The decision could not be checked right now. Try again in a moment.",
+  NOT_IMPLEMENTED:
+    "Changing amounts is not available yet. Approve the order as it is, or ask the agent.",
+};
+const decisionFailure = (result: { kind: string; message?: string }) => {
+  const code = /^([A-Z_]+):/.exec(result.message ?? "")?.[1];
+  return (
+    (code === undefined ? undefined : FAILURES[code]) ?? "The decision was not saved. Try again."
+  );
+};
+
+/** What the model is told after a decision on the card. */
+const decisionContext = (order: Order) =>
+  order.status === "placed" || order.status === "awaiting_payment"
+    ? `The approver confirmed order ${order.orderId} on the approval card. It was sent to ${brand.name}.`
+    : `The approver rejected order ${order.orderId} on the approval card. Nothing is ordered. Do not ask for its approval again unless the user asks for a new order.`;
 
 /** Puts a decided order back into the tool result it came from. */
 const replace = (data: Order | PendingList, updated: Order) =>

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ProductFacts } from "@app/contract";
 import {
   floorToLot,
+  grossPerStandardUnit,
   planOriginalQuantity,
   pricePerStdUnit,
   quantityForShortfall,
@@ -528,5 +529,34 @@ describe("substitute ranking", () => {
       pricePerStdUnit({ net: 0, vatRate: 0, currency: "EUR" }, { value: 2, unit: "LTR" }),
     ).toEqual({ value: 0, unit: "LTR" });
     expect(pricePerStdUnit({ net: 1, vatRate: 0, currency: "EUR" }, null)).toBeNull();
+  });
+});
+
+describe("grossPerStandardUnit", () => {
+  const unitPrice = { net: 10, vatRate: 14, currency: "EUR" as const };
+
+  test("an offer states the gross price per litre for a litre product and per kilogram for a weight product", () => {
+    expect(
+      grossPerStandardUnit({ unitPrice, comparisonPrice: null }, { value: 2, unit: "LTR" }),
+    ).toEqual({ gross: 5.7, unit: "LTR" });
+    expect(
+      grossPerStandardUnit({ unitPrice, comparisonPrice: null }, { value: 0.5, unit: "KGM" }),
+    ).toEqual({ gross: 22.8, unit: "KGM" });
+  });
+
+  test("the wholesaler's comparison price wins over the computed one", () => {
+    expect(
+      grossPerStandardUnit(
+        { unitPrice, comparisonPrice: { value: 4, unit: "KGM" } },
+        { value: 2, unit: "LTR" },
+      ),
+    ).toEqual({ gross: 4.56, unit: "KGM" });
+  });
+
+  test("no conversion gives null", () => {
+    expect(grossPerStandardUnit({ unitPrice, comparisonPrice: null }, null)).toBeNull();
+    expect(
+      grossPerStandardUnit({ unitPrice, comparisonPrice: null }, { value: 6, unit: "CT" }),
+    ).toBeNull();
   });
 });

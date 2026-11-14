@@ -37,7 +37,9 @@ export async function cleanMergedWorktree(
     return;
   }
   const keep = (reason: string) =>
-    console.log(`Kept worktree ${worktree.path}: ${reason}. From ${mainPath}, run: ${rerun}`);
+    console.log(
+      `Kept worktree ${worktree.path}: ${reason}. From ${mainPath}, run:\n  git pull --ff-only origin main\n  ${rerun}`,
+    );
   if (!decision.remove) return keep(decision.reason);
   if (await hasRuntime(worktree.path)) {
     const env = Object.fromEntries(

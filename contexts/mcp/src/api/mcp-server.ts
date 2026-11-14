@@ -24,7 +24,14 @@ import {
 import { z } from "zod";
 import { SKILL_NAME, skillUri } from "../domain/skill.ts";
 import { loadSkill, type SkillPack } from "../application/skills.ts";
-import { runTool, type ToolReply, type TradeRest, type ViewPages } from "../application/tools.ts";
+import {
+  runTool,
+  type ToolReply,
+  type TradeRest,
+  type ViewName,
+  type ViewPages,
+} from "../application/tools.ts";
+import type { ViewUris } from "../application/view-uris.ts";
 
 export type ViewToolsMode = "app" | "off";
 
@@ -37,6 +44,7 @@ export const viewToolsMode = (value: string | undefined): ViewToolsMode => {
 export interface McpDeps {
   readonly rest: TradeRest;
   readonly views: ViewPages;
+  readonly viewUris: ViewUris;
   readonly viewTools: ViewToolsMode;
   readonly skills: SkillPack;
 }
@@ -105,16 +113,19 @@ const chatViewOf = (name: ToolName) => {
   return view === undefined || VIEWS_NOT_IN_CHAT.has(view.view) ? undefined : view;
 };
 
-const toolMeta = (name: ToolName): Record<string, unknown> => {
+type AnnouncedUris = ReadonlyMap<ViewName, string>;
+
+const toolMeta = (name: ToolName, uris: AnnouncedUris): Record<string, unknown> => {
   if (VIEW_TOOLS.some((tool) => tool === name)) {
     const ui: McpUiToolMeta = { visibility: ["app"] };
     return { ui };
   }
   const view = chatViewOf(name);
   if (view === undefined) return {};
-  const ui: McpUiToolMeta = { resourceUri: view.uri };
+  const uri = uris.get(view.view) ?? view.uri;
+  const ui: McpUiToolMeta = { resourceUri: uri };
   // The flat key mirrors ext-apps' registerAppTool, for hosts that read the older form.
-  return { ui, [RESOURCE_URI_META_KEY]: view.uri };
+  return { ui, [RESOURCE_URI_META_KEY]: uri };
 };
 
 // An error has no structuredContent: SDK clients check it against outputSchema even when isError is set.
@@ -144,25 +155,37 @@ const withoutLanguage = (args: Record<string, unknown>) =>
   Object.fromEntries(Object.entries(args).filter(([key]) => key !== "language"));
 
 // The same JSON Schema options as McpServer.registerTool uses; ToolSchema checks they are object schemas.
-const toolDefinition = (name: ToolName): Tool =>
+const toolDefinition = (name: ToolName, uris: AnnouncedUris): Tool =>
   ToolSchema.parse({
     name,
     description: DESCRIPTIONS[name],
     inputSchema: inputSchema(name),
     outputSchema: z.toJSONSchema(TOOL_OUTPUT[name], { target: "draft-7", io: "output" }),
-    _meta: toolMeta(name),
+    _meta: toolMeta(name, uris),
   });
 
+/** The versioned URI of each view that one of the tools shows in the chat. */
+const announcedUris = async (
+  tools: readonly ToolName[],
+  viewUris: ViewUris,
+): Promise<AnnouncedUris> => {
+  const shown = new Set(tools.flatMap((name) => chatViewOf(name)?.view ?? []));
+  return new Map(
+    await Promise.all([...shown].map(async (view) => [view, await viewUris.uri(view)] as const)),
+  );
+};
+
 /** One MCP server with the SPEC-003 tools and the SPEC-013 view resources. */
-const createMcpServer = ({ rest, views, viewTools, skills }: McpDeps): McpServer => {
+const createMcpServer = ({ rest, views, viewUris, viewTools, skills }: McpDeps): McpServer => {
   const server = new McpServer(SERVER_INFO);
   server.server.registerCapabilities(CAPABILITIES);
   const tools: readonly ToolName[] =
     viewTools === "app" ? [...MODEL_TOOLS, ...VIEW_TOOLS] : MODEL_TOOLS;
   // Tools use the low-level handlers: registerTool answers invalid input with its own text, without BAD_REQUEST.
-  server.server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: tools.map(toolDefinition),
-  }));
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const uris = await announcedUris(tools, viewUris);
+    return { tools: tools.map((name) => toolDefinition(name, uris)) };
+  });
   server.server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     const name = tools.find((tool) => tool === params.name);
     if (name === undefined) {
@@ -170,18 +193,40 @@ const createMcpServer = ({ rest, views, viewTools, skills }: McpDeps): McpServer
     }
     return toCallToolResult(await runTool(rest, name, withoutLanguage(params.arguments ?? {})));
   });
-  for (const { view, uri } of VIEWS) {
-    server.registerResource(view, uri, { mimeType: RESOURCE_MIME_TYPE }, async () => {
+  registerViews(server, views, viewUris);
+  registerSkills(server, skills);
+  return server;
+};
+
+/**
+ * Each view under its versioned URI (listed) and its base URI (not listed). A read of any
+ * version returns the current HTML under the requested URI, so a host with an older URI still loads.
+ */
+const registerViews = (server: McpServer, views: ViewPages, viewUris: ViewUris): void => {
+  for (const { view, uri: base } of VIEWS) {
+    const read = async (uri: URL) => {
       const html = await views.html(view);
       if (!html.ok) {
         const code = html.error === "NOT_FOUND" ? RESOURCE_NOT_FOUND : ErrorCode.InternalError;
         throw new McpError(code, `The view ${view} is not available: ${html.error}.`);
       }
-      return { contents: [{ uri, mimeType: RESOURCE_MIME_TYPE, text: html.value }] };
-    });
+      return { contents: [{ uri: uri.href, mimeType: RESOURCE_MIME_TYPE, text: html.value }] };
+    };
+    const list = async () => ({ resources: [{ uri: await viewUris.uri(view), name: view }] });
+    server.registerResource(
+      view,
+      new ResourceTemplate(`${base}/{version}`, { list }),
+      { mimeType: RESOURCE_MIME_TYPE },
+      read,
+    );
+    // A template without variables matches only the base URI and stays out of resources/list.
+    server.registerResource(
+      `${view}-base`,
+      new ResourceTemplate(base, { list: undefined }),
+      { mimeType: RESOURCE_MIME_TYPE },
+      read,
+    );
   }
-  registerSkills(server, skills);
-  return server;
 };
 
 /** The Skills extension. The SDK speaks only the initialize era, so `server/discover` answers with the legacy versions. */

@@ -17,12 +17,20 @@ const ownedBy = (owner: MandateOwner) =>
   and(eq(mandates.customer, owner.customer), eq(mandates.agent, owner.agent));
 
 export const postgresMandateStore = (db: Db): MandateStore => ({
-  replaceActive: async (owner, next, registeredAt) =>
+  replaceActive: async (owner, operationId, next, registeredAt) =>
     db.transaction(async (tx) => {
-      // Serialises registers of one owner, so parallel registers cannot both see the same version.
+      // Serialises registers of one owner, so parallel registers cannot both see the same version
+      // or both miss the same operationId.
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`mandates:${owner.customer}:${owner.agent}`}, 0))`,
       );
+      if (operationId !== undefined) {
+        const [earlier] = await tx
+          .select()
+          .from(mandates)
+          .where(and(ownedBy(owner), eq(mandates.operationId, operationId)));
+        if (earlier !== undefined) return { stored: toStored(earlier), replayed: true };
+      }
       await tx
         .update(mandates)
         .set({ status: "revoked" })
@@ -31,7 +39,7 @@ export const postgresMandateStore = (db: Db): MandateStore => ({
         .select({ version: max(mandates.version) })
         .from(mandates)
         .where(ownedBy(owner));
-      const mandate = next(latest?.version ?? 0);
+      const { mandate, jws } = await next(latest?.version ?? 0);
       const [row] = await tx
         .insert(mandates)
         .values({
@@ -39,14 +47,15 @@ export const postgresMandateStore = (db: Db): MandateStore => ({
           customer: owner.customer,
           agent: owner.agent,
           version: mandate.version,
+          operationId: operationId ?? null,
           status: "active",
           mandate,
-          jws: null,
+          jws,
           registeredAt,
         })
         .returning();
       if (row === undefined) throw new Error("insert returned no row");
-      return toStored(row);
+      return { stored: toStored(row), replayed: false };
     }),
   findActive: async (owner) => {
     const [row] = await db

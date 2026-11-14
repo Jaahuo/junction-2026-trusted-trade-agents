@@ -30,11 +30,19 @@ const inputs: { [K in RouteKey]: RouteInput<K> } = {
   facts: fixtures.factsRequest,
   precheck: fixtures.precheckRequest,
   requote: fixtures.requoteRequest,
+  issued: { offerIds: [fixtures.offerClaims.offerId] },
   validate: fixtures.validateRequest,
   account: {},
   openapi: {},
 };
-const implemented = new Set<RouteKey>(["search", "facts", "openapi", "offers", "requote"]);
+const implemented = new Set<RouteKey>([
+  "search",
+  "facts",
+  "openapi",
+  "offers",
+  "requote",
+  "issued",
+]);
 
 // A context leaves this test when it adds migrations: its own route tests then cover its routes
 // against a real database. The remaining stub contexts never contact the database.

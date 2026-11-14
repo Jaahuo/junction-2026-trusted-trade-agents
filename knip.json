@@ -20,14 +20,7 @@
       ]
     },
     "contexts/orders": {
-      "ignoreDependencies": [
-        "react",
-        "@app/kernel",
-        "@ctx/mandates",
-        "@elysia/eden",
-        "@tanstack/react-query",
-        "zod"
-      ]
+      "ignoreDependencies": ["react", "@tanstack/react-query", "zod"]
     },
     "contexts/views": {
       "entry": ["src/views/*/main.{ts,tsx}"],

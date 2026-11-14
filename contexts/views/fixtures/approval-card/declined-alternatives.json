@@ -417,7 +417,7 @@
     "action": "reject",
     "next": "alternatives",
     "note": "Too expensive: Find a cheaper brand, max €1,000",
-    "by": "approver",
+    "by": "acct_demo",
     "at": "2026-11-14T10:20:00+00:00"
   },
   "requotes": [],

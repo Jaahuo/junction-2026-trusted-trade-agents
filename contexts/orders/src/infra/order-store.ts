@@ -1,5 +1,5 @@
 import type { Db } from "@app/server-kit";
-import { and, eq, inArray, sql, sum } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, sum } from "drizzle-orm";
 import type { OrderStore, OrderTx, StoredOrder } from "../application/ports.ts";
 import { history, orders, refusals } from "./schema.ts";
 
@@ -56,6 +56,14 @@ const toRow = (order: StoredOrder): Row => ({
   createdAt: new Date(order.createdAt),
 });
 
+const find = async (db: Executor, customer: string, orderId: string) => {
+  const [row] = await db
+    .select()
+    .from(orders)
+    .where(and(eq(orders.customer, customer), eq(orders.orderId, orderId)));
+  return row === undefined ? null : toStored(row);
+};
+
 const findByKey = async (db: Executor, customer: string, idempotencyKey: string) => {
   const [row] = await db
     .select()
@@ -65,12 +73,25 @@ const findByKey = async (db: Executor, customer: string, idempotencyKey: string)
 };
 
 const orderTx = (tx: Executor): OrderTx => ({
+  find: (customer, orderId) => find(tx, customer, orderId),
   findByKey: (customer, key) => findByKey(tx, customer, key),
   insert: async (order) => {
     await tx.insert(orders).values(toRow(order));
   },
-  update: async (order) => {
-    await tx.update(orders).set(toRow(order)).where(eq(orders.orderId, order.orderId));
+  decide: async (order, proposalVersion) => {
+    const updated = await tx
+      .update(orders)
+      .set(toRow(order))
+      .where(
+        and(
+          eq(orders.customer, order.customer),
+          eq(orders.orderId, order.orderId),
+          eq(orders.status, "pending_approval"),
+          eq(orders.proposalVersion, proposalVersion),
+        ),
+      )
+      .returning({ orderId: orders.orderId });
+    return updated.length === 1;
   },
   placedInvoiceGross: async (customer) => {
     const [row] = await tx
@@ -94,13 +115,15 @@ const orderTx = (tx: Executor): OrderTx => ({
 });
 
 export const postgresOrderStore = (db: Db): OrderStore => ({
-  find: async (customer, orderId) => {
-    const [row] = await db
-      .select()
-      .from(orders)
-      .where(and(eq(orders.customer, customer), eq(orders.orderId, orderId)));
-    return row === undefined ? null : toStored(row);
-  },
+  find: (customer, orderId) => find(db, customer, orderId),
+  pending: async (customer) =>
+    (
+      await db
+        .select()
+        .from(orders)
+        .where(and(eq(orders.customer, customer), eq(orders.status, "pending_approval")))
+        .orderBy(asc(orders.createdAt))
+    ).map(toStored),
   findByKey: (customer, key) => findByKey(db, customer, key),
   history: async (customer, productIds) =>
     productIds.length === 0

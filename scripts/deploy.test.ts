@@ -2,10 +2,8 @@ import { expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { $ } from "bun";
 import {
   CHAT_SERVICE,
-  CHAT_SYNC_EXCLUDES,
   chatEnv,
   chatSettings,
   deployEnv,
@@ -173,6 +171,9 @@ test("the chat host runs with login on, sign-up off and the hosted inference end
     "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1",
   );
   expect(env.get("OPENAI_API_KEY")).toBe("inference-key");
+  expect(env.get("MCP_SERVER_URL")).toBe(`${outputs.public_base_url}/mcp`);
+  expect(env.get("AGENT_MODEL_ID")).toBe("nemotron-3.5-super-vl");
+  expect(env.get("OPENWEBUI_MAX_TOKENS")).toBe("4096");
   expect(renderEnvFile(env)).toContain("WEBUI_ADMIN_PASSWORD=admin-password\n");
 });
 
@@ -186,14 +187,11 @@ test("Caddy serves the chat host on its own subdomain when the chat runs", () =>
 test("the chat unit keeps its data in a volume and listens on loopback only", () => {
   expect(CHAT_SERVICE).toContain("-p 127.0.0.1:8080:8080");
   expect(CHAT_SERVICE).toContain("-v trusted-trade-chat:/app/backend/data");
-  expect(CHAT_SERVICE).toContain(
-    "-v /opt/trusted-trade-chat/branding/custom.css:/app/backend/open_webui/static/custom.css:ro",
-  );
-  expect(CHAT_SERVICE).toContain(
-    "-v /opt/trusted-trade-chat/branding:/app/backend/open_webui/static/acme:ro",
-  );
+  expect(CHAT_SERVICE).not.toContain("/opt/trusted-trade-chat/branding");
   expect(CHAT_SERVICE).toContain("--env-file /etc/trusted-trade-chat.env");
-  expect(CHAT_SERVICE).toContain("ghcr.io/open-webui/open-webui:v0.13.3");
+  expect(CHAT_SERVICE).toContain("ConditionPathExists=/etc/trusted-trade-chat-image.env");
+  expect(CHAT_SERVICE).toContain("EnvironmentFile=/etc/trusted-trade-chat-image.env");
+  expect(CHAT_SERVICE).toContain("${TRUSTED_TRADE_CHAT_IMAGE}");
 });
 
 test("a reset runs with the hosted keys and production mode against the local checkout", async () => {
@@ -225,6 +223,23 @@ test("push rejects untrusted image references before loading secrets or touching
   expect(
     await failure(push(outputs, { DEPLOY_IMAGE: `${repo}@sha256:${"a".repeat(64)}` })),
   ).toMatch(/DEPLOY_REGISTRY_USER/);
+});
+
+test("chat requires a trusted immutable image only when enabled", async () => {
+  const repo = "ghcr.io/jaahuo/junction-2026-trusted-trade-agents";
+  const image = `${repo}@sha256:${"a".repeat(64)}`;
+  for (const chatImage of [
+    "",
+    `${repo}:latest`,
+    `${repo}@sha256:${"A".repeat(64)}`,
+    `ghcr.io/other/image@sha256:${"b".repeat(64)}`,
+  ]) {
+    expect(
+      await failure(
+        push(outputs, { ...chatSecrets, DEPLOY_IMAGE: image, DEPLOY_CHAT_IMAGE: chatImage }),
+      ),
+    ).toMatch(/DEPLOY_CHAT_IMAGE/);
+  }
 });
 
 test("push uses the exact digest and strict host checking, and stops on a digest mismatch", async () => {
@@ -300,6 +315,137 @@ test("push uses the exact digest and strict host checking, and stops on a digest
   }
 });
 
+test("chat digest is verified before disruption and provisioning failure stops deployment", async () => {
+  const root = await mkdtemp(join(tmpdir(), "deploy-chat-"));
+  const previous = { ...process.env };
+  const previousFetch = globalThis.fetch;
+  const repo = "ghcr.io/jaahuo/junction-2026-trusted-trade-agents";
+  const image = `${repo}@sha256:${"a".repeat(64)}`;
+  const chatImage = `${repo}@sha256:${"b".repeat(64)}`;
+  const appId = `sha256:${"c".repeat(64)}`;
+  const chatId = `sha256:${"d".repeat(64)}`;
+  const server = Bun.serve({ port: 0, fetch: () => new Response("ok") });
+  try {
+    const log = join(root, "commands");
+    const input = join(root, "input");
+    await writeFile(
+      join(root, "ssh"),
+      `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_LOG"
+case "$*" in
+  *"io.trusted-trade.service"*) printf '%s\\n' "$FAKE_CHAT_ROLE";;
+  *"docker container inspect"*"trusted-trade-chat"*) printf '%s true\\n' "$FAKE_CHAT_RUNNING";;
+  *"docker container inspect"*) printf '%s true\\n' "$FAKE_APP_ID";;
+  *"docker image inspect"*"${chatImage}"*) printf '%s\\n%s\\n' "$FAKE_CHAT_ID" "$FAKE_CHAT_DIGEST";;
+  *"docker image inspect"*) printf '%s\\n%s\\n' "$FAKE_APP_ID" "$FAKE_APP_DIGEST";;
+  *"docker exec trusted-trade-chat"*) [ "$FAKE_PROVISION_FAIL" != 1 ];;
+  *"install -m"*) cat >> "$FAKE_INPUT";;
+esac
+`,
+    );
+    await writeFile(join(root, "rsync"), '#!/bin/sh\nprintf \'rsync %s\\n\' "$*" >> "$FAKE_LOG"\n');
+    await chmod(join(root, "ssh"), 0o755);
+    await chmod(join(root, "rsync"), 0o755);
+    process.env["PATH"] = `${root}:${previous["PATH"] ?? ""}`;
+    process.env["DEPLOY_ENV"] = keys;
+    process.env["FAKE_LOG"] = log;
+    process.env["FAKE_INPUT"] = input;
+    process.env["FAKE_APP_ID"] = appId;
+    process.env["FAKE_APP_DIGEST"] = image;
+    process.env["FAKE_CHAT_ID"] = chatId;
+    process.env["FAKE_CHAT_DIGEST"] = image;
+    process.env["FAKE_PROVISION_FAIL"] = "0";
+    process.env["FAKE_CHAT_RUNNING"] = chatId;
+    process.env["FAKE_CHAT_ROLE"] = "api";
+    globalThis.fetch = Object.assign(
+      (request: RequestInfo | URL, init?: RequestInit) => {
+        const url = request instanceof Request ? request.url : request.toString();
+        return url.startsWith("https://chat.")
+          ? Promise.resolve(new Response("ok"))
+          : previousFetch(request, init);
+      },
+      { preconnect: previousFetch.preconnect },
+    );
+    const settings = {
+      ...chatSecrets,
+      DEPLOY_IMAGE: image,
+      DEPLOY_CHAT_IMAGE: chatImage,
+      DEPLOY_REGISTRY_USER: "user",
+      DEPLOY_REGISTRY_TOKEN: "token",
+    };
+    const localOutputs = { ...outputs, public_base_url: `http://127.0.0.1:${server.port}` };
+    expect(await failure(push(localOutputs, settings))).toMatch(/requested repository digest/);
+    expect(await readFile(log, "utf8")).not.toContain("systemctl stop trusted-trade");
+
+    process.env["FAKE_CHAT_ID"] = "invalid";
+    await writeFile(log, "");
+    expect(await failure(push(localOutputs, settings))).toMatch(/invalid SHA-256 image ID/);
+    expect(await readFile(log, "utf8")).not.toContain("systemctl stop trusted-trade");
+    process.env["FAKE_CHAT_ID"] = chatId;
+
+    process.env["FAKE_CHAT_DIGEST"] = chatImage;
+    await writeFile(log, "");
+    expect(await failure(push(localOutputs, settings))).toMatch(/not an Open WebUI image/);
+    expect(await readFile(log, "utf8")).not.toContain("install -m");
+    expect(await readFile(log, "utf8")).not.toContain("systemctl stop trusted-trade");
+    process.env["FAKE_CHAT_ROLE"] = "openwebui";
+    process.env["FAKE_CHAT_RUNNING"] = appId;
+    await writeFile(log, "");
+    expect(await failure(push(localOutputs, settings))).toMatch(
+      /Running chat container image hash/,
+    );
+    expect(await readFile(log, "utf8")).not.toContain("docker exec trusted-trade-chat");
+    expect(await readFile(input, "utf8")).toContain(`TRUSTED_TRADE_CHAT_IMAGE="${chatImage}"`);
+    const installed = await readFile(input, "utf8");
+    expect(installed).toContain(`WEBUI_ADMIN_EMAIL=${chatSecrets.OPENWEBUI_ADMIN_EMAIL}`);
+    expect(installed).toContain(`WEBUI_ADMIN_PASSWORD=${chatSecrets.OPENWEBUI_ADMIN_PASSWORD}`);
+    expect(installed).toContain(`OPENAI_API_KEY=${chatSecrets.VERDA_INFERENCE_KEY}`);
+    expect(installed).toContain(`MCP_SERVER_URL=${localOutputs.public_base_url}/mcp`);
+
+    process.env["FAKE_CHAT_RUNNING"] = chatId;
+    await writeFile(log, "");
+    await push(localOutputs, settings);
+    const successfulCommands = await readFile(log, "utf8");
+    expect(successfulCommands).toContain(
+      "docker exec trusted-trade-chat python /opt/trusted-trade/hosts/openwebui/scripts/provision_agent.py",
+    );
+    expect(successfulCommands).not.toMatch(/rsync[^\n]*hosts\/openwebui/);
+    expect(successfulCommands).not.toContain("python3");
+    process.env["FAKE_PROVISION_FAIL"] = "1";
+    await writeFile(log, "");
+    expect(await failure(push(localOutputs, settings))).not.toBe("no error");
+    const commands = await readFile(log, "utf8");
+    expect(commands).toContain(
+      "docker exec trusted-trade-chat python /opt/trusted-trade/hosts/openwebui/scripts/provision_agent.py",
+    );
+    expect(commands.indexOf("systemctl restart trusted-trade-chat")).toBeGreaterThan(
+      commands.indexOf(
+        "docker container inspect --format '{{.Image}} {{.State.Running}}' trusted-trade",
+      ),
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    await server.stop();
+    for (const name of [
+      "PATH",
+      "DEPLOY_ENV",
+      "FAKE_LOG",
+      "FAKE_INPUT",
+      "FAKE_APP_ID",
+      "FAKE_APP_DIGEST",
+      "FAKE_CHAT_ID",
+      "FAKE_CHAT_DIGEST",
+      "FAKE_CHAT_RUNNING",
+      "FAKE_CHAT_ROLE",
+      "FAKE_PROVISION_FAIL",
+    ]) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("data transfer sends files to the literal remote data directory", async () => {
   const root = await mkdtemp(join(tmpdir(), "deploy-rsync-"));
   try {
@@ -359,19 +505,4 @@ test("deployWarning warns only when the latest completed deploy of main failed",
   expect(deployWarning([{ conclusion: "failure" }])).toBe(
     "Warning: the latest deploy of main (?) ended in failure, so the hosted demo may be stale. See the deploy workflow.",
   );
-});
-
-test("the chat sync passes its exclude patterns to rsync without glob expansion", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "chat-sync-"));
-  try {
-    const args = await $`printf '%s\n' ${CHAT_SYNC_EXCLUDES}`.cwd(dir).text();
-    expect(args.trim().split("\n")).toEqual([
-      "--exclude=.env",
-      "--exclude=.env.*",
-      "--exclude=__pycache__",
-      "--exclude=*.pyc",
-    ]);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
 });

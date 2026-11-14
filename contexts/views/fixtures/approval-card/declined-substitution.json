@@ -1,0 +1,187 @@
+{
+  "orderId": "ord_test_4481",
+  "customer": "cust_invoice_01",
+  "agentId": "agent_demo",
+  "accountId": "acct_demo",
+  "offerIds": ["off_test_70", "off_test_71"],
+  "lines": [
+    {
+      "offerId": "off_test_70",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_70",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_yogurt_750",
+        "quantity": {
+          "value": 199,
+          "unit": "ST"
+        },
+        "unitPrice": {
+          "net": 3.49,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 694.51,
+          "gross": 791.74
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": {
+          "value": 21,
+          "unit": "ST"
+        },
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": []
+        },
+        "product": {
+          "name": "Test plant-based yogurt 750 g",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": null,
+          "countryOfOrigin": "be",
+          "deliveryReliability": 0.98,
+          "co2PerKg": 0.6,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_71",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_71",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_yogurt_400",
+        "quantity": {
+          "value": 21,
+          "unit": "ST"
+        },
+        "unitPrice": {
+          "net": 2.23,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 46.83,
+          "gross": 53.39
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": "prod_test_yogurt_750",
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": []
+        },
+        "product": {
+          "name": "Test plant-based yogurt unsweetened 400 g",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": null,
+          "countryOfOrigin": "be",
+          "deliveryReliability": 0.92,
+          "co2PerKg": 0.6,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    }
+  ],
+  "alternatives": [],
+  "mandateId": "mnd_test_1",
+  "mandateVersion": 1,
+  "status": "declined",
+  "reasons": ["SUBSTITUTION", "AVAILABILITY_DIFFERS"],
+  "proposalVersion": 1,
+  "approvalUrl": null,
+  "paymentTerms": "invoice",
+  "total": {
+    "net": 741.34,
+    "gross": 845.13
+  },
+  "originalRequest": "220 tubs of lactose-free plant-based yogurt by Monday",
+  "decision": {
+    "action": "reject",
+    "next": "stop",
+    "note": null,
+    "by": "acct_demo",
+    "at": "2026-11-14T10:20:00+00:00"
+  },
+  "requotes": [],
+  "nextDeliveryDate": "2026-11-16",
+  "audit": [
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "agent",
+      "event": "order_requested"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "offer_verified"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "check_failed",
+      "reason": "SUBSTITUTION",
+      "detail": "The line is a substitute for the requested product.",
+      "productId": "prod_test_yogurt_400"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "check_failed",
+      "reason": "AVAILABILITY_DIFFERS",
+      "detail": "The delivery date or amount changed since the offer was made.",
+      "productId": "prod_test_yogurt_750"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "sent_to_approval"
+    },
+    {
+      "at": "2026-11-14T10:20:00+00:00",
+      "actor": "approver",
+      "event": "declined"
+    }
+  ],
+  "createdAt": "2026-11-14T10:05:00+00:00"
+}

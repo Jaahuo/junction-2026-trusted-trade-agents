@@ -1,0 +1,66 @@
+{
+  "mandate": {
+    "iss": "cust_fixture_all",
+    "mandateId": "mnd_fixture_all",
+    "version": 1,
+    "agent": "agent_fixture_buyer",
+    "signedBy": "acct_fixture_owner",
+    "limits": {
+      "maxOrderTotal": {
+        "value": 1000,
+        "currency": "EUR",
+        "basis": "gross"
+      },
+      "categories": null,
+      "substitutions": "ask",
+      "newProducts": "ask",
+      "minDeliveryReliability": {
+        "value": 0.9,
+        "ifNoData": "auto"
+      },
+      "maxCo2PerKg": {
+        "value": 3,
+        "ifNoData": "auto"
+      },
+      "allergenData": {
+        "ifNoData": "ask"
+      },
+      "paymentTerms": {
+        "invoice": "auto",
+        "pay_on_order": "ask"
+      },
+      "substitutionRules": [
+        {
+          "replaces": "prod_test_yogurt_750",
+          "productId": "prod_test_yogurt_400",
+          "policy": "auto",
+          "productName": "Test plant-based yogurt unsweetened 400 g",
+          "replacesName": "Test plant-based yogurt 750 g",
+          "decidedAt": "2026-11-14T10:21:00+00:00"
+        },
+        {
+          "replaces": "prod_test_oat_drink",
+          "productId": "prod_test_oat_drink_barista",
+          "policy": "never",
+          "productName": "Test oat drink barista 1 l",
+          "replacesName": "Test oat drink 1 l",
+          "decidedAt": "2026-11-14T11:02:00+00:00"
+        }
+      ]
+    },
+    "standingConstraints": {
+      "hard": [],
+      "soft": [
+        {
+          "attribute": "countryOfOrigin",
+          "prefer": "fi"
+        }
+      ]
+    },
+    "iat": 1794650400,
+    "exp": 4102444800
+  },
+  "jws": "fixture-mandate-jws",
+  "status": "active",
+  "registeredAt": "2026-11-14T10:00:00+00:00"
+}

@@ -19,14 +19,16 @@ import {
   lineTotal,
   mergeConstraints,
   offerExpiry,
+  priceCacheExpiry,
 } from "../domain/offer-rules.ts";
 import {
+  grossPerStandardUnit,
   planOriginalQuantity,
   quantityForShortfall,
   rankSubstitutes,
   stockCovers,
 } from "../domain/partial-stock.ts";
-import type { CachedQuote, OffersDeps } from "./ports.ts";
+import type { OffersDeps } from "./ports.ts";
 
 export const PRECHECK_CONCURRENCY = 4;
 
@@ -190,27 +192,25 @@ export async function getOffers(
   }
 
   const customer = principal.customer;
-  const cacheKey = (productId: string) => ({ customer, requestedDate: req.deliverBy, productId });
+  const priceKey = (productId: string, pricingDate: string) => ({
+    customer,
+    requestedDate: pricingDate,
+    productId,
+  });
   const lookedUpAt = deps.now();
-  const cached = new Map<string, CachedQuote>();
+  const priceCached = new Set<string>();
   const availability = new Map<string, AvailabilityQuote>();
   const prices = new Map<string, PriceQuote>();
   const availabilityRead = new Set<string>();
   const priceRead = new Set<string>();
 
+  // Availability is always read live; only prices come from the cache (SPEC-005).
   const loadAvailability = async (ids: readonly string[]): Promise<boolean> => {
     const misses: string[] = [];
     for (const id of unique(ids)) {
       if (availabilityRead.has(id)) continue;
       availabilityRead.add(id);
-      const hit = deps.cache.get(cacheKey(id), lookedUpAt);
-      if (hit === undefined) misses.push(id);
-      else {
-        cached.set(id, hit);
-        availability.set(id, hit.availability);
-        prices.set(id, hit.price);
-        priceRead.add(id);
-      }
+      misses.push(id);
     }
     for (const productIds of batchIds(misses)) {
       const read = await live.getAvailability({
@@ -229,6 +229,13 @@ export async function getOffers(
     for (const { product, deliveryDate } of lines) {
       if (priceRead.has(product.productId)) continue;
       priceRead.add(product.productId);
+      // Check the cache age now: availability reads before this can take time.
+      const hit = deps.cache.get(priceKey(product.productId, deliveryDate), deps.now());
+      if (hit !== undefined) {
+        prices.set(product.productId, hit);
+        priceCached.add(product.productId);
+        continue;
+      }
       const ids = byDate.get(deliveryDate) ?? [];
       ids.push(product.productId);
       byDate.set(deliveryDate, ids);
@@ -394,7 +401,9 @@ export async function getOffers(
         quantity: offer.quantity,
         unitPrice: price.unitPrice,
         deposits,
+        depositsIncluded: price.depositKnown !== false,
         total,
+        pricePerStandardUnit: grossPerStandardUnit(price, product.perSalesUnit),
         deliveryDate: offer.deliveryDate,
         requestedDate: req.deliverBy,
         nextDeliveryDate: quote.nextDeliveryDate,
@@ -445,11 +454,11 @@ export async function getOffers(
       continue;
     }
     if (offer.replaces !== null && !survivingOriginals.has(offer.index)) continue;
-    if (!cached.has(offer.product.productId)) {
+    if (!priceCached.has(offer.product.productId)) {
       deps.cache.set(
-        cacheKey(offer.product.productId),
-        { availability: offer.availability, price: offer.price },
-        new Date(offer.price.validTo),
+        priceKey(offer.product.productId, offer.deliveryDate),
+        offer.price,
+        priceCacheExpiry(offer.price.validTo, offer.availability.cutoffAt, lookedUpAt),
       );
     }
     const rankIndex = survivingRanks.get(offer.index) ?? 0;

@@ -11,7 +11,8 @@ export interface Constraints {
   soft: SoftConstraint[];
 }
 
-const toCents = (value: number): number => Math.round(Number((value * 100).toPrecision(12))) / 100;
+export const toCents = (value: number): number =>
+  Math.round(Number((value * 100).toPrecision(12))) / 100;
 
 export function lineTotal(
   unitPrice: { net: number; vatRate: number },
@@ -30,6 +31,16 @@ export function offerExpiry(validTo: string, cutoffAt: string | null): Date {
   if (cutoffAt === null) return end;
   const cutoff = new Date(cutoffAt);
   return cutoff < end ? cutoff : end;
+}
+
+/** How long a price may be served from the cache, at most (SPEC-005). */
+const PRICE_CACHE_MS = 5 * 60_000;
+
+/** The earliest of validTo, cutoffAt and PRICE_CACHE_MS after the lookup. */
+export function priceCacheExpiry(validTo: string, cutoffAt: string | null, lookedUpAt: Date): Date {
+  const bound = offerExpiry(validTo, cutoffAt);
+  const capped = new Date(lookedUpAt.getTime() + PRICE_CACHE_MS);
+  return capped < bound ? capped : bound;
 }
 
 export function expiredOmitReason(

@@ -310,7 +310,7 @@ const fi: typeof en = {
   notVerified: "Ei vahvistettu",
   viewFullLog: "Näytä koko loki",
   purpose: "Tarkoitus",
-  checkAllergenRule: (allergen) => `Tarkista, että se sopii sääntöösi (${allergen})`,
+  checkAllergenRule: (allergen) => `Tarkista, sopiiko se sääntöösi: ei ${allergen}`,
   orderSent: "Tilaus lähetetty",
   exclVat: (total) => `${total} (alv 0 %)`,
   youAt: (time) => `Sinä, ${time}`,

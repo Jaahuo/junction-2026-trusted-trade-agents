@@ -22,6 +22,7 @@ const ready = () => ({
   base: "main",
   currentMain: "main",
   baseIsAncestor: true,
+  mergeable: true as boolean | null,
   author: "author",
   reviews: [] as Review[],
   checks: [{ name: "gate", status: "completed", conclusion: "success" as string | null }],
@@ -34,11 +35,13 @@ describe("PR merge policy", () => {
     expect(() => parseRisk("Risk: unknown")).toThrow();
     expect(() => parseRisk("Risk: ordinary\nRisk: impact")).toThrow();
   });
-  test("ordinary changes require only current head, base and green gate", () => {
+  test("ordinary changes require current head, a clean merge and green gate, not current main", () => {
     expect(() => requireMergeEvidence(ready())).not.toThrow();
     expect(() => requireMergeEvidence({ ...ready(), localHead: "old" })).toThrow();
-    expect(() => requireMergeEvidence({ ...ready(), currentMain: "new" })).toThrow();
-    expect(() => requireMergeEvidence({ ...ready(), baseIsAncestor: false })).toThrow();
+    const behind = { ...ready(), currentMain: "new", baseIsAncestor: false };
+    expect(() => requireMergeEvidence(behind)).not.toThrow();
+    expect(() => requireMergeEvidence({ ...behind, mergeable: false })).toThrow("conflicts");
+    expect(() => requireMergeEvidence({ ...behind, mergeable: null })).toThrow("computing");
     expect(() => requireMergeEvidence({ ...ready(), checks: [] })).toThrow();
     expect(() =>
       requireMergeEvidence({
@@ -67,6 +70,31 @@ describe("PR merge policy", () => {
     ).toThrow();
     expect(() => requireMergeEvidence({ ...impact, reviews: [approval] })).not.toThrow();
   });
+  test("impact and lock-in still require current main, whatever GitHub reports", () => {
+    for (const risk of ["impact", "lock-in"] as const) {
+      const reviewed = { ...ready(), risk, reviews: [approval] };
+      expect(() => requireMergeEvidence(reviewed)).not.toThrow();
+      expect(() => requireMergeEvidence({ ...reviewed, currentMain: "new" })).toThrow(
+        "current main",
+      );
+      expect(() => requireMergeEvidence({ ...reviewed, baseIsAncestor: false })).toThrow(
+        "current main",
+      );
+    }
+  });
+  test("a review of an earlier head counts only when that head carries the same change", () => {
+    const updated = { ...ready(), risk: "impact" as const, head: "merged", localHead: "merged" };
+    const earlier = { ...approval, commit_id: "head" };
+    expect(() => requireMergeEvidence({ ...updated, reviews: [earlier] })).toThrow();
+    expect(() =>
+      requireMergeEvidence({ ...updated, reviews: [earlier], equivalentHeads: ["head"] }),
+    ).not.toThrow();
+    expect(() =>
+      requireMergeEvidence({ ...updated, reviews: [earlier], equivalentHeads: ["other"] }),
+    ).toThrow();
+    const lockIn = { ...updated, risk: "lock-in" as const, reviews: [earlier] };
+    expect(() => requireMergeEvidence({ ...lockIn, equivalentHeads: ["head"] })).not.toThrow();
+  });
   test("agent review evidence is independent, complete and bound to the exact head", () => {
     const head = "a".repeat(40);
     const data = {
@@ -92,6 +120,14 @@ describe("PR merge policy", () => {
       requireMergeEvidence({ ...impact, head: "b".repeat(40), localHead: "b".repeat(40) }),
     ).toThrow();
     expect(() => requireMergeEvidence({ ...impact, risk: "lock-in" })).toThrow();
+    expect(() =>
+      requireMergeEvidence({
+        ...impact,
+        head: "b".repeat(40),
+        localHead: "b".repeat(40),
+        equivalentHeads: [head],
+      }),
+    ).not.toThrow();
     expect(() => parseAgentReview({ ...data, reviewerAgent: "owner-agent" })).toThrow();
     expect(() => parseAgentReview({ ...data, findings: "" })).toThrow();
     expect(() => parseAgentReview({ ...data, method: "" })).toThrow();

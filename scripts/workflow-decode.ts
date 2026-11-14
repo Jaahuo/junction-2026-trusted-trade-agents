@@ -17,6 +17,9 @@ function boolean(value: unknown): boolean {
   if (typeof value !== "boolean") fail("Invalid GitHub response: expected boolean");
   return value;
 }
+function nullableBoolean(value: unknown): boolean | null {
+  return value === null ? null : boolean(value);
+}
 function nullableText(value: unknown): string | null {
   return value === null ? null : text(value);
 }
@@ -52,6 +55,7 @@ export const decodePull = (value: unknown) => ({
     sha: text(field(field(value, "base"), "sha")),
     ref: text(field(field(value, "base"), "ref")),
   },
+  mergeable: nullableBoolean(field(value, "mergeable") ?? null),
 });
 export const decodeDependency = (value: unknown) => ({
   merged: boolean(field(value, "merged")),

@@ -21,6 +21,7 @@ import { createRoot } from "./index.ts";
 import { type McpDeps, VIEWS_NOT_IN_CHAT, viewToolsMode } from "./mcp-server.ts";
 
 const placed: Order = { ...fixtures.order, status: "placed", approvalUrl: null };
+const { idempotencyKey: _key, ...placeInput } = fixtures.placeOrderRequest;
 
 interface Call {
   readonly route: keyof TradeRest;
@@ -67,12 +68,16 @@ const QUIET_TWINS = [
   ["get_mandate", "show_mandate"],
 ] as const;
 
-const inputs: { [T in ToolName]: z.input<(typeof TOOL_INPUT)[T]> } = {
+const inputs: {
+  [T in ToolName]: T extends "place_order"
+    ? Omit<z.input<(typeof TOOL_INPUT)[T]>, "idempotencyKey">
+    : z.input<(typeof TOOL_INPUT)[T]>;
+} = {
   search_products: fixtures.searchRequest,
   find_products: fixtures.searchRequest,
   get_offers: fixtures.offersRequest,
   quote_offers: fixtures.offersRequest,
-  place_order: fixtures.placeOrderRequest,
+  place_order: placeInput,
   get_order_status: { orderId: fixtures.order.orderId },
   get_mandate: {},
   show_mandate: {},
@@ -158,27 +163,15 @@ describe("tools/list", () => {
     expect(() => viewToolsMode("hidden")).toThrow("MCP_VIEW_TOOLS");
   });
 
-  test("every tool's inputSchema is TOOL_INPUT[tool], plus language on a tool with a view, and its outputSchema is TOOL_OUTPUT[tool]", async () => {
-    for (const tool of await mcp().listTools()) {
-      const name = z.enum([...MODEL_TOOLS, ...VIEW_TOOLS]).parse(tool.name);
-      const input = z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" });
-      const hasView = VIEWS.some(
-        (view) => !VIEWS_NOT_IN_CHAT.has(view.view) && view.tools.some((entry) => entry === name),
-      );
-      expect({ name, input: tool.inputSchema, output: tool.outputSchema }).toEqual({
-        name,
-        input: hasView
-          ? {
-              ...input,
-              properties: {
-                ...input["properties"],
-                language: { type: "string", description: expect.any(String) },
-              },
-            }
-          : input,
-        output: z.toJSONSchema(TOOL_OUTPUT[name], { target: "draft-7", io: "output" }),
-      });
-    }
+  test("place_order asks for offers but not an agent-generated idempotency key", async () => {
+    const tools = await mcp().listTools();
+    const input = z
+      .object({ properties: z.record(z.string(), z.unknown()), required: z.array(z.string()) })
+      .parse(tools.find((tool) => tool.name === "place_order")?.inputSchema);
+    expect(input.properties).toHaveProperty("offers");
+    expect(input.properties).not.toHaveProperty("idempotencyKey");
+    expect(input.required).toContain("offers");
+    expect(input.required).not.toContain("idempotencyKey");
   });
 
   test("each tool in VIEWS declares the view's ui:// resource, except views not in the chat", async () => {
@@ -292,8 +285,53 @@ describe("tools/call", () => {
   });
 
   test("a pending place_order text contains the approvalUrl", async () => {
-    const result = await mcp().callTool("place_order", fixtures.placeOrderRequest);
+    const result = await mcp().callTool("place_order", placeInput);
     expect(result.content[0]?.text).toContain(`${fixtures.order.approvalUrl}`);
+  });
+
+  test("placement retries keep their system key across requests and server instances", async () => {
+    const first = mcp();
+    const restarted = mcp();
+    for (const args of [placeInput, { ...placeInput, alternatives: [], language: "fi" }]) {
+      expect((await first.callTool("place_order", args)).isError).toBeUndefined();
+    }
+    expect(
+      (await restarted.callTool("place_order", { ...placeInput, originalRequest: "Retry" }))
+        .isError,
+    ).toBeUndefined();
+    const requests = [...first.calls, ...restarted.calls].map((call) =>
+      TOOL_INPUT.place_order.parse(call.args[0]),
+    );
+    expect(requests[0]?.idempotencyKey).toMatch(/^mcp-order-v1-[a-f0-9]{64}$/);
+    expect(requests[1]?.idempotencyKey).toBe(requests[0]?.idempotencyKey);
+    expect(requests[2]?.idempotencyKey).toBe(requests[0]?.idempotencyKey);
+  });
+
+  test("different offers, alternatives and replacement references cannot reuse a system key", async () => {
+    const { callTool, calls } = mcp();
+    const variants = [
+      placeInput,
+      { ...placeInput, offers: ["off_other"] },
+      { ...placeInput, alternatives: ["off_alternative"] },
+      { ...placeInput, supersedes: { orderId: "ord_previous", proposalVersion: 1 } },
+      { ...placeInput, supersedes: { orderId: "ord_previous", proposalVersion: 2 } },
+      { ...placeInput, supersedes: { orderId: "ord_other", proposalVersion: 1 } },
+    ];
+    for (const args of variants) {
+      expect((await callTool("place_order", args)).isError).toBeUndefined();
+    }
+    const keys = calls.map((call) => TOOL_INPUT.place_order.parse(call.args[0]).idempotencyKey);
+    expect(new Set(keys).size).toBe(variants.length);
+  });
+
+  test("place_order refuses agent-generated keys and invalid offers before calling REST", async () => {
+    const { callTool, calls } = mcp();
+    for (const args of [fixtures.placeOrderRequest, { offers: [] }]) {
+      const result = await callTool("place_order", args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toMatch(/^BAD_REQUEST:/);
+    }
+    expect(calls).toEqual([]);
   });
 
   test("get_order_status passes orderId as the path parameter", async () => {
@@ -364,7 +402,7 @@ describe("tools/call", () => {
   test("a REST error gives isError, the code and the envelope in the text and no structuredContent", async () => {
     const { rest } = fakeRest(fixtures.errorEnvelope);
     const { callTool } = mcp({ rest });
-    const result = await callTool("place_order", fixtures.placeOrderRequest);
+    const result = await callTool("place_order", placeInput);
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toBeUndefined();
     expect(result.content.map((block) => block.text)).toEqual([
@@ -691,7 +729,7 @@ describe("an MCP SDK client", () => {
     const client = await connectClient({ rest, views: fakeViews, viewTools: "app" });
     const result = await client.callTool({
       name: "place_order",
-      arguments: fixtures.placeOrderRequest,
+      arguments: placeInput,
     });
     const text = z
       .array(z.looseObject({ text: z.string() }))

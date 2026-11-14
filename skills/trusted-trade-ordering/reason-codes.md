@@ -7,7 +7,7 @@ Results:
 - **Approval**: a human decides.
   - In a `precheck`, an approval code means the order will go to a human. Place it when the offer meets the user's need. Then follow the order-result action.
   - In an order with status `pending_approval`, take the action in the table: tell the user, give `approvalUrl`, and stop.
-- **Rejected**: the order is `rejected` and final. Take the action in the table. A new request is a new order with a new `idempotencyKey`.
+- **Rejected**: the order is `rejected` and final. Take the action in the table. A new request needs new offers.
 - **Refused**: the request fails with an error and no order is stored.
 
 ## Approval codes
@@ -35,7 +35,7 @@ Results:
 | `NOT_AUTHENTICATED` | The request was not authenticated. The first build never returns it.                                                                | Tell the user. Stop.                                                                                                             |
 | `MANDATE_INVALID`   | No valid mandate exists for the agent: none, expired or revoked.                                                                    | Tell the user. Call `draft_mandate` with the terms the user gives, and ask the user to press Register in the mandate view. Stop. |
 | `OFFER_INVALID`     | An offer id is unknown or expired, a token failed verification, or the request repeats an offer. Refused with 400, no order stored. | Call `quote_offers` again. Place the new `offerId` values, each once.                                                            |
-| `OFFER_EXPIRED`     | An offer expired before the order was placed.                                                                                       | Call `quote_offers` again for the same need. Place the new `offerId` values with a new `idempotencyKey`.                         |
+| `OFFER_EXPIRED`     | An offer expired before the order was placed.                                                                                       | Call `quote_offers` again for the same need. Place the new `offerId` values.                                                     |
 | `CREDIT_LIMIT`      | The order total is above the remaining credit.                                                                                      | Tell the user the total and the remaining credit. Stop. Do not shrink or split the order to fit.                                 |
 | `PAYMENT_FAILED`    | The payment was not authorized.                                                                                                     | Tell the user. Stop.                                                                                                             |
 | `CUTOFF_PASSED`     | The order cut-off for the delivery date has passed.                                                                                 | Tell the user the next delivery date from `nextDeliveryDate`. Request new offers for that date only when the user accepts it.    |
@@ -45,10 +45,10 @@ Results:
 
 These are error codes, not reason codes. No order is stored.
 
-| Error                 | Meaning                                                                                       | Next action                                                                                                                     |
-| --------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `409 STALE_OFFER`     | The mandate changed since the offers were made, or live stock is below the order quantity.    | Call `quote_offers` again. Place the new `offerId` values.                                                                      |
-| `400 OFFER_INVALID`   | See `OFFER_INVALID` above.                                                                    | See `OFFER_INVALID` above.                                                                                                      |
-| `409 CONFLICT`        | The `idempotencyKey` was used with other offers.                                              | Send the original offers again with the same key to read the stored order. Use a new key only for a new request the user wants. |
-| `400 BAD_REQUEST`     | The input is invalid, or holds a field the server refuses, or an unsupported hard constraint. | Read the message. Fix the input. Do not retry unchanged.                                                                        |
-| `502 UPSTREAM_FAILED` | The wholesaler's systems did not answer.                                                      | Tell the user. Retry later.                                                                                                     |
+| Error                 | Meaning                                                                                       | Next action                                                |
+| --------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `409 STALE_OFFER`     | The mandate changed since the offers were made, or live stock is below the order quantity.    | Call `quote_offers` again. Place the new `offerId` values. |
+| `400 OFFER_INVALID`   | See `OFFER_INVALID` above.                                                                    | See `OFFER_INVALID` above.                                 |
+| `409 CONFLICT`        | The server reports a placement conflict.                                                      | Tell the user. Stop. The server manages retry keys.        |
+| `400 BAD_REQUEST`     | The input is invalid, or holds a field the server refuses, or an unsupported hard constraint. | Read the message. Fix the input. Do not retry unchanged.   |
+| `502 UPSTREAM_FAILED` | The wholesaler's systems did not answer.                                                      | Tell the user. Retry later.                                |

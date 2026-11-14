@@ -22,6 +22,7 @@ import {
   ToolSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { placeOrderInput } from "../application/place-order-input.ts";
 import { SKILL_NAME, skillUri } from "../domain/skill.ts";
 import { loadSkill, type SkillPack } from "../application/skills.ts";
 import {
@@ -88,7 +89,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   quote_offers:
     "The same signed offers as get_offers, without a view. Use it while you prepare or place an order the user asked for, so the chat shows only the order. Same input and result as get_offers; pass each chosen offerId to place_order.",
   place_order:
-    "Place an order from the offerIds of signed offers (from get_offers or quote_offers) with an idempotency key. Pass the short offerId (off_…), not the long token. The order is placed, pending human approval or rejected, with reason codes. When the user changes an earlier pending proposal, pass supersedes with its orderId and proposalVersion. An accepted replacement closes only that earlier proposal. Do not replace unrelated orders. A pending order has an approvalUrl for the human; do not approve it yourself.",
+    "Place an order from the offerIds of signed offers (from get_offers or quote_offers). The server handles idempotency: retry with the same offers, alternatives and supersedes after a lost reply. Pass the short offerId (off_…), not the long token. The order is placed, pending human approval or rejected, with reason codes. When the user changes an earlier pending proposal, pass supersedes with its orderId and proposalVersion. An accepted replacement closes only that earlier proposal. Do not replace unrelated orders. A pending order has an approvalUrl for the human; do not approve it yourself.",
   get_order_status: "Get the current status and the audit record of an order.",
   get_mandate:
     "Get the purchasing limits currently in force for this agent, without opening a view. Use it to check limits while preparing or placing an order. When the user asks to see the limits, use show_mandate.",
@@ -149,7 +150,10 @@ const LANGUAGE = {
 };
 
 const inputSchema = (name: ToolName) => {
-  const schema = z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" });
+  const schema = z.toJSONSchema(name === "place_order" ? placeOrderInput : TOOL_INPUT[name], {
+    target: "draft-7",
+    io: "input",
+  });
   if (chatViewOf(name) === undefined) return schema;
   return { ...schema, properties: { ...schema["properties"], language: LANGUAGE } };
 };

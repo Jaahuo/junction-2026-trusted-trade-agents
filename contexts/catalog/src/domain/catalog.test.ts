@@ -46,6 +46,23 @@ describe("search ranking", () => {
     expect(ids(products, request({ terms: ["mjölk", "luomu"] }))).toEqual(["b", "c"]);
   });
 
+  test("a hyphenated term matches names that write the words apart", () => {
+    const products = [
+      product("apart", { searchText: "test milk 1 l lactose free uht" }),
+      product("cheese", { searchText: "test lactose-free cheese 200 g" }),
+    ];
+    expect(ids(products, request({ terms: ["lactose-free milk"] }))).toEqual(["apart"]);
+  });
+
+  test("a hyphenated name still matches the hyphenated term", () => {
+    const products = [product("joined", { searchText: "test lactose-free milk drink 1 l" })];
+    expect(ids(products, request({ terms: ["lactose-free milk"] }))).toEqual(["joined"]);
+    expect(parseTerms(["Lactose-free  milk"])).toEqual({
+      ok: true,
+      value: [["lactose", "free", "milk"]],
+    });
+  });
+
   test("confirmed hard matches rank first, then soft matches, then reliability, then matched terms", () => {
     const products = [
       product("unknown-fi", { searchText: "maito", countryOfOrigin: "fi", deliveryReliability: 1 }),

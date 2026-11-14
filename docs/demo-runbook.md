@@ -93,6 +93,8 @@ Open WebUI 0.13.3 also works as a host against `/mcp` (voice spike #45).
 ## 6. Before each rehearsal and recording
 
 Run these from the worktree that serves the demo, in order:
+Import the private catalogue bundle first with the [catalogue import procedure](catalogue-import.md). Include its demo metadata.
+Resets preserve that import. Scripts read PostgreSQL, not the source directory.
 
 1. Reset the database to the demo state:
 
@@ -103,7 +105,7 @@ Run these from the worktree that serves the demo, in order:
    It resets only this worktree's database, so run it in the worktree whose server the host reaches.
 
 2. Before a recording, check that the demo products still fit the live data.
-   Use the `requestedDate` of `data/demo-products.json`, or the deliver-by date that the demo sentence names:
+   Use the requested date from imported demo metadata, or the deliver-by date that the demo sentence names:
 
    ```sh
    bun scripts/check-demo-data.ts --date <YYYY-MM-DD>
@@ -126,11 +128,12 @@ Run these from the worktree that serves the demo, in order:
 
 ### Smoke script options
 
-| Option             | Effect                                                                                                                                                               |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--scenario 1\|2`  | Scenario 1: search, offers, place (`placed`, no reasons), audit record. Scenario 2: place (`pending_approval`, `SPEND_OVER_LIMIT`), pending list, approve, `placed`. |
-| `--base-url <url>` | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                      |
-| `--no-reset`       | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                              |
+| Option                | Effect                                                                                                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--scenario 1\|2`     | Scenario 1: search, offers, place (`placed`, no reasons), audit record. Scenario 2: place (`pending_approval`, `SPEND_OVER_LIMIT`), pending list, approve, `placed`. |
+| `--base-url <url>`    | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                      |
+| `--no-reset`          | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                              |
+| `--database-env NAME` | Read imported demo metadata from the database URL in environment variable `NAME`. Required for another application target. Also requires `--no-reset`.               |
 
 The server, not the script, reads `WHOLESALER_LIVE`; start it with `WHOLESALER_LIVE=mock`.
 If `offers` fails with `omitted: NO_PRICE`, the server has no live price source: check `WHOLESALER_LIVE` and `VALIO_AIMO_API_KEY`.

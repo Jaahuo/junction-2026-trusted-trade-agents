@@ -49,7 +49,7 @@ One service sits in front of a wholesaler's existing systems and adds the order 
 
 **In scope**
 
-- Structured product search over the static product file
+- Structured product search over the static catalogue imported into PostgreSQL
 - Signed offers built from live price and availability
 - Orders checked against the buyer's mandate and the wholesaler's fixed guardrails
 - Human approval, with a reason code on every request
@@ -458,15 +458,16 @@ The contract is vendor-neutral and each wholesaler hosts its own endpoint, with 
 
 ### Adapter for the Valio Aimo mock
 
-| Adapter function  | Source                                                 | What it gives                                                                                      |
-| ----------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `searchCatalog`   | Product data file, downloaded once and indexed locally | Names in Finnish, Swedish and English, allergen classifications, packaging, origin, GTINs          |
-| `getPrices`       | `POST /api/price`, up to 1,000 product IDs             | Price per sales unit with VAT, comparison price per litre or kilogram, validity period, error flag |
-| `getAvailability` | `POST /api/availability`, up to 1,000 product IDs      | Earliest delivery date, amount in sales units, closing time, sales block, stock model              |
-| `getSubstitutes`  | Substitution pairs in the product file                 | Allowed replacements per product                                                                   |
-| `submitOrder`     | None in the mock                                       | Writes to our own order store                                                                      |
+| Adapter function  | Source                                            | What it gives                                                                                      |
+| ----------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `searchCatalog`   | Product data imported once into PostgreSQL        | Names in Finnish, Swedish and English, allergen classifications, packaging, origin, GTINs          |
+| `getPrices`       | `POST /api/price`, up to 1,000 product IDs        | Price per sales unit with VAT, comparison price per litre or kilogram, validity period, error flag |
+| `getAvailability` | `POST /api/availability`, up to 1,000 product IDs | Earliest delivery date, amount in sales units, closing time, sales block, stock model              |
+| `getSubstitutes`  | Imported substitution pairs in PostgreSQL         | Allowed replacements per product                                                                   |
+| `submitOrder`     | None in the mock                                  | Writes to our own order store                                                                      |
 
-- Delivery reliability and CO2 come from two CSV files, joined on product ID.
+- An explicit import preserves the complete product records and both enrichment CSVs in catalogue-owned PostgreSQL tables.
+- Runtime search joins delivery reliability and CO2 on product ID. It never reads source files.
 - All calls send the API key in the `X-API-Key` header.
 - Assumption: Valio Aimo's production API authenticates clients with OAuth2. We do not build that flow because it is out of scope and not relevant to the demo; a production adapter would replace the API key with an OAuth2 access token.
 - Never query all products. Filter on static data first, then send the shortlist in one call. Rate limits are undisclosed, so cache results within their validity.

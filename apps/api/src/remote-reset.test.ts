@@ -1,7 +1,12 @@
 import { SQL } from "bun";
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { verifyMandate } from "@app/contract/server";
 import { closeDb, type Db, discoverContexts, env, openDb } from "@app/server-kit";
+import { importCatalogue, migrateCatalogue, readDemoProducts } from "@ctx/catalog/api";
+import { writeFictionalSources } from "../../../contexts/catalog/src/infra/test-fixtures.ts";
 import { migrationManifest, resetContexts } from "./remote-reset.ts";
 
 const withDatabase = async (run: (db: Db) => Promise<void>): Promise<void> => {
@@ -109,4 +114,38 @@ test("the seeded mandate verifies with the buyer key the reset ran with", async 
     if (previous === undefined) delete process.env["BUYER_SIGNING_JWK"];
     else process.env["BUYER_SIGNING_JWK"] = previous;
   }
+});
+
+test("repeated demo resets preserve every catalogue row and its migration ledger", async () => {
+  await withDatabase(async (db) => {
+    const dir = await mkdtemp(join(tmpdir(), "catalogue-reset-"));
+    try {
+      await writeFictionalSources(dir);
+      await migrateCatalogue(db);
+      await importCatalogue(db, dir);
+      const snapshot = async () => ({
+        products: await db.$client`SELECT * FROM catalog_products ORDER BY ordinal`,
+        enrichments: await db.$client`SELECT * FROM catalog_csv_rows ORDER BY source, ordinal`,
+        manifest: await db.$client`SELECT * FROM catalog_manifest ORDER BY id`,
+        ledger: await db.$client`SELECT * FROM drizzle.__migrations_catalog ORDER BY id`,
+      });
+      const before = await snapshot();
+      const demo = await readDemoProducts(db);
+      if (demo === null) throw new Error("Fixture has no demo metadata");
+      const contexts = await discoverContexts();
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await resetContexts(db, contexts);
+        expect(await snapshot()).toEqual(before);
+        const seeded = await db.$client<
+          { productId: string }[]
+        >`SELECT "productId" FROM orders_history`;
+        expect(seeded.map((row) => row.productId)).toEqual([
+          ...Array.from({ length: 3 }, () => demo.s1.productId),
+          ...Array.from({ length: 3 }, () => demo.s2.productId),
+        ]);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

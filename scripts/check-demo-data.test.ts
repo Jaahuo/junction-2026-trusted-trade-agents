@@ -6,6 +6,7 @@ import {
   mapRow,
   parseArgs,
   salesUnits,
+  selectDatabaseUrl,
   validateCandidates,
 } from "./check-demo-data";
 
@@ -136,6 +137,30 @@ describe("demo data checker", () => {
     expect(salesUnits({ value: 20, unit: "LTR" }, { volume: 2 }, "KI")).toBe(10);
     expect(salesUnits({ value: 1, unit: "KGM" }, { volume: null }, "ST")).toBe(
       Number.POSITIVE_INFINITY,
+    );
+  });
+
+  test("only the owned application URL may implicitly use the generated database", () => {
+    const local = { url: "postgres://local/catalogue", port: 20513 };
+    for (const target of [
+      "https://example.com",
+      "http://127.0.0.1:20514",
+      "http://localhost:20513/another-app",
+    ]) {
+      expect(() => selectDatabaseUrl(target, local, undefined)).toThrow("--database-env");
+    }
+    expect(selectDatabaseUrl("https://example.com", local, "postgres://selected/catalogue")).toBe(
+      "postgres://selected/catalogue",
+    );
+    for (const target of [
+      "http://127.0.0.1:20513",
+      "http://localhost:20513",
+      "http://[::1]:20513",
+    ]) {
+      expect(selectDatabaseUrl(target, local, undefined)).toBe(local.url);
+    }
+    expect(() => selectDatabaseUrl("https://example.com", undefined, undefined)).toThrow(
+      "--database-env",
     );
   });
 

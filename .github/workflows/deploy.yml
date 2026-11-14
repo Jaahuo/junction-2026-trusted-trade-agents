@@ -84,6 +84,7 @@ jobs:
           ref: ${{ needs.target.outputs.sha }}
           persist-credentials: false
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
+      - run: bun install --frozen-lockfile
       - name: Start deployment evidence
         run: |
           mkdir -p "$RUNNER_TEMP/deployment-evidence"
@@ -126,6 +127,10 @@ jobs:
           docker load --input "$RUNNER_TEMP/chat-image.tar"
       - name: Smoke production runtime
         run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/fictional-catalogue"
+          bun -e 'import { writeFictionalSources } from "./contexts/catalog/src/infra/test-fixtures.ts"; const dir = process.argv[1]; if (!dir) throw new Error("Missing fixture directory"); await writeFictionalSources(dir);' "$fixture"
+          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/image_smoke bun scripts/catalog-import.ts --source "$fixture"
           umask 077
           bun scripts/generate-keys.ts > "$RUNNER_TEMP/image.env"
           printf '%s\n' \
@@ -134,8 +139,17 @@ jobs:
           trap 'docker logs gate-smoke; docker rm -f gate-smoke; rm -f "$RUNNER_TEMP/image.env"' EXIT
           docker run --detach --name gate-smoke --network host --env-file "$RUNNER_TEMP/image.env" "gate-image:$SHA"
           curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --max-time 2 http://127.0.0.1:3000/api/health
+          docker exec gate-smoke /usr/local/bin/bun apps/api/src/remote-reset.ts --yes
+          test "$(docker inspect --format '{{json .Mounts}}' gate-smoke)" = '[]'
+          curl --fail --silent --show-error -H 'content-type: application/json' \
+            -d '{"terms":["fictional oats"],"hard":[],"soft":[],"quantity":{"value":1,"unit":"ST"},"deliverBy":"2026-11-20","paymentTerms":"invoice"}' \
+            http://127.0.0.1:3000/api/catalog/search | jq -e '.candidates | any(.productId == "fictional-oats" and .orderQuantity.value == 1)'
+          curl --fail --silent --show-error -H 'content-type: application/json' \
+            -d '{"productIds":["fictional-oats"],"hard":[]}' \
+            http://127.0.0.1:3000/api/catalog/facts | jq -e '.products | any(.productId == "fictional-oats" and .deliveryReliability == 0.95 and .co2PerKg == 1.25)'
           docker exec gate-smoke /usr/local/bin/bun -e '
             if (process.getuid() !== 1000) throw new Error("Expected runtime UID 1000");
+            if (await Bun.file("/app/data/valio_aimo_junction26_product_data.json").exists()) throw new Error("Unexpected source data");
             for (const path of ["/bin/sh", "/bin/bash", "/sbin/apk", "/usr/bin/apt", "/usr/bin/apt-get"]) {
               if (await Bun.file(path).exists()) throw new Error(`Unexpected runtime tool: ${path}`);
             }

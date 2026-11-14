@@ -1,5 +1,9 @@
 **/node_modules
 /data/**
+**/valio_aimo_junction26_product_data.json
+**/valio_aimo_junction26_product_data_schema.json
+**/valio_aimo_junction26_delivery_reliability.csv
+**/valio_aimo_junction26_carbon_footprint.csv
 **/.env*
 **/.git
 **/.git/**

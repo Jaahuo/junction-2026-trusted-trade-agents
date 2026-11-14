@@ -7,7 +7,7 @@ The demo runs on one Vultr instance and one Tiger Data PostgreSQL service. OpenT
 - `mise install` provides the pinned OpenTofu.
 - A Vultr API key with your client IP allowed, and a Tiger Data project id with client credentials.
 - An SSH key at `~/.ssh/id_ed25519.pub`, or set `TF_VAR_ssh_public_key_path`.
-- The challenge data files in `data/`.
+- An approved catalogue import into the target database before deploying the PostgreSQL-only API. See [catalogue import](catalogue-import.md).
 - Docker with Buildx, and access to the private `ghcr.io/jaahuo/junction-2026-trusted-trade-agents` package.
 
 ## Operator files
@@ -78,9 +78,9 @@ bun scripts/deploy.ts push
 
 `push` requires the fixed repository and an exact SHA-256 API image digest before it changes the host. When chat is enabled, it also requires a chat image digest from the same repository. It does not build an image or copy the checkout. It verifies the known SSH host key, waits for cloud-init, installs and starts Docker, and pulls the required digests before stopping the service. It uses a temporary Docker configuration for registry access. It stores the API digest as `TRUSTED_TRADE_IMAGE` in `/etc/trusted-trade-image.env`, separate from the app environment. The service starts that digest without pulling, so restarts do not need registry credentials.
 
-`push` copies only `data/`, without `--delete`, to the host. It makes transferred and retained files readable by container UID 1000 without adding group or public access. The container mounts that directory read-only at `/app/data`. It writes `/etc/trusted-trade.env` and the Caddyfile, starts the service, and waits for `/api/health`. It then checks that the container is running and its image ID matches the SHA-256 image ID captured from the verified digest before stopping the old service. A mismatch fails deployment; health alone is not sufficient. Docker verifies the manifest and layer hashes when pulling by digest. This does not hash the container's writable filesystem or authenticate the image publisher. The server runs `bun apps/api/src/main.ts` from `/app` and migrates on start. An existing VM moves to the container service on `push`; it does not need another `tofu apply` or replacement.
+`push` does not transfer catalogue files or mount a host data directory. It writes `/etc/trusted-trade.env` and the Caddyfile, starts the service, and waits for `/api/health`. It then verifies the running container's image ID against the selected digest. Health alone does not prove the catalogue is imported. Verify search and facts before the cutover. Keep legacy host source files until an operator approves their separate removal.
 
-`reset --yes` replaces the hosted demo data. It drops only the tables and types that each context's migrations create, and their migration records, because the TimescaleDB extension lives in the hosted `public` schema. It uses no CASCADE and runs in one transaction, so a foreign object that depends on ours aborts the reset before anything is dropped. Then it migrates and seeds like `bun run db:reset`, with the keys from `env.deploy`, so the seeded mandate verifies on the host.
+`reset --yes` replaces hosted transactional demo data but preserves catalogue tables and their migration records. It drops only other contexts' migration-owned tables, types and ledgers, without CASCADE. A foreign dependency aborts the drop transaction. It then migrates and seeds with the keys from `env.deploy`. Imported demo metadata supplies order history; no import or source-file read occurs during reset.
 
 The URL is `tofu -chdir=infra output -raw public_base_url`: `https://<ip>.sslip.io`, or `https://<domain>` with `TF_VAR_domain` and a DNS A record to `public_ip`. Connect the host to `<url>/mcp`.
 
@@ -101,7 +101,7 @@ tofu -chdir=infra output -json | gh secret set DEPLOY_OUTPUTS --env production
 gh secret set DEPLOY_KNOWN_HOSTS --env production < verified_known_hosts
 ```
 
-`DEPLOY_OUTPUTS` holds the database URL. Set it again after any `apply` that changes an output. The challenge data ships in a separate step without `--delete`, so a CI push never removes the data files that are not in Git.
+`DEPLOY_OUTPUTS` holds the database URL. Set it again after any `apply` that changes an output. Deployment does not import or synchronize catalogue data.
 
 ### Security and audit evidence
 
@@ -163,6 +163,7 @@ To turn the chat host off, delete the four secrets, deploy, and run `systemctl d
 
 - Deploy published images by hand: set `DEPLOY_IMAGE`, `DEPLOY_CHAT_IMAGE` when chat is enabled, and the registry variables above. Then run `bun scripts/deploy.ts push`.
 - To roll back, select earlier retained digests from the same source SHA with their gate and deployment evidence. Set `DEPLOY_IMAGE` and, when chat is enabled, `DEPLOY_CHAT_IMAGE`. Run `push` with fresh `read:packages` credentials. Do not rebuild the images or reset the database. Roll back only if the earlier API image is compatible with the current database schema. A code rollback does not reverse migrations or restore data.
+- A pre-cutover file-backed API is not a drop-in rollback: this deployment no longer mounts its source directory. Follow the [catalogue rollback constraints](catalogue-import.md#recovery-and-rollback).
 - Remove the token from the shell after deployment: `unset DEPLOY_REGISTRY_TOKEN`. If you used Docker login locally, run `docker logout ghcr.io`.
 - Check health: `bun scripts/deploy.ts health`.
 - Logs: `ssh root@$(tofu -chdir=infra output -raw public_ip) journalctl -u trusted-trade -f`.

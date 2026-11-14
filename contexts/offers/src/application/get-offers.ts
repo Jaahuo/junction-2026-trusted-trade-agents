@@ -176,7 +176,9 @@ export async function getOffers(
       omit(
         { index, line },
         "INVALID_QUANTITY",
-        `the quantity must be a positive multiple of ${product.allowedLotSize} ${product.salesUnit}`,
+        line.quantity.unit !== product.salesUnit
+          ? `use the sales unit ${product.salesUnit}; search gives the order quantity in orderQuantity`
+          : `the quantity must be a positive multiple of ${product.allowedLotSize} ${product.salesUnit}`,
       );
       continue;
     }

@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   quality:
-    runs-on: craci
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -28,7 +28,7 @@ jobs:
           fi
 
   test:
-    runs-on: craci
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -62,7 +62,7 @@ jobs:
             ' sh "$(id -u)" "$(id -g)"
 
   secrets:
-    runs-on: craci
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -72,7 +72,7 @@ jobs:
       - run: gitleaks git --redact --no-banner
 
   audit:
-    runs-on: craci
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -94,7 +94,7 @@ jobs:
           if-no-files-found: warn
 
   image:
-    runs-on: craci
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     services:
       postgres:
@@ -147,7 +147,9 @@ jobs:
           bun scripts/ci-image.ts evidence/image-scan.json
       - name: Record image identity
         run: |
-          image_id=$(docker image inspect "gate-image:$GITHUB_SHA" --format '{{.Id}}')
+          # The config digest from the archive; docker inspect .Id depends on the image store (#198).
+          image_id=$(bun scripts/ci-image.ts config-digest evidence/image.tar)
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
           lock_hash=$(sha256sum bun.lock | cut -d ' ' -f 1)
           version=$(/tmp/trivy --version | head -n 1 | cut -d ' ' -f 2)
           test "$version" = "0.76.2"

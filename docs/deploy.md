@@ -9,6 +9,7 @@ The demo runs on one Vultr instance and one Tiger Data PostgreSQL service. OpenT
 - An SSH key at `~/.ssh/id_ed25519.pub`, or set `TF_VAR_ssh_public_key_path`.
 - The challenge data files in `data/`.
 - Docker with Buildx, and access to the private `ghcr.io/jaahuo/junction-2026-trusted-trade-agents` package.
+- Python 3 on the machine that runs `push`, for hosted chat provisioning.
 
 ## Operator files
 
@@ -84,7 +85,10 @@ The URL is `tofu -chdir=infra output -raw public_base_url`: `https://<ip>.sslip.
 
 ## Automatic deploy from main
 
-`.github/workflows/deploy.yml` runs after a successful main-push `gate`, or by hand on `main`. It selects the current main commit's successful push gate run and its exact run attempt. It verifies that run's image archive, scan, SBOM and manifest checksums, then publishes that same image to private GHCR. The deploy job receives its immutable digest. It never rebuilds an image or consumes PR artifacts. Publication has package write access; deployment has package read access and the production secrets. Deployment remains serialized and checks main again before changing the host. Scheduled gates never deploy. It never resets data.
+`.github/workflows/deploy.yml` runs after a successful main-push `gate`, or by hand on `main`. It selects the current main commit's successful push gate run and its exact run attempt. It verifies that run's image archive, scan, SBOM and manifest checksums, then publishes that same image to private GHCR. The deploy job receives its immutable digest.
+The manifest's `imageId` is the image config digest that `scripts/ci-image.ts config-digest` reads and verifies from the OCI archive. Publish compares it with the archive before loading and with the registry manifest's config digest after pushing; either mismatch stops the run before deployment. It does not use `docker image inspect` because the classic image store reports the config digest as the Id and the containerd store, the default in Docker 29, reports the manifest digest (#198).
+If main has moved to a commit whose push gate has not passed yet, the run skips publish and deploy, writes a `Skipped:` summary line and ends green; that commit's own gate starts its deploy.
+`bun run ship` warns when the latest completed deploy of main failed. It never rebuilds an image or consumes PR artifacts. Publication has package write access; deployment has package read access and the production secrets. Deployment remains serialized and checks main again before changing the host. Scheduled gates never deploy. It never resets data.
 
 After the first `apply` and `push`, set the secrets of the `production` environment:
 
@@ -112,7 +116,23 @@ The current private repository plan does not support branch protection. At inspe
 Without that key it skips the chat host and changes nothing else.
 The chat host uses the OpenAI-compatible Verda endpoint `https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1` with the base model `nemotron-3.5-super-vl`, and connects to `<url>/mcp` of the same deployment.
 Login is on and sign-up is off, because the inference key pays for every chat.
-Sign in with the admin account and choose the model "Buyer agent".
+Sign in with the admin account. Choose Acme Kitchens or Acme Bakery; Acme Kitchens is the default.
+
+The managed presets use the shared [purchasing prompt](../hosts/openwebui/agent/purchasing.md).
+They combine concise ordering replies with structured recipe planning.
+The main project's ordering skill and reason-code reference are embedded in both system prompts.
+Valio Aimo recipe reads are off by default pending permission.
+For an authorized manual deployment, set `VALIO_AIMO_RECIPE_PERMISSION=True` in the deployment process environment.
+The deploy forwards that flag to provisioning and the chat container.
+The MCP connection supplies purchasing tools; the server controls approval and buying authority.
+The presets do not create a buyer account or grant purchasing rights.
+
+For the chat host, `push` copies only `hosts/openwebui/agent`, `branding` and `scripts` to `/opt/trusted-trade-chat`.
+It excludes environment files and Python caches.
+The service mounts the branding files read-only and keeps chat data in its existing volume.
+After the service starts, the deploy runs the local Python provisioner against the hosted URL.
+It embeds the local ordering skill and configures the inference endpoint, MCP connection and managed presets.
+Title, follow-up and tag generation are disabled; voice remains available.
 
 Keep the chat secrets in a fourth operator file, `~/.config/trusted-trade/env.chat`:
 

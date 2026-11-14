@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { preferred } from "./constraints.ts";
+import { preferred, required } from "./constraints.ts";
 import { setLang } from "./locale.ts";
 
 test("a preferred constraint reads in English, with region names and words", () => {
@@ -18,6 +18,18 @@ test("a preferred constraint reads in Finnish; an unknown value keeps its words"
     );
     expect(preferred("packaging", "reusable")).toBe("Pakkaus: uudelleenkäytettävä");
     expect(preferred("brand", "valio")).toBe("Brand: Valio");
+  } finally {
+    setLang("en");
+  }
+});
+
+test("a required constraint reads in Finnish with the allergen's own name when there is one", () => {
+  setLang("fi");
+  try {
+    expect(required("gluten")).toBe("Ei gluteenia");
+    expect(required("lactose")).toBe("Laktoositon");
+    expect(required("vegan")).toBe("Vegaaninen");
+    expect(required("pineNut")).toBe("Pine nut: ei sisällä");
   } finally {
     setLang("en");
   }

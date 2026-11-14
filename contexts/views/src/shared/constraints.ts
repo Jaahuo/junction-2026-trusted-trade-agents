@@ -1,4 +1,5 @@
 import { intlLocale, pick } from "./locale.ts";
+import { FI_ALLERGENS } from "./trust.ts";
 
 // Constraint labels, shared by search results and agent settings:
 // "Gluten free", "Vegan", "Country of origin: Finland", "Pakkausmateriaali: palautettava lasi".
@@ -60,18 +61,23 @@ export const preferred = (attribute: string, prefer: string) =>
   }`;
 
 const REQUIRED = {
-  en: { lactose: "Lactose free", vegan: "Vegan", free: (name: string) => `${name} free` },
+  en: {
+    lactose: "Lactose free",
+    vegan: "Vegan",
+    free: (attribute: string) => `${attributeName(attribute)} free`,
+  },
   fi: {
     lactose: "Laktoositon",
     vegan: "Vegaaninen",
-    free: (name: string) => `${name}: ei sisällä`,
+    free: (attribute: string) => {
+      const name = FI_ALLERGENS[attribute];
+      return name === undefined ? `${attributeName(attribute)}: ei sisällä` : `Ei ${name}`;
+    },
   },
 };
 
 /** "Gluten free", "Vegan": a required (hard) constraint as the approver reads it (SPEC-004). */
 export const required = (attribute: string) => {
   const text = pick(REQUIRED);
-  return attribute === "lactose" || attribute === "vegan"
-    ? text[attribute]
-    : text.free(attributeName(attribute));
+  return attribute === "lactose" || attribute === "vegan" ? text[attribute] : text.free(attribute);
 };

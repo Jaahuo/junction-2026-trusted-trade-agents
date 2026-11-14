@@ -1,68 +1,104 @@
 # Submission
 
-Draft for the Junction 2026 submission of the Trusted trade agents project.
-Final submission closes on Sunday, November 15, 2026 at 10:00 Helsinki time.
-A person records the video, exports the deck and submits; this page holds the links and the material to prepare them.
+The submission closes on Sunday, November 15, 2026 at 10:00 Helsinki time.
+A person must record and upload the video, export and upload the deck, submit the entry, and paste the receipt in [issue #35](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/35).
+This page prepares those artifacts; it is not a submission receipt.
 
-## Links
+## Links and release record
 
-Fill in each link before you submit.
-Every link must open without a login.
+| Item        | Link                                                         | Status                                                                                                       |
+| ----------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Pitch video | Not uploaded                                                 | Not recorded; maximum 2:00                                                                                   |
+| Deck PDF    | Not uploaded                                                 | Not exported                                                                                                 |
+| Live demo   | https://199-247-4-99.sslip.io                                | `/` and `/api/health` returned HTTP 200 on November 15; check again before submission and throughout judging |
+| Source      | https://github.com/Jaahuo/junction-2026-trusted-trade-agents | **Private**; not accessible to judges without login                                                          |
 
-| Item                       | Link                                                                   | Status                                       |
-| -------------------------- | ---------------------------------------------------------------------- | -------------------------------------------- |
-| Pitch video (2:00 at most) | TODO                                                                   | Not recorded                                 |
-| Deck (PDF)                 | TODO                                                                   | Not exported                                 |
-| Live demo                  | TODO: the hosted URL of #84, or a tunnel that stays up through judging | Not chosen                                   |
-| Source code                | https://github.com/Jaahuo/junction-2026-trusted-trade-agents           | Private until #38 or #63 settles the dataset |
+After recording, state the actual video length alongside the uploaded file and record the commit of the build shown.
+Before submitting, open each artifact and the demo without a login.
+The source must be public and open without a login.
+Issue [#299](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/299) owns cleanup and the source-publication decision. The closure of #38 and #63 did not authorize publication.
+The source link is not yet submission-ready.
+The person submitting must add the actual video and deck links here and paste the submission receipt in issue #35 before the deadline.
+The submission form URL is not recorded here.
 
-- Video length: TODO (for example `1:58`, stated with the file).
-- Recorded build: TODO (the commit on `main` that the video shows).
-- Submission receipt: paste it in #35 before 10:00.
+## What the demo proves and what it does not
 
-## What is real and what is simulated
-
-Say this in the video and on the last slide.
-
-- Real: the product data, live availability and prices from the challenge's wholesaler mock, the signed offers, the mandate checks, the guardrails, the approval flow and the audit record.
-- Simulated: one demo account and no authentication; anyone with the demo URL can open the approval page (SPEC-002).
-- Simulated: the buyer's signing key is held by the server ("simulated custody", SPEC-008).
-- Scenario 3 runs on live data with a lactose-free product that is not milk, because no lactose-free milk in the mock is short (#83).
-- The missed cut-off clip is not available on live data: the mock gives the same first delivery date for every product (#83).
+- The synthetic challenge catalogue and demo metadata are imported into PostgreSQL from a private bundle. Prices and availability come from the challenge's wholesaler mock when configured; they can change.
+- Offers are signed. An independent verifier can discover the published key and verify an offer. The server applies mandate limits and order guardrails, records decisions and provides an audit trail.
+- The mandate is AP2-style, not a claim of AP2 conformance. The server signs it using a buyer key in simulated server custody. The current mandate lookup uses the stored mandate; the signature helper is not called on that lookup. Independent buyer-side key custody and signature verification on use remain work to do. See [mandate lookup](../contexts/mandates/src/application/mandates.ts) and [verification helper](../packages/contract/src/server/mandate-token.ts).
+- The demo has one account and no authentication. Anyone who can reach the REST endpoints can make approval decisions. MCP view-tool visibility depends on the host and is not an authorization boundary.
+- The mock is not a production wholesaler connection. Accounts and authorization, real payment, buyer-controlled key custody and another wholesaler adapter are future work. The demo account has no credit limit.
+- [The order statuses have a documented Peppol/UBL mapping; XML export and Peppol delivery are next steps](specs.md#peppolubl-status-mapping). No Peppol integration is implemented.
 
 ## Before recording
 
-Follow `docs/demo-runbook.md` (#19). In short:
+Use the [demo runbook](demo-runbook.md) and the [catalogue import procedure](catalogue-import.md).
+The operator must select the database serving the demo and obtain approval for any hosted import or reset.
+Do not expose private raw source files, credentials or bulk metadata in the recording or submission. Product displays needed for the demo are legitimate.
 
-1. Run `bun run db:reset`.
-2. Run `bun scripts/check-demo-data.ts --date <requestedDate>` and confirm S1, S2 and S3 print `ok`. If the mock's first delivery date has moved, update `requestedDate` in `data/demo-products.json` first.
-3. Run `bun scripts/demo-smoke.ts --scenario 1` and `--scenario 2`.
-4. Run `bun run build` so the `ui://` views render in the host.
+1. Confirm the private bundle, including demo metadata, was imported into the selected PostgreSQL database. Reset preserves the import. There is no runtime source-file fallback.
+2. Run `bun run db:reset` on the intended worktree database. For a hosted target, follow its separately approved reset procedure.
+3. Run `bun scripts/check-demo-data.ts --date <requestedDate>` using the date from the imported metadata or the demo request. For another database, use the documented `--database-env NAME` selection. Confirm `S1 ok` and `S2 ok`. The checker prints `S3` and `LATE` only when those metadata entries exist; if present, they must also print `ok`.
+4. If imported `s3` is null, record scenario 3 using a fictional fixture and say “This scenario uses a fixture” in the video. The current [scenario 3 script](../scripts/demo-scenario-3.ts) requires a configured live mock and does not support `WHOLESALER_LIVE=fixture`; a runnable fixture setup must be provided before that clip can be recorded. Do not present a live clip as a fixture or claim this fallback is ready. If `s3` is present but fails the check, do not record it as a working live scenario.
+5. Use a missed cut-off clip only when imported `late` is set and its current check passes. Otherwise omit it.
+6. Run the scenario 1 and 2 smoke checks in the runbook. They create orders and reset the local database; use the runbook's target-selection options for a hosted server. Reset the intended demo state again before recording.
+7. Build the views and rehearse in Open WebUI with voice, the configured model, and the MCP connection to the intended server. Check the in-chat card and its confirmation; keep the phone approval page ready as fallback. Host support and model tool choices vary, so record only behavior observed in the take. See [host support](host-support.md#measured-results).
+8. Recheck the demo URL and public source access. Record the build commit and duration after the take. Do not submit until every required link opens without login.
 
 ## Video shot list
 
-Total 2:00 at most, split by judging weight.
+Maximum runtime: 2:00. Keep the chef speaking in the kitchen as the main shot, with the agent screen beside the kitchen. Use observed results, not a promised model response.
 
-| Time      | Shot                       | Criterion                   | What the viewer sees                                                                                                                                                                                                         |
-| --------- | -------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0:00-0:10 | Problem                    | User need (20%)             | One sentence: kitchens want an agent to order for them, but not with unlimited authority, and wholesalers want to keep their own rules.                                                                                      |
-| 0:10-0:35 | Scenario 1: small order    | End-to-end demo (30%)       | The buyer types or says a small lactose-free milk order. The agent searches, gets a signed offer and places it. The order is placed with no reasons, and the audit record is shown.                                          |
-| 0:35-1:15 | Scenario 2: over the limit | Autonomy and controls (20%) | 1,000 litres of lactose-free milk by Monday. The order goes to approval with `SPEND_OVER_LIMIT`. The approval card or page opens, a person approves, and the order is placed. Point out that the model has no approval tool. |
-| 1:15-1:45 | Scenario 3: short stock    | Exceptions (15%)            | A lactose-free product with stock below the request. The agent orders what is available and proposes the listed substitute; the order goes to approval with the shortfall and substitution reasons.                          |
-| 1:45-2:00 | Open contract              | Openness (15%)              | `/.well-known/trusted-trade.json`, the OpenAPI document, and an offer verified with the public key from `/.well-known/jwks.json`. End on: "Any agent can call it, the wholesaler enforces the buyer's signed limits."        |
+| Time      | Picture and narration                                                                                                                                                                                                                                                            |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0:00–0:20 | **Protocol first.** Show discovery and the MCP endpoint, then an offer verified against the published key. Say: “An agent discovers the ordering service, verifies a signed offer, and works within an AP2-style mandate.” Briefly disclose simulated server custody.            |
+| 0:20–0:45 | **Chef and routine order.** The chef speaks a small request. Show Open WebUI searching, obtaining an offer and placing the order within the configured limits. Show the resulting status and audit record.                                                                       |
+| 0:45–1:20 | **Human control.** The chef asks for a larger order. Show the spend-limit reason and the approval card. A person approves; show the resulting status. If the card action fails, use the phone approval page. Mention that the demo has no authentication.                        |
+| 1:20–1:45 | **Short stock.** If the current scenario 3 data passes, show the short original and proposed substitute awaiting approval. If `s3` is null, use the fictional fixture only when a runnable setup exists and explicitly say it is a fixture. Show the actual reasons and outcome. |
+| 1:45–2:00 | **Close.** Summarize the open discovery and signed offers, and distinguish the mock from a production connection. Say: “the order statuses have a documented Peppol/UBL mapping; XML export and Peppol delivery are next steps.”                                                 |
 
-Optional, only if time allows: the rogue-agent pass of #19 acceptance 8, where a changed offer, a reused token and an expired offer each end with their reason code.
+The [mapping](specs.md#peppolubl-status-mapping) is documentation, not delivery integration. Do not include a cut-off clip unless the `late` condition above is met.
 
-## Deck outline
+## Seven-slide deck text
 
-One slide per judging criterion, then assumptions and next steps.
+### 1. Trusted Trade Agents
 
-1. **Title.** Trusted trade agents: an open ordering endpoint that buyer agents can use and wholesalers can trust.
-2. **User need (20%).** A food-service buyer orders from a notebook or memory, often hands-busy. Agents could order, but buyers will not hand them unlimited purchasing authority. Evidence: the buyer interview of November 14 (#44).
-3. **End-to-end demo (30%).** One request goes through search, signed offer, mandate check and placed order, with the audit record. Show scenario 1 as a still or a short loop.
-4. **Autonomy and controls (20%).** The buyer's signed mandate sets the limits, and the wholesaler enforces them along with its own guardrails. Over the limit, a person approves on the approval card; the model never sees an approval tool.
-5. **Robustness to exceptions (15%).** Short stock with a substitute, an expired or changed offer, and the credit limit each end with a reason code a person can read.
-6. **Openness and path to production (15%).** A discovery file, an OpenAPI document, an MCP endpoint and a skill, with offers any party can verify against the published keys. Wholesaler-specific code sits only in adapters, so another wholesaler plugs in through an adapter. Positioning line from the research note on #35: "Any agent can call it, the wholesaler enforces the buyer's signed limits, and the order maps to Peppol."
-7. **Assumptions and next steps.** What is simulated (see the list above); next steps are accounts and the authorize flow (#34), pay-on-order, and a second adapter (#33).
+**A supplier-hosted ordering service for buyer agents**
 
-Quote a mentor only with permission (#76).
+Discover the service, obtain signed offers, and order within buyer-defined limits.
+
+### 2. The need
+
+Kitchen staff need to order while their hands and attention are busy.
+An agent can help, but the buyer needs control over what it may order and when a person must decide.
+
+### 3. End-to-end demo
+
+The chef speaks a request. The agent searches the catalogue, obtains an offer and submits an order.
+The server checks the order and records its outcome and audit trail.
+Show a still from the actual recorded take.
+
+### 4. Autonomy with controls
+
+An AP2-style mandate expresses buyer limits. The server applies those limits and its order guardrails.
+An order outside the limits can wait for a person's decision.
+The demonstration uses a server-held buyer key and an unauthenticated demo account.
+
+### 5. Exceptions
+
+The service can explain a shortfall and offer a substitute for approval.
+Offer expiry and invalid signatures have explicit outcomes.
+Availability and the exact reasons depend on current mock data and the request.
+
+### 6. Open contract
+
+Discovery, OpenAPI, MCP and the ordering skill describe how a client connects.
+Signed offers can be verified with the published key.
+The order statuses have a documented [Peppol/UBL mapping](specs.md#peppolubl-status-mapping); XML export and Peppol delivery are next steps.
+
+### 7. Boundaries and next steps
+
+- Challenge catalogue and wholesaler mock, not a production integration; scenario 3 may require a disclosed fictional fixture.
+- One unauthenticated demo account; human approval endpoints are publicly callable.
+- Buyer key custody is simulated on the server. Buyer-side custody and mandate signature verification on use are future work.
+- Add accounts and authorization, real payment and another wholesaler adapter before production use.

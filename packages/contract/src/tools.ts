@@ -16,7 +16,7 @@ import {
 } from "./orders.ts";
 import { SearchRequestSchema, SearchResultSchema } from "./search.ts";
 
-/** The model sees these. `find_products` and `quote_offers` are `search_products` and `get_offers` without a view (SPEC-012). */
+/** Model-visible tools; use the quiet lookups during ordering (SPEC-012). */
 export const MODEL_TOOLS = [
   "search_products",
   "find_products",
@@ -25,6 +25,7 @@ export const MODEL_TOOLS = [
   "place_order",
   "get_order_status",
   "get_mandate",
+  "show_mandate",
   "draft_mandate",
   "list_pending_approvals",
 ] as const;
@@ -40,6 +41,7 @@ export const TOOL_INPUT = {
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
+  show_mandate: EmptySchema,
   draft_mandate: DraftMandateRequestSchema,
   list_pending_approvals: EmptySchema,
   decide_approval: DecideApprovalInputSchema,
@@ -55,6 +57,7 @@ export const TOOL_OUTPUT = {
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,
+  show_mandate: StoredMandateSchema,
   draft_mandate: MandateDraftSchema,
   list_pending_approvals: PendingListSchema,
   decide_approval: OrderSchema,

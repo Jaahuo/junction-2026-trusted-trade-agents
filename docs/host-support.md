@@ -95,3 +95,44 @@ curl -fsS "$BASE_URL/skills/trusted-trade-ordering/reason-codes.md" -o trusted-t
 | `-32603` | Internal error |
 
 The spec defines no notifications.
+
+## Open WebUI
+
+Open WebUI is a self-hosted chat host. It is the proposed main demo host (docs/prd.md row "Demo hosts", decision #44).
+This section records what Open WebUI documents, read on Nov 14, 2026.
+These are vendor claims, not measured results.
+The host spike #9 and the voice spike #45 record the measured result for each check.
+
+### Version
+
+Use Open WebUI v0.13.1 or later, and record the exact image tag in the spike result.
+
+| Version | What it adds                                                                                                                  | Source                                                                         |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| v0.6.31 | Native MCP support over Streamable HTTP                                                                                       | [MCP docs](https://docs.openwebui.com/features/extensibility/mcp/)             |
+| v0.13.0 | MCP Apps in chat: a tool's app renders in a sandboxed frame, and each tool call from the app waits for the user to confirm it | [release notes](https://github.com/open-webui/open-webui/releases/tag/v0.13.0) |
+| v0.13.1 | MCP App views keep their state while the message updates; an app can send a chat message after the user confirms it           | [release notes](https://github.com/open-webui/open-webui/releases/tag/v0.13.1) |
+
+A version before v0.13.0 shows only the text and structured result of a tool, not the view.
+
+### Documented behavior
+
+| Check (#9)        | Open WebUI documents                                                                                                                           | Effect on this server                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| no-auth connector | Native MCP is Streamable HTTP only. An administrator adds the server. The connection auth can be None.                                         | Add `<base URL>/mcp` with auth None (SPEC-012). Stdio and SSE are not needed.         |
+| views render      | A tool whose `_meta.ui.resourceUri` points to a `ui://` resource of type `text/html;profile=mcp-app` renders inline after it runs. Limit 5 MB. | The server already serves its views with this MIME type.                              |
+| view calls tool   | An app can call the server's tools. The user confirms each call in a "Tool call" dialog.                                                       | Approve and reject from the approval card take one extra click to confirm.            |
+| app-only hidden   | `_meta.ui.visibility` is honored: a tool without `model` is hidden from the model, and a tool without `app` cannot be called by an app.        | Keep `MCP_VIEW_TOOLS=app`, the default. The view tools declare `visibility: ["app"]`. |
+| token round trip  | Not documented.                                                                                                                                | Measure in the spike.                                                                 |
+
+Open WebUI needs a stable `WEBUI_SECRET_KEY` for MCP Apps.
+Set it in the container environment so that a restart does not change it.
+
+The app frame can reach only the sites that the server declares.
+Inside a host, the views call tools through the MCP Apps bridge and do not fetch the REST API directly (`contexts/views/src/shared/source.ts`), so they need no extra domains.
+
+### Measured results
+
+#9 owns the result lines in this file (its acceptance 7 counts exactly five `<check>: yes|no` lines).
+When #9 runs in Open WebUI, those lines name Open WebUI and its image tag as the host.
+The voice spike #45 posts its results on #44.

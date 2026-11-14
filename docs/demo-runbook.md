@@ -122,6 +122,7 @@ Run these from the worktree that serves the demo, in order:
    Each run starts with `bun run db:reset`, so repeated runs never use up the credit limit.
    Each step prints `ok <step>`; a failure prints `FAIL step <step>` with the HTTP status and error code, and exits 1.
    The run leaves a placed order, so run `bun run db:reset` once more before you record.
+   Wait a few seconds between smoke scripts and before the first chat request to avoid upstream rate limits.
 
 ### Smoke script options
 

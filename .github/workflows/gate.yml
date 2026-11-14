@@ -153,16 +153,18 @@ jobs:
         with:
           name: delivery-${{ github.sha }}-${{ github.run_attempt }}
           path: evidence/
-          retention-days: 90
+          retention-days: 7
           compression-level: 0
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: failure()
+        if: always()
         with:
           name: image-reports-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             evidence/sbom.cdx.json
             evidence/image-scan.json
+            evidence/manifest.json
+            evidence/SHA256SUMS
           retention-days: 90
           if-no-files-found: warn
 

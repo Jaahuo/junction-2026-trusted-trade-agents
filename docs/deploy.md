@@ -98,7 +98,7 @@ gh secret set DEPLOY_KNOWN_HOSTS --env production < verified_known_hosts
 
 ### Security and audit evidence
 
-The [delivery gates](workflow.md#ci-stages-and-security-evidence) define the severity policy and evidence limits. Gate artifacts bind the image archive, CycloneDX SBOM and scan report to the commit, lockfile, run and attempt. Deployment evidence records the published digest and result without credentials. Artifacts remain private and expire after 90 days. Preserve the records elsewhere before expiry if your audit period is longer. Registry images require a separate retention policy.
+The [delivery gates](workflow.md#ci-stages-and-security-evidence) define the severity policy and evidence limits. Gate artifacts bind the image archive, CycloneDX SBOM and scan report to the commit, lockfile, run and attempt. Deployment evidence records the published digest and result without credentials. Private image archives expire after 7 days; reports and deployment evidence expire after 90 days. Rerun the selected main-push gate run if its archive expires before deployment. A new manual gate run is not a push gate. Preserve records elsewhere before expiry if your audit period is longer. Registry images require a separate retention policy.
 
 All four production secrets are required, including `DEPLOY_KNOWN_HOSTS`. A missing secret is not a successful deployment. Verify a successful health check and the digest in deployment evidence before reporting a release.
 

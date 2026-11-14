@@ -73,7 +73,7 @@ Do not use blanket ignore flags or hide unfixed vulnerabilities. A policy except
 
 ### Evidence and limits
 
-Download the artifacts from the exact gate and deployment run, including its run attempt. Retain the audit JSON, image scan JSON, CycloneDX SBOM, manifest and checksum file. Match the commit, lockfile hash, run identity and image digest before using them as release evidence. Private artifacts expire after 90 days. Copy required records to an approved archive before expiry. This retention setting is not a tamper-proof audit store.
+Download the artifacts from the exact gate and deployment run, including its run attempt. Retain the audit JSON, image scan JSON, CycloneDX SBOM, manifest and checksum file. Match the commit, lockfile hash, run identity and image digest before using them as release evidence. Private reports expire after 90 days; large image archives expire after 7 days to limit storage use. Copy required records to an approved archive before expiry. This retention setting is not a tamper-proof audit store.
 
 The image SBOM inventories detected OS and installed language packages. It includes development dependencies shipped in the runtime image. It does not prove complete coverage of bundled browser code, the Bun executable, application logic or external services. Scanners use advisory databases available at scan time. New advisories can appear after release. Checksums bind files together but do not authenticate their author. These reports are not signed attestations, an independent security assessment or proof of zero vulnerabilities.
 

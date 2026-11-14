@@ -45,6 +45,23 @@ test("a missing signing key or a quote in a value fails before anything ships", 
   expect(() => parseEnv("not a pair")).toThrow(/KEY=VALUE/);
 });
 
+test("an empty, public-only or malformed signing key fails before push or reset touches anything", () => {
+  const publicKey = '{"kty":"EC","crv":"P-256","x":"a","y":"b","kid":"k1","alg":"ES256"}';
+  const offer = `OFFER_SIGNING_JWK=${jwk}\nOFFER_SIGNING_KID=k1\n`;
+  expect(() => deployEnv(outputs, parseEnv(`${offer}BUYER_SIGNING_JWK=\n`))).toThrow(
+    /lacks BUYER_SIGNING_JWK/,
+  );
+  expect(() => deployEnv(outputs, parseEnv(`${offer}BUYER_SIGNING_JWK=${publicKey}\n`))).toThrow(
+    /BUYER_SIGNING_JWK must be a private P-256 JWK/,
+  );
+  expect(() => deployEnv(outputs, parseEnv(`${offer}BUYER_SIGNING_JWK={not json\n`))).toThrow(
+    /private P-256 JWK/,
+  );
+  expect(() => deployEnv(outputs, parseEnv(`${keys}OFFER_SIGNING_KID= \n`))).toThrow(
+    /lacks OFFER_SIGNING_KID/,
+  );
+});
+
 test("Caddy serves the hostname with automatic TLS and proxies to the app port", () => {
   expect(renderCaddyfile(outputs)).toBe(
     "203-0-113-7.sslip.io {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:3000\n}\n",

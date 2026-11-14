@@ -14,6 +14,23 @@ export interface Outputs {
 
 const SECRETS_FILE = ".env.deploy";
 const SECRET_NAMES = ["OFFER_SIGNING_JWK", "OFFER_SIGNING_KID", "BUYER_SIGNING_JWK"] as const;
+const PRIVATE_KEYS = ["OFFER_SIGNING_JWK", "BUYER_SIGNING_JWK"] as const;
+
+const isPrivateP256Jwk = (text: string): boolean => {
+  let key: unknown;
+  try {
+    key = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  if (typeof key !== "object" || key === null) return false;
+  const field = (name: string): unknown => (name in key ? Reflect.get(key, name) : undefined);
+  return (
+    field("kty") === "EC" &&
+    field("crv") === "P-256" &&
+    ["x", "y", "d"].every((name) => typeof field(name) === "string" && field(name) !== "")
+  );
+};
 
 export const parseEnv = (text: string): Map<string, string> =>
   new Map(
@@ -33,11 +50,14 @@ export const deployEnv = (
   outputs: Outputs,
   secrets: ReadonlyMap<string, string>,
 ): Map<string, string> => {
-  const missing = SECRET_NAMES.filter((name) => !secrets.has(name));
+  const missing = SECRET_NAMES.filter((name) => (secrets.get(name) ?? "").trim() === "");
   if (missing.length > 0)
     throw new Error(
       `${SECRETS_FILE} lacks ${missing.join(", ")}. Run: bun scripts/generate-keys.ts > ${SECRETS_FILE}`,
     );
+  const invalid = PRIVATE_KEYS.filter((name) => !isPrivateP256Jwk(secrets.get(name) ?? ""));
+  if (invalid.length > 0)
+    throw new Error(`${SECRETS_FILE}: ${invalid.join(", ")} must be a private P-256 JWK`);
   return new Map<string, string>([
     ...secrets,
     ["NODE_ENV", "production"],

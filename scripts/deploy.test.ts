@@ -17,11 +17,30 @@ const outputs: Outputs = {
   database_url: "postgres://u:p%40ss@db.example:5432/tsdb?sslmode=require",
 };
 
-const jwk = '{"kty":"EC","crv":"P-256","x":"a","y":"b","d":"c","kid":"k1","alg":"ES256"}';
-const keys = `OFFER_SIGNING_JWK=${jwk}\nOFFER_SIGNING_KID=k1\nBUYER_SIGNING_JWK=${jwk}\n`;
+const privateJwk = async (): Promise<JsonWebKey> => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ]);
+  return { ...(await crypto.subtle.exportKey("jwk", pair.privateKey)), alg: "ES256" };
+};
 
-test("the env file keeps a JSON key literal and adds the hosted settings", () => {
-  const file = renderEnvFile(deployEnv(outputs, parseEnv(`# keys\n${keys}MCP_VIEW_TOOLS="app"\n`)));
+const offerKey = await privateJwk();
+const buyerKey = await privateJwk();
+const jwk = JSON.stringify(offerKey);
+const offer = `OFFER_SIGNING_JWK=${jwk}\nOFFER_SIGNING_KID=k1\n`;
+const keys = `${offer}BUYER_SIGNING_JWK=${JSON.stringify(buyerKey)}\n`;
+
+const failure = async (run: Promise<unknown>): Promise<string> =>
+  run.then(
+    () => "no error",
+    (error: unknown) => String(error),
+  );
+
+test("the env file keeps a JSON key literal and adds the hosted settings", async () => {
+  const file = renderEnvFile(
+    await deployEnv(outputs, parseEnv(`# keys\n${keys}MCP_VIEW_TOOLS="app"\n`)),
+  );
   expect(file).toContain(`OFFER_SIGNING_JWK='${jwk}'`);
   expect(file).toContain("MCP_VIEW_TOOLS='app'");
   expect(file).toContain("NODE_ENV='production'");
@@ -29,37 +48,42 @@ test("the env file keeps a JSON key literal and adds the hosted settings", () =>
   expect(file).toContain(`DATABASE_URL='${outputs.database_url}'`);
 });
 
-test("a hosted setting wins over the same name in the secrets file", () => {
+test("a hosted setting wins over the same name in the secrets file", async () => {
   const file = renderEnvFile(
-    deployEnv(outputs, parseEnv(`${keys}DATABASE_URL=postgres://local/x\n`)),
+    await deployEnv(outputs, parseEnv(`${keys}DATABASE_URL=postgres://local/x\n`)),
   );
   expect(file).not.toContain("postgres://local/x");
   expect(file.match(/^DATABASE_URL=/gm)).toHaveLength(1);
 });
 
-test("a missing signing key or a quote in a value fails before anything ships", () => {
-  expect(() => renderEnvFile(deployEnv(outputs, parseEnv("OFFER_SIGNING_KID=k1\n")))).toThrow(
-    /OFFER_SIGNING_JWK, BUYER_SIGNING_JWK/,
+test("a missing setting or a quote in a value fails before anything ships", async () => {
+  expect(await failure(deployEnv(outputs, parseEnv("OFFER_SIGNING_KID=k1\n")))).toMatch(
+    /lacks OFFER_SIGNING_JWK, BUYER_SIGNING_JWK/,
   );
-  expect(() => renderEnvFile(deployEnv(outputs, parseEnv(`${keys}NOTE=it's\n`)))).toThrow(/NOTE/);
+  expect(await failure(deployEnv(outputs, parseEnv(`${keys}OFFER_SIGNING_KID= \n`)))).toMatch(
+    /lacks OFFER_SIGNING_KID/,
+  );
+  const env = await deployEnv(outputs, parseEnv(`${keys}NOTE=it's\n`));
+  expect(() => renderEnvFile(env)).toThrow(/NOTE/);
   expect(() => parseEnv("not a pair")).toThrow(/KEY=VALUE/);
 });
 
-test("an empty, public-only or malformed signing key fails before push or reset touches anything", () => {
-  const publicKey = '{"kty":"EC","crv":"P-256","x":"a","y":"b","kid":"k1","alg":"ES256"}';
-  const offer = `OFFER_SIGNING_JWK=${jwk}\nOFFER_SIGNING_KID=k1\n`;
-  expect(() => deployEnv(outputs, parseEnv(`${offer}BUYER_SIGNING_JWK=\n`))).toThrow(
-    /lacks BUYER_SIGNING_JWK/,
-  );
-  expect(() => deployEnv(outputs, parseEnv(`${offer}BUYER_SIGNING_JWK=${publicKey}\n`))).toThrow(
-    /BUYER_SIGNING_JWK must be a private P-256 JWK/,
-  );
-  expect(() => deployEnv(outputs, parseEnv(`${offer}BUYER_SIGNING_JWK={not json\n`))).toThrow(
-    /private P-256 JWK/,
-  );
-  expect(() => deployEnv(outputs, parseEnv(`${keys}OFFER_SIGNING_KID= \n`))).toThrow(
-    /lacks OFFER_SIGNING_KID/,
-  );
+test("an empty, public-only, malformed, truncated or mismatched signing key fails before push or reset", async () => {
+  const { d, ...publicKey } = buyerKey;
+  const other = await privateJwk();
+  const cases = [
+    "",
+    JSON.stringify(publicKey),
+    "{not json",
+    JSON.stringify({ ...buyerKey, d: (d ?? "").slice(0, 10) }),
+    JSON.stringify({ ...buyerKey, d: other.d }),
+  ];
+  for (const value of cases)
+    expect(
+      await failure(deployEnv(outputs, parseEnv(`${offer}BUYER_SIGNING_JWK=${value}\n`))),
+    ).toMatch(
+      value === "" ? /lacks BUYER_SIGNING_JWK/ : /BUYER_SIGNING_JWK must be a private P-256 JWK/,
+    );
 });
 
 test("Caddy serves the hostname with automatic TLS and proxies to the app port", () => {
@@ -68,13 +92,13 @@ test("Caddy serves the hostname with automatic TLS and proxies to the app port",
   );
 });
 
-test("a reset runs with the hosted keys and production mode against the local checkout", () => {
+test("a reset runs with the hosted keys and production mode against the local checkout", async () => {
   const env = resetEnv(
-    deployEnv(outputs, parseEnv(keys)),
+    await deployEnv(outputs, parseEnv(keys)),
     { BUYER_SIGNING_JWK: "local-key", NODE_ENV: "development", PATH: "/usr/bin" },
     "/work/checkout",
   );
-  expect(env["BUYER_SIGNING_JWK"]).toBe(jwk);
+  expect(env["BUYER_SIGNING_JWK"]).toBe(JSON.stringify(buyerKey));
   expect(env["NODE_ENV"]).toBe("production");
   expect(env["DATABASE_URL"]).toBe(outputs.database_url);
   expect(env["APP_ROOT"]).toBe("/work/checkout");

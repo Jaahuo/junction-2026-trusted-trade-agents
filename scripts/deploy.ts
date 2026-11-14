@@ -16,20 +16,24 @@ const SECRETS_FILE = ".env.deploy";
 const SECRET_NAMES = ["OFFER_SIGNING_JWK", "OFFER_SIGNING_KID", "BUYER_SIGNING_JWK"] as const;
 const PRIVATE_KEYS = ["OFFER_SIGNING_JWK", "BUYER_SIGNING_JWK"] as const;
 
-const isPrivateP256Jwk = (text: string): boolean => {
-  let key: unknown;
+const P256 = { name: "ECDSA", namedCurve: "P-256" } as const;
+const ES256 = { name: "ECDSA", hash: "SHA-256" } as const;
+
+/** Signs a probe with the private key and verifies it with its public part: the key imports and its halves match. */
+const isUsableSigningKey = async (text: string): Promise<boolean> => {
   try {
-    key = JSON.parse(text);
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return false;
+    const jwk: JsonWebKey = parsed;
+    const { d: _d, key_ops: _ops, ...publicJwk } = jwk;
+    const signer = await crypto.subtle.importKey("jwk", jwk, P256, false, ["sign"]);
+    const verifier = await crypto.subtle.importKey("jwk", publicJwk, P256, false, ["verify"]);
+    const probe = new TextEncoder().encode("deploy-key-probe");
+    const signature = await crypto.subtle.sign(ES256, signer, probe);
+    return await crypto.subtle.verify(ES256, verifier, signature, probe);
   } catch {
     return false;
   }
-  if (typeof key !== "object" || key === null) return false;
-  const field = (name: string): unknown => (name in key ? Reflect.get(key, name) : undefined);
-  return (
-    field("kty") === "EC" &&
-    field("crv") === "P-256" &&
-    ["x", "y", "d"].every((name) => typeof field(name) === "string" && field(name) !== "")
-  );
 };
 
 export const parseEnv = (text: string): Map<string, string> =>
@@ -46,16 +50,19 @@ export const parseEnv = (text: string): Map<string, string> =>
   );
 
 /** The hosted environment: the signing keys and settings that both the server and a reset use. */
-export const deployEnv = (
+export const deployEnv = async (
   outputs: Outputs,
   secrets: ReadonlyMap<string, string>,
-): Map<string, string> => {
+): Promise<Map<string, string>> => {
   const missing = SECRET_NAMES.filter((name) => (secrets.get(name) ?? "").trim() === "");
   if (missing.length > 0)
     throw new Error(
       `${SECRETS_FILE} lacks ${missing.join(", ")}. Run: bun scripts/generate-keys.ts > ${SECRETS_FILE}`,
     );
-  const invalid = PRIVATE_KEYS.filter((name) => !isPrivateP256Jwk(secrets.get(name) ?? ""));
+  const usable = await Promise.all(
+    PRIVATE_KEYS.map((name) => isUsableSigningKey(secrets.get(name) ?? "")),
+  );
+  const invalid = PRIVATE_KEYS.filter((_, index) => usable[index] !== true);
   if (invalid.length > 0)
     throw new Error(`${SECRETS_FILE}: ${invalid.join(", ")} must be a private P-256 JWK`);
   return new Map<string, string>([

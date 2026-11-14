@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+
 import { fail, git } from "./lib.ts";
 import { hasRuntime } from "./runtime.ts";
 import { parseWorktrees, worktreeCleanup } from "./workflow-policy.ts";
@@ -5,6 +8,113 @@ import { parseWorktrees, worktreeCleanup } from "./workflow-policy.ts";
 async function run(cmd: string[], cwd: string, env = process.env): Promise<boolean> {
   const child = Bun.spawn(cmd, { cwd, env, stdout: "inherit", stderr: "inherit" });
   return (await child.exited) === 0;
+}
+
+// lsof -F0 separates fields with NUL and records with a newline.
+export function processesInWorktree(output: string, worktreePath: string): number[] {
+  const root = resolve(worktreePath);
+  const selected = new Set<number>();
+  let pid: number | undefined;
+  for (const raw of output.split("\0")) {
+    const field = raw.replace(/^\n+/, "");
+    if (field.startsWith("p")) {
+      const value = field.slice(1);
+      if (!/^[1-9]\d*$/.test(value)) throw new Error("Invalid PID in lsof output");
+      pid = Number(value);
+      if (!Number.isSafeInteger(pid)) throw new Error("Invalid PID in lsof output");
+    } else if (field.startsWith("n")) {
+      if (pid === undefined) throw new Error("Missing PID in lsof output");
+      const path = field.slice(1);
+      if (!isAbsolute(path)) throw new Error("Invalid cwd in lsof output");
+      const fromRoot = relative(root, resolve(path));
+      if (
+        fromRoot === "" ||
+        (fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot))
+      )
+        selected.add(pid);
+    }
+  }
+  return [...selected];
+}
+
+async function commandOutput(cmd: string[]): Promise<string> {
+  const child = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+  const [output, errors, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (code !== 0 || errors.trim()) throw new Error(`${cmd[0]} failed: ${errors.trim() || code}`);
+  return output;
+}
+
+async function protectedProcesses(): Promise<Set<number>> {
+  const output = await commandOutput(["ps", "-axo", "pid=,ppid="]);
+  const parents = new Map<number, number>();
+  for (const line of output.split("\n")) {
+    if (!line.trim()) continue;
+    const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!match) throw new Error("Invalid process list");
+    parents.set(Number(match[1]), Number(match[2]));
+  }
+  const protectedPids = new Set<number>();
+  let current = process.pid;
+  while (current > 0 && !protectedPids.has(current)) {
+    protectedPids.add(current);
+    const parent = parents.get(current);
+    if (parent === undefined) throw new Error("Cannot determine caller ancestry");
+    current = parent;
+  }
+  return protectedPids;
+}
+
+async function discoverProcesses(root: string): Promise<number[]> {
+  const output = await commandOutput(["lsof", "-a", "-d", "cwd", "-F0pn"]);
+  if (!processesInWorktree(output, realpathSync(process.cwd())).includes(process.pid))
+    throw new Error("lsof did not report the cleanup process cwd");
+  return processesInWorktree(output, root);
+}
+
+function signalProcess(pid: number, signal: "SIGTERM" | "SIGKILL"): boolean {
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+export async function stopWorktreeProcesses(worktreePath: string): Promise<number[]> {
+  const root = realpathSync(worktreePath);
+  const protectedPids = await protectedProcesses();
+  const initial = await discoverProcesses(root);
+  if (initial.some((pid) => protectedPids.has(pid)))
+    throw new Error("a caller or its ancestor is running inside the worktree");
+  const stopped = new Set<number>();
+  for (const pid of initial) {
+    if (!(await discoverProcesses(root)).includes(pid)) continue;
+    if (signalProcess(pid, "SIGTERM")) {
+      stopped.add(pid);
+      console.log(`Sent SIGTERM to worktree process ${pid}.`);
+    }
+  }
+  if (initial.length === 0) return [];
+  await Bun.sleep(500);
+  const survivors = await discoverProcesses(root);
+  if (survivors.some((pid) => protectedPids.has(pid)))
+    throw new Error("a caller or its ancestor is running inside the worktree");
+  for (const pid of survivors) {
+    if (!stopped.has(pid)) throw new Error(`new worktree process ${pid} appeared during cleanup`);
+    if (!(await discoverProcesses(root)).includes(pid)) continue;
+    if (signalProcess(pid, "SIGKILL")) console.log(`Sent SIGKILL to worktree process ${pid}.`);
+  }
+  if (survivors.length) {
+    await Bun.sleep(500);
+    if ((await discoverProcesses(root)).length)
+      throw new Error("worktree processes are still running");
+  }
+  return [...stopped];
 }
 
 async function decide(branch: string, mergedHead: string) {
@@ -41,6 +151,13 @@ export async function cleanMergedWorktree(
       `Kept worktree ${worktree.path}: ${reason}. From ${mainPath}, run:\n  git pull --ff-only origin main\n  ${rerun}`,
     );
   if (!decision.remove) return keep(decision.reason);
+  try {
+    await stopWorktreeProcesses(worktree.path);
+  } catch (error) {
+    return keep(
+      `process cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   if (await hasRuntime(worktree.path)) {
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([name]) => name !== "DATABASE_URL"),

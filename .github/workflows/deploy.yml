@@ -37,8 +37,13 @@ jobs:
           push: true
           provenance: false
           sbom: false
-          cache-from: type=gha,scope=production-image
-          cache-to: type=gha,scope=production-image,mode=max
+          cache-from: type=local,src=/home/runner/.cache/buildx/api
+          cache-to: type=local,dest=/home/runner/.cache/buildx/api-new,mode=max
+      - name: Keep only the newest layer cache
+        run: |
+          set -euo pipefail
+          rm -rf /home/runner/.cache/buildx/api
+          mv /home/runner/.cache/buildx/api-new /home/runner/.cache/buildx/api
       - name: Verify published image
         id: verify
         env:
@@ -93,8 +98,13 @@ jobs:
           push: true
           provenance: false
           sbom: false
-          cache-from: type=gha,scope=production-chat-image
-          cache-to: type=gha,scope=production-chat-image,mode=max
+          cache-from: type=local,src=/home/runner/.cache/buildx/chat
+          cache-to: type=local,dest=/home/runner/.cache/buildx/chat-new,mode=max
+      - name: Keep only the newest layer cache
+        run: |
+          set -euo pipefail
+          rm -rf /home/runner/.cache/buildx/chat
+          mv /home/runner/.cache/buildx/chat-new /home/runner/.cache/buildx/chat
       - name: Verify published image
         id: verify
         env:

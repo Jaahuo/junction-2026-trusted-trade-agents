@@ -71,7 +71,7 @@ All jobs run on the self-hosted Vultr runners with the labels `self-hosted`, `li
 
 Each runner keeps Bun package downloads and pinned tools in its home volume between jobs, so the workflows use no cache action for them. Every install still uses `--frozen-lockfile`. Each runner pulls the PostgreSQL and BuildKit images when it starts. The PostgreSQL service keeps its data in memory.
 
-Deployment builds use the GitHub Actions Docker layer cache under `production-image` and `production-chat-image`. Only the two build jobs request cache-write access. They build the pushed main SHA from the checkout, not from PR artifacts. Docker validates layer reuse against build inputs; source changes can still invalidate dependency layers because the Dockerfile copies source before installation.
+Each runner keeps a Docker layer cache for the API image and one for the chat image in its home volume, under `/home/runner/.cache/buildx`. A build reads the cache of the runner it runs on and replaces it afterward, so the cache does not grow. The GitHub cache service is not used: exporting to it took three minutes per build from these runners. The API Dockerfile installs dependencies from the workspace `package.json` files and `bun.lock` alone, so a source-only change reuses the install layers. A runner that has not built an image yet builds it without a cache. A pull request job runs as the same user on the same runner and can change this cache, so a production build can reuse layers that a pull request wrote. The owner accepted this with the shared runners: it saves about a minute per deploy, mostly the pull of the chat base image.
 
 ### Temporary security coverage
 

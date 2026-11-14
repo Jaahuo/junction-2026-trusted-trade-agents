@@ -126,17 +126,21 @@ const readOutputs = async (): Promise<Outputs> =>
   parseOutputs(process.env["DEPLOY_OUTPUTS"] ?? (await $`tofu -chdir=infra output -json`.text()));
 
 const waitForHealth = async (url: string): Promise<void> => {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const ok = await fetch(`${url}/api/health`)
+  const deadline = Date.now() + 180_000;
+  while (Date.now() < deadline) {
+    const ok = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(5000) })
       .then((response) => response.ok)
       .catch(() => false);
     if (ok) {
       console.log(`healthy: ${url}/api/health`);
       return;
     }
-    await Bun.sleep(2000);
+    console.log(`waiting for ${url}/api/health`);
+    await Bun.sleep(3000);
   }
-  throw new Error(`${url}/api/health did not answer 200 within two minutes`);
+  throw new Error(
+    `${url}/api/health did not answer 200 within three minutes. Check: ssh root@<ip> journalctl -u trusted-trade -u caddy -n 50`,
+  );
 };
 
 /** The app secrets: DEPLOY_ENV in CI, else the ignored local file. */

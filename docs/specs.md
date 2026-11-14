@@ -74,7 +74,9 @@ PRD: [Tools](prd.md#tools).
 ```ts
 export const MODEL_TOOLS = [
   "search_products",
+  "find_products",
   "get_offers",
+  "quote_offers",
   "place_order",
   "get_order_status",
   "get_mandate",
@@ -129,7 +131,9 @@ export interface DecideApprovalInput {
 }
 export const TOOL_INPUT = {
   search_products: SearchRequestSchema,
+  find_products: SearchRequestSchema,
   get_offers: OffersRequestSchema,
+  quote_offers: OffersRequestSchema,
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
@@ -662,6 +666,7 @@ PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 - Every tool of SPEC-003 is registered with `inputSchema` = `TOOL_INPUT[tool]` and `outputSchema` = `TOOL_OUTPUT[tool]`. The result has `content` (a text summary) and `structuredContent` (the REST 2xx body). Text of a pending order includes its `approvalUrl`. A REST error, or input that `TOOL_INPUT[tool]` refuses (`BAD_REQUEST`), → `isError: true` and no `structuredContent`; the text has the error code, the message and the envelope as JSON. Reason: an MCP SDK client validates any `structuredContent` against `outputSchema`, also when `isError` is set. So every result with `structuredContent` parses with `TOOL_OUTPUT[tool]`. Hosts without Apps complete the flow from text, structured content and the approval page.
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
 - Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
+- Quiet twins: `find_products` and `quote_offers` are `search_products` and `get_offers` without a view. Same `TOOL_INPUT`, `TOOL_OUTPUT`, REST route and handler; no `_meta.ui` and no `language` input; `ROUTES` keeps the name of the tool with the view. A host opens a view for every call of a tool that declares one, so the agent uses the quiet twins while it prepares or places an order the user asked for, and the chat shows only the approval card. It uses `search_products` and `get_offers` when the user asks to see the products or compare offers.
 - Each tool whose view is shown in the chat also lists an optional `language` input (a BCP 47 tag): the language the user writes in. Only the view reads it, from the tool input; the server drops it before the REST call, so it is not part of `TOOL_INPUT` or any route.
 - Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
 
@@ -672,7 +677,9 @@ PRD: [Approval and user-facing views](prd.md#approval-and-user-facing-views).
 ```ts
 export const TOOL_OUTPUT = {
   search_products: SearchResultSchema,
+  find_products: SearchResultSchema,
   get_offers: OffersResultSchema,
+  quote_offers: OffersResultSchema,
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,

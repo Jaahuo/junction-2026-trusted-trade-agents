@@ -4,7 +4,10 @@
     "steps": [{ "say": "We need 20 litres of whole milk on Monday." }],
     "expect": [
       { "noError": "OFFER_INVALID", "known": "#162" },
-      { "order": "placed", "known": "#165" }
+      { "order": "placed", "known": "#165" },
+      { "notCalled": "search_products" },
+      { "notCalled": "get_offers" },
+      { "notCalled": "get_order_status" }
     ]
   },
   {

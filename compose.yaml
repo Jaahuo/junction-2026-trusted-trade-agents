@@ -9,5 +9,6 @@ services:
       - "127.0.0.1:${PG_PORT:?run runtime setup}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    command: ["postgres", "-c", "max_connections=400"]
 volumes:
   postgres_data:

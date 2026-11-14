@@ -3,8 +3,10 @@ import {
   buildSystemPrompt,
   extractPrompt,
   hasConnection,
+  hasOpenaiConfig,
   mergeConnections,
   modelPayload,
+  openaiConfig,
   parseEnv,
   toolServer,
 } from "./openwebui.ts";
@@ -53,4 +55,16 @@ test("parses KEY=value lines and skips comments", () => {
     OPENWEBUI_PORT: "38090",
     EMPTY: "",
   });
+});
+
+test("pushes the model endpoint from .env until Open WebUI stores exactly it", () => {
+  const url = "https://inference.example/v1";
+  const stored = openaiConfig(url, "key");
+  expect(hasOpenaiConfig(stored, url, "key")).toBe(true);
+  expect(hasOpenaiConfig(stored, url, "other key")).toBe(false);
+  expect(
+    hasOpenaiConfig(openaiConfig("http://host.docker.internal:18080/v1", "key"), url, "key"),
+  ).toBe(false);
+  expect(hasOpenaiConfig({ ...stored, ENABLE_OPENAI_API: false }, url, "key")).toBe(false);
+  expect(hasOpenaiConfig(null, url, "key")).toBe(false);
 });

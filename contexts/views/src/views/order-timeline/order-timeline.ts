@@ -14,7 +14,19 @@ import { lang, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { statusDisc, type Tone, trustStyles } from "../../shared/trust.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
-import { cardStyles, orderHeader, orderStateLabel, thumb } from "../approval-card/parts.ts";
+import { CARD } from "../approval-card/card-strings.ts";
+import {
+  cardStyles,
+  detailsFooter,
+  disclosureRow,
+  disclosureStyles,
+  offerSeal,
+  orderHeader,
+  orderStateLabel,
+  type RowTone,
+  rows,
+  thumb,
+} from "../approval-card/parts.ts";
 
 import { TIMELINE } from "./strings.ts";
 
@@ -35,8 +47,131 @@ function integrityStrip(order: Order) {
   </p>`;
 }
 
+type AuditEvent = Order["audit"][number];
+
+/** How each log entry reads: went through (check), needs a look (warning) or a plain step. */
+const EVENT_TONE = {
+  order_requested: "neutral",
+  order_refused: "danger",
+  offer_verified: "auto",
+  check_passed: "auto",
+  check_failed: "attention",
+  sent_to_approval: "neutral",
+  approved: "auto",
+  declined: "danger",
+  requoted: "neutral",
+  edited: "neutral",
+  payment_authorized: "auto",
+  payment_failed: "danger",
+  placed: "auto",
+  rejected: "danger",
+} satisfies Record<AuditEvent["event"], RowTone>;
+
+/** A note longer than this is clamped to two lines behind "Show more". */
+const LONG_NOTE = 140;
+
+/** Which parts of the timeline are open: More details, one log entry (or all) and the note. */
+export type TimelineUi = { details: boolean; entry: number | "all" | null; note: boolean };
+export const COLLAPSED: TimelineUi = { details: false, entry: null, note: false };
+export type TimelineActions = {
+  toggleDetails: () => void;
+  toggleEntry: (index: number) => void;
+  toggleNote: () => void;
+};
+const NO_ACTIONS: TimelineActions = {
+  toggleDetails: () => undefined,
+  toggleEntry: () => undefined,
+  toggleNote: () => undefined,
+};
+
+/** One log entry as the card's opening row: icon and event, time and chevron; open, the facts. */
+function logEntry(event: AuditEvent, index: number, ui: TimelineUi, act: TimelineActions) {
+  const text = pick(TIMELINE);
+  const words = pick(ORDER_WORDING);
+  const l = lang();
+  const title = text.events[event.event];
+  const time = formatTimestamp(event.at, l);
+  const actor = words.actors[event.actor];
+  const reason = event.reason ? text.reason[event.reason] : undefined;
+  const detail =
+    event.detail && (!event.reason || event.detail !== text.reason[event.reason])
+      ? event.detail
+      : undefined;
+  const facts: [string, unknown][] = [
+    [text.facts.time, html`<time datetime=${event.at}>${time}</time>`],
+    [text.facts.by, actor],
+  ];
+  if (detail !== undefined)
+    facts.push([event.event === "declined" ? text.facts.note : text.facts.detail, detail]);
+  if (event.rule)
+    facts.push([text.facts.rule, html`<span title=${event.rule}>${text.supportRule}</span>`]);
+  const open = ui.entry === "all" || ui.entry === index;
+  const tone = EVENT_TONE[event.event];
+  return html`<li class=${event.integrityOk === false ? "broken" : ""}>
+    ${disclosureRow({
+      panel: `entry-${index}`,
+      open,
+      toggle: () => act.toggleEntry(index),
+      label: text.entryLabel(title, time, actor),
+      tone,
+      lead: html`${
+          event.actor === "agent"
+            ? html`<span class="agent" aria-hidden="true">${unsafeSVG(agent16)}</span>`
+            : nothing
+        }<span class="strong event-title ${tone}">${title}</span>`,
+      value: /\d{1,2}[.:]\d{2} UTC$/.exec(time)?.[0] ?? time,
+      sentence: reason,
+      facts,
+    })}
+    ${
+      event.integrityOk === false
+        ? html`<p class="strong tampered body-small">${text.entryChanged}</p>`
+        : nothing
+    }
+  </li>`;
+}
+
+/** The order log inside More details: its integrity strip and one opening row per entry. */
+function orderLog(order: Order, ui: TimelineUi, act: TimelineActions) {
+  const text = pick(TIMELINE);
+  return html`<section class="group log" aria-label=${text.orderLog}>
+    <h3 class="section-title">
+      ${text.orderLog}
+      <span class="count body-small secondary">${text.entries(order.audit.length)}</span>
+    </h3>
+    ${integrityStrip(order)}
+    ${
+      order.audit.length === 0
+        ? html`<p class="secondary">${text.noActivity}</p>`
+        : html`<ol class="events">
+            ${order.audit.map((event, index) => logEntry(event, index, ui, act))}
+          </ol>`
+    }
+  </section>`;
+}
+
+/** The decision note, clamped to two lines behind "Show more" when it is long. */
+function decisionNote(note: string, ui: TimelineUi, act: TimelineActions) {
+  const text = pick(TIMELINE);
+  if (note.length <= LONG_NOTE) return html`<p>${text.note(note)}</p>`;
+  return html`<p id="decision-note" class="note ${ui.note ? "" : "clamped"}">${text.note(note)}</p>
+    <button
+      type="button"
+      class="note-toggle body-small"
+      aria-expanded=${ui.note ? "true" : "false"}
+      aria-controls="decision-note"
+      @click=${act.toggleNote}
+    >
+      ${ui.note ? text.showLess : text.showMore}
+    </button>`;
+}
+
 /** Render the order record without adding actions to the audit view. */
-export function renderOrderTimeline(order: Order): TemplateResult {
+export function renderOrderTimeline(
+  order: Order,
+  ui: TimelineUi = COLLAPSED,
+  act: TimelineActions = NO_ACTIONS,
+): TemplateResult {
   const decision = order.decision;
   const text = pick(TIMELINE);
   const words = pick(ORDER_WORDING);
@@ -77,44 +212,10 @@ export function renderOrderTimeline(order: Order): TemplateResult {
                       : text.nextNotRecorded
                 }
               </p>
-              ${decision.note ? html`<p>${text.note(decision.note)}</p>` : nothing}
+              ${decision.note ? decisionNote(decision.note, ui, act) : nothing}
             </div>`
           : nothing
       }
-      <section class="log" aria-label=${text.orderLog}>
-        <h3 class="section-title">${text.orderLog}</h3>
-        ${integrityStrip(order)}
-        ${
-          order.audit.length === 0
-            ? html`<p class="secondary">${text.noActivity}</p>`
-            : html`<ol class="events">
-                ${order.audit.map(
-                  (event) =>
-                    html`<li class=${event.integrityOk === false ? "broken" : ""}>
-                      <p class="label-small secondary event-meta">
-                        ${
-                          event.actor === "agent"
-                            ? html`<span class="agent" aria-hidden="true"
-                                >${unsafeSVG(agent16)}</span
-                              >`
-                            : nothing
-                        }<time datetime=${event.at}>${formatTimestamp(event.at, l)}</time>
-                        · ${words.actors[event.actor]}
-                      </p>
-                      <h4 class="body-small">${text.events[event.event]}</h4>
-                      ${event.reason ? html`<p class="body-small">${text.reason[event.reason]}</p>` : nothing}
-                      ${event.rule ? html`<span class="body-small" title=${event.rule}>${text.supportRule}</span>` : nothing}
-                      ${event.detail && (!event.reason || event.detail !== text.reason[event.reason]) ? html`<p class="body-small">${event.detail}</p>` : nothing}
-                      ${
-                        event.integrityOk === false
-                          ? html`<p class="strong tampered">${text.entryChanged}</p>`
-                          : nothing
-                      }
-                    </li>`,
-                )}
-              </ol>`
-        }
-      </section>
       ${
         order.requotes.length === 0
           ? nothing
@@ -156,13 +257,25 @@ export function renderOrderTimeline(order: Order): TemplateResult {
             </section>`
       }
     </div>
+    ${detailsFooter({
+      open: ui.details,
+      toggle: act.toggleDetails,
+      hint: pick(CARD).offerAndSignature,
+      body: html`${orderLog(order, ui, act)}
+        <section class="group">
+          <h3 class="section-title">${pick(CARD).offer}</h3>
+          ${rows([[pick(CARD).offerNo, order.offerIds.join(", ")]])} ${offerSeal(order)}
+        </section>`,
+    })}
   </article>`;
 }
 
 class OrderTimeline extends ViewElement<ViewEntryOf<"order-timeline">> {
+  static override properties = { ...ViewElement.properties, ui: { state: true } };
   static override styles = [
     base,
     cardStyles,
+    disclosureStyles,
     trustStyles,
     css`
       .timeline {
@@ -199,53 +312,64 @@ class OrderTimeline extends ViewElement<ViewEntryOf<"order-timeline">> {
         background: var(--color-bg-subtle);
       }
       .decision p + p,
-      li p + p {
+      .requotes li p + p {
         margin-top: var(--spacing-xs);
       }
-      /* Entries, oldest first: an 8 px dot, "time · actor", then the event. */
-      .events {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-xs);
+      /* A long note: two lines until "Show more". */
+      .note.clamped {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
       }
+      .note-toggle {
+        margin-top: var(--spacing-xs);
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--color-link);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .log .count {
+        font-family: var(--font-family-sans);
+        font-weight: 400;
+      }
+      /* Log entries are the card's opening rows, one per entry, with a divider under each. */
       .events li {
-        position: relative;
-        padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-xs) var(--spacing-xl);
+        border-bottom: 1px solid var(--color-border);
       }
-      .events li::before {
-        position: absolute;
-        top: 7px;
-        left: var(--spacing-sm);
-        width: 8px;
-        height: 8px;
-        border-radius: var(--radius-full);
-        background: var(--color-border-strong);
-        content: "";
+      .events .offer-reason {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--spacing-2xs);
+        color: var(--color-text);
+        font-size: var(--font-size-sm);
+      }
+      /* The title takes its row's outcome colour: green done, amber flagged, red refused. */
+      .events .event-title.auto {
+        color: var(--color-text-success);
+      }
+      .events .event-title.attention {
+        color: var(--color-text-warning);
+      }
+      .events .event-title.danger {
+        color: var(--color-text-danger);
+      }
+      .events .agent {
+        display: inline-flex;
+        color: var(--color-text-brand);
+      }
+      .events .agent svg {
+        width: 12px;
+        height: 12px;
       }
       .events li.broken {
         background: var(--color-bg-danger);
       }
-      .events li.broken::before {
-        background: var(--color-text-danger);
-      }
-      .event-meta {
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-2xs);
-      }
-      .event-meta .agent {
-        display: inline-flex;
-        color: var(--color-text-brand);
-      }
-      .event-meta .agent svg {
-        width: 12px;
-        height: 12px;
-      }
-      .events h4 {
-        font-weight: 400;
-      }
       .tampered {
-        margin-top: var(--spacing-xs);
+        margin: 0 0 var(--spacing-xs);
         color: var(--color-text-danger);
       }
       .requotes li {
@@ -258,9 +382,22 @@ class OrderTimeline extends ViewElement<ViewEntryOf<"order-timeline">> {
     `,
   ];
   readonly entry = viewEntry("order-timeline");
+  declare private ui: TimelineUi;
+
+  constructor() {
+    super();
+    this.ui = COLLAPSED;
+  }
+
+  private readonly act: TimelineActions = {
+    toggleDetails: () => (this.ui = { ...this.ui, details: !this.ui.details }),
+    toggleEntry: (index) =>
+      (this.ui = { ...this.ui, entry: this.ui.entry === index ? null : index }),
+    toggleNote: () => (this.ui = { ...this.ui, note: !this.ui.note }),
+  };
 
   protected override renderDone(order: ViewData<"order-timeline">) {
-    return renderOrderTimeline(order);
+    return renderOrderTimeline(order, this.ui, this.act);
   }
 }
 

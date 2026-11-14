@@ -43,6 +43,11 @@ const en = {
   previousProduct: (name: string) => `Previous product: ${name}`,
   unitPrice: "Unit price:",
   totalLabel: "Total:",
+  entries: (count: number) => `${count} ${count === 1 ? "entry" : "entries"}`,
+  facts: { time: "Time", by: "By", detail: "Detail", note: "Note", rule: "Rule" },
+  entryLabel: (title: string, time: string, actor: string) => `${title}, ${time}, ${actor}`,
+  showMore: "Show more",
+  showLess: "Show less",
 };
 
 const fi: typeof en = {
@@ -83,6 +88,11 @@ const fi: typeof en = {
   previousProduct: (name) => `Aiempi tuote: ${name}`,
   unitPrice: "Yksikköhinta:",
   totalLabel: "Yhteensä:",
+  entries: (count) => `${count} ${count === 1 ? "merkintä" : "merkintää"}`,
+  facts: { time: "Aika", by: "Tekijä", detail: "Lisätieto", note: "Huomio", rule: "Sääntö" },
+  entryLabel: (title, time, actor) => `${title}, ${time}, ${actor}`,
+  showMore: "Näytä lisää",
+  showLess: "Näytä vähemmän",
 };
 
 export const TIMELINE = { en, fi };

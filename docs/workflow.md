@@ -62,8 +62,7 @@ The `gate` workflow runs on pull requests only. It is one job named `gate`, the 
 | Gate   | gate     | Gitleaks scan of Git history, types, format, lint, unused code, duplication, migration |
 |        |          | consistency and the full test suite against disposable PostgreSQL                      |
 | Build  | deploy   | Build, push and verify the API and chat images in two parallel jobs                    |
-| Turn   | deploy   | Wait until every earlier main pipeline has finished                                    |
-| Deploy | deploy   | Deploy both digests with production-only credentials and verify health                 |
+| Deploy | deploy   | Wait in the deploy queue, then deploy both digests and verify health                   |
 | Smoke  | deploy   | Run each deployed image on the runner and check its runtime; off by default            |
 
 All jobs run on the self-hosted Vultr runners with the labels `self-hosted`, `linux`, `x64` and `junction-ci`, because the account has no GitHub-hosted minutes left. The runners are persistent and privileged: a pull request from any collaborator runs on the same machines as the deployment job. The deployment job removes its SSH key when it ends. Gates never deploy. Every push to main builds and deploys without a gate on the merged commit. The PR gate is the only code check.

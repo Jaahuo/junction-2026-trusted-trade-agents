@@ -116,33 +116,12 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-  turn:
-    needs: [api, chat]
-    runs-on: [self-hosted, linux, x64, junction-ci]
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      actions: read
-    outputs:
-      deploy: ${{ steps.turn.outputs.deploy }}
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
-      - name: Wait for every earlier main pipeline to finish
-        id: turn
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: bun scripts/ci-deploy-turn.ts
-
   deploy:
-    needs: [api, chat, turn]
-    if: needs.turn.outputs.deploy == 'true'
+    needs: [api, chat]
     concurrency:
       group: deploy-production
       cancel-in-progress: false
+      queue: max
     runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 15
     environment: production
@@ -165,7 +144,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: bun scripts/ci-deploy-turn.ts --no-wait
+        run: bun scripts/ci-deploy-stale.ts
       - name: Deploy verified digest
         id: deploy
         if: steps.fresh.outputs.deploy == 'true'

@@ -79,6 +79,11 @@ The server publishes the offer signing key set at `/.well-known/jwks.json`.
 
 ## Demo host
 
+Open [the hosted chat](https://chat.199-247-4-99.sslip.io) and sign in as `chef@localhost.invalid`.
+Ask the operator for the password. Select Acme Kitchens or Acme Bakery.
+The Chef account is a restricted buyer, not an administrator.
+See [Open WebUI setup](docs/openwebui.md) for account provisioning.
+
 The owner chose Open WebUI with voice for the demo, with human approval on the in-chat card and the phone approval page as fallback ([#44](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44)).
 In a historical Open WebUI 0.13.3 spike, voice called `search_products` and the search view rendered. The approval link was not tested in that run.
 These results do not establish support in other hosts or for the complete current approval flow. See [host support](docs/host-support.md) for measured results and limits.

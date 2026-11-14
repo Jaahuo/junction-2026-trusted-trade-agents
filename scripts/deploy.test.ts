@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { $ } from "bun";
 import {
   CHAT_SERVICE,
+  CHAT_SYNC_EXCLUDES,
   chatEnv,
   chatSettings,
   deployEnv,
@@ -357,4 +359,19 @@ test("deployWarning warns only when the latest completed deploy of main failed",
   expect(deployWarning([{ conclusion: "failure" }])).toBe(
     "Warning: the latest deploy of main (?) ended in failure, so the hosted demo may be stale. See the deploy workflow.",
   );
+});
+
+test("the chat sync passes its exclude patterns to rsync without glob expansion", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-sync-"));
+  try {
+    const args = await $`printf '%s\n' ${CHAT_SYNC_EXCLUDES}`.cwd(dir).text();
+    expect(args.trim().split("\n")).toEqual([
+      "--exclude=.env",
+      "--exclude=.env.*",
+      "--exclude=__pycache__",
+      "--exclude=*.pyc",
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

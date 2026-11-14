@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Order } from "@app/contract";
+import { fixtures, type Order } from "@app/contract";
 import type { AnyElysia } from "elysia";
 import { mountWithOffers } from "./fake-offers.ts";
 import { withDatabase } from "./test-database.ts";
@@ -24,6 +24,13 @@ const pendingOrder = async (app: AnyElysia, offers: string[]) => {
 };
 
 const events = (order: Order) => order.audit.map(({ actor, event }) => `${actor}:${event}`);
+
+/** The date `days` after `base`, both YYYY-MM-DD. */
+const day = (base: string, days: number) => {
+  const date = new Date(`${base}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
 
 test("an expired pending offer is re-quoted on approve; same or lower price replaces it with requoted", async () =>
   withDatabase(async (db) => {
@@ -114,4 +121,62 @@ test("a re-quote at approval that offers cannot answer gives 502 and the order s
     expect(stored.status).toBe("pending_approval");
     expect(stored.proposalVersion).toBe(pending.proposalVersion);
     expect((await counts(db)).history).toBe(0);
+  }));
+
+test("a re-quote at a higher price stays pending even when the order already listed PRICE_CHANGED and SPEND_OVER_LIMIT", async () =>
+  withDatabase(async (db) => {
+    const { app, clock, sign, offers } = await mountWithOffers(db);
+    const pending = await pendingOrder(app, [await sign(overLimit, inMinutes(10))]);
+    expect(pending.reasons).toContain("SPEND_OVER_LIMIT");
+    clock.now = inMinutes(10);
+    offers.state.price = 1.2;
+    const second = await orderOf(await approve(app, pending));
+    expect(second.status).toBe("pending_approval");
+    expect(second.reasons).toEqual(expect.arrayContaining(["SPEND_OVER_LIMIT", "PRICE_CHANGED"]));
+
+    // The re-quoted offers expire too, and the next re-quote is higher again.
+    clock.now = inMinutes(21);
+    offers.state.price = 1.5;
+    const response = await approve(app, second);
+    expect(response.status).toBe(200);
+    const third = await orderOf(response);
+    expect(third.status).toBe("pending_approval");
+    expect(third.reasons).toContain("PRICE_CHANGED");
+    expect(third.proposalVersion).toBe(second.proposalVersion + 1);
+    expect(third.requotes).toHaveLength(2);
+    expect(events(third)).not.toContain("approver:approved");
+    expect(third.receipt).toBeUndefined();
+    expect((await counts(db)).history).toBe(0);
+  }));
+
+test("a re-quote with a later delivery date stays pending with AVAILABILITY_DIFFERS even when the order was already late", async () =>
+  withDatabase(async (db) => {
+    const { app, clock, sign, offers } = await mountWithOffers(db);
+    const requested = fixtures.offerClaims.requestedDate;
+    const pending = await pendingOrder(app, [
+      await sign({ ...overLimit, deliveryDate: day(requested, 1) }, inMinutes(10)),
+    ]);
+    expect(pending.reasons).toContain("AVAILABILITY_DIFFERS");
+    clock.now = inMinutes(10);
+    offers.state.deliveryDate = day(requested, 3);
+
+    const order = await orderOf(await approve(app, pending));
+    expect(order.status).toBe("pending_approval");
+    expect(order.reasons).toContain("AVAILABILITY_DIFFERS");
+    expect(order.proposalVersion).toBe(pending.proposalVersion + 1);
+    expect(events(order)).not.toContain("approver:approved");
+    expect((await counts(db)).history).toBe(0);
+  }));
+
+test("a re-quote at a lower price on the same terms is placed", async () =>
+  withDatabase(async (db) => {
+    const { app, clock, sign, offers } = await mountWithOffers(db);
+    const pending = await pendingOrder(app, [await sign(overLimit, inMinutes(10))]);
+    clock.now = inMinutes(10);
+    offers.state.price = 0.9;
+
+    const order = await orderOf(await approve(app, pending));
+    expect(order.status).toBe("placed");
+    expect(order.total.gross).toBeLessThan(pending.total.gross);
+    expect(order.reasons).not.toContain("PRICE_CHANGED");
   }));

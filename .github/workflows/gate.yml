@@ -51,7 +51,15 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
       - run: bun install --frozen-lockfile
-      - run: bun test
+      - name: Run tests in an isolated process namespace
+        run: |
+          sudo --preserve-env=PATH,HOME,DATABASE_URL,TEST_DATABASE_URL,MISE_LOG_LEVEL,MISE_TRUSTED_CONFIG_PATHS,MISE_YES \
+            /usr/bin/unshare --mount --propagation private --pid --fork \
+            /bin/sh -eu -c '
+              /usr/bin/umount --recursive /proc
+              /usr/bin/mount --types proc proc /proc
+              exec /usr/bin/setpriv --reuid="$1" --regid="$2" --init-groups bun test
+            ' sh "$(id -u)" "$(id -g)"
 
   secrets:
     runs-on: ubuntu-24.04

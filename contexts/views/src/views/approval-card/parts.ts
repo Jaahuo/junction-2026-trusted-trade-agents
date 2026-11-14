@@ -61,8 +61,8 @@ export const icon = (svg: string, label?: string) =>
   >`;
 
 /**
- * The petrol header: logo with the eyebrow (or, v17, a yellow status pill), then a title row
- * and optional facts.
+ * The petrol header: logo with the eyebrow (or, v17, a yellow status pill; or nothing when the
+ * eyebrow is empty), then a title row and optional facts.
  */
 export const brandHeader = (
   eyebrow: string,
@@ -76,8 +76,10 @@ export const brandHeader = (
       ${
         pill
           ? html`<span class="pill" part="status">${icon(attention16)}${eyebrow}</span>`
-          : html`<span class="divider" aria-hidden="true"></span>
-              <p class="label-small eyebrow">${eyebrow}</p>`
+          : eyebrow === ""
+            ? nothing
+            : html`<span class="divider" aria-hidden="true"></span>
+                <p class="label-small eyebrow">${eyebrow}</p>`
       }
     </div>
     ${title ?? nothing} ${facts ?? nothing}
@@ -139,7 +141,7 @@ export const cardStyles = css`
     gap: var(--spacing-xs);
     padding: var(--spacing-xs) var(--spacing-md) var(--spacing-xs) var(--spacing-sm);
     border-radius: var(--radius-full);
-    background: var(--color-yellow-aimo);
+    background: var(--color-bg-attention);
     color: var(--color-text);
     font-size: var(--font-size-2xs);
     font-weight: 700;

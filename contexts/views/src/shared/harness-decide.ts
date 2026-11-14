@@ -1,4 +1,10 @@
-import { type DecideApprovalInput, type Order, OrderSchema } from "@app/contract";
+import {
+  type DecideApprovalInput,
+  fixtures,
+  type Order,
+  OrderSchema,
+  type StoredMandate,
+} from "@app/contract";
 
 // The harness has no server, so it plays the decision locally to let a tester walk a flow:
 // approve and pick place the order, reject records it, edit makes a new version of the order.
@@ -21,6 +27,19 @@ const scaled = (line: Order["lines"][number], value: number) => {
     },
   };
 };
+
+/** The harness's mandate: an order limit the over-limit fixtures break and can be brought under. */
+export const HARNESS_MANDATE: StoredMandate = {
+  ...fixtures.storedMandate,
+  mandate: {
+    ...fixtures.storedMandate.mandate,
+    limits: {
+      ...fixtures.storedMandate.mandate.limits,
+      maxOrderTotal: { value: 1700, currency: "EUR", basis: "gross" },
+    },
+  },
+};
+const LIMIT = HARNESS_MANDATE.mandate.limits.maxOrderTotal.value;
 
 /** The order after `input`, as the harness shows it. */
 export function harnessDecide(order: Order, input: DecideApprovalInput, at: string): Order {
@@ -56,9 +75,14 @@ export function harnessDecide(order: Order, input: DecideApprovalInput, at: stri
         const value = change?.quantity?.value ?? l.claims.quantity.value;
         return value === 0 ? [] : [value === l.claims.quantity.value ? l : scaled(l, value)];
       });
+      // The new quote checks the limit again; the other reasons stay.
+      const reasons = order.reasons.filter(
+        (r) => r !== "SPEND_OVER_LIMIT" || total(lines).gross > LIMIT,
+      );
       return OrderSchema.parse({
         ...order,
         lines,
+        reasons,
         offerIds: lines.map((l) => l.offerId),
         total: total(lines),
         proposalVersion: order.proposalVersion + 1,

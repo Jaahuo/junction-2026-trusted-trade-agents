@@ -1,6 +1,30 @@
 import { describe, expect, test } from "bun:test";
 import { DemoProductsSchema } from "../packages/contract/src/index.ts";
-import { mapRow, validateCandidates } from "./check-demo-data";
+import {
+  isLate,
+  isShortWithSubstitute,
+  mapRow,
+  parseArgs,
+  salesUnits,
+  validateCandidates,
+} from "./check-demo-data";
+
+const row = (overrides: Partial<Parameters<typeof isShortWithSubstitute>[0]["row"]> = {}) => ({
+  productId: "synthetic",
+  amount: 10,
+  date: "2026-11-16",
+  stock: "confirmed" as const,
+  net: 1,
+  gross: 2,
+  comparison: null,
+  comparisonUnit: null,
+  volume: null,
+  substitutes: ["synthetic-sub"],
+  ...overrides,
+});
+const substitute = row({ productId: "synthetic-sub", substitutes: [] });
+const check = (r: ReturnType<typeof row>, units: number, substitutes = [substitute]) =>
+  isShortWithSubstitute({ row: r, units, substitutes, date: "2026-11-16" });
 
 describe("demo data checker", () => {
   test("maps a recorded availability and price response in the documented shape to a row with amount, date, stock and net price", () => {
@@ -84,5 +108,42 @@ describe("demo data checker", () => {
         s2: { ...scenario, quantity: { value: "20", unit: "LTR" } },
       }).success,
     ).toBe(false);
+  });
+
+  test("S3 holds for confirmed stock below the request with an orderable substitute under the credit limit", () => {
+    expect(check(row(), 12)).toBe(true);
+  });
+
+  test("S3 fails for enough stock, unlimited stock, no orderable substitute or a total over the credit limit", () => {
+    expect(check(row(), 10)).toBe(false);
+    expect(check(row({ amount: 999999, stock: "unconfirmed" }), 12)).toBe(false);
+    expect(check(row({ amount: 9999999999 }), 12)).toBe(false);
+    expect(check(row(), 12, [])).toBe(false);
+    expect(check(row(), 12, [{ ...substitute, gross: null }])).toBe(false);
+    expect(check(row(), 12, [{ ...substitute, date: "2026-11-17" }])).toBe(false);
+    expect(check(row({ gross: 500 }), 12)).toBe(false);
+    expect(check(row({ substitutes: [] }), 12)).toBe(false);
+  });
+
+  test("LATE holds only when the first open date is after the requested date", () => {
+    expect(isLate({ date: "2026-11-17" }, "2026-11-16")).toBe(true);
+    expect(isLate({ date: "2026-11-16" }, "2026-11-16")).toBe(false);
+    expect(isLate({ date: null }, "2026-11-16")).toBe(false);
+  });
+
+  test("salesUnits passes the sales unit through and converts litres by volume", () => {
+    expect(salesUnits({ value: 7, unit: "ST" }, { volume: null }, "ST")).toBe(7);
+    expect(salesUnits({ value: 20, unit: "LTR" }, { volume: 2 }, "KI")).toBe(10);
+    expect(salesUnits({ value: 1, unit: "KGM" }, { volume: null }, "ST")).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+  });
+
+  test("parseArgs takes a date and an optional id list, and rejects anything else", () => {
+    expect(parseArgs(["--date", "2026-11-16"]).date).toBe("2026-11-16");
+    expect(parseArgs(["--date", "2026-11-16", "--ids", "a,b"]).ids).toEqual(["a", "b"]);
+    expect(() => parseArgs(["--date", "16.11.2026"])).toThrow("Usage");
+    expect(() => parseArgs(["--date"])).toThrow("Usage");
+    expect(() => parseArgs(["--other", "x", "--date", "2026-11-16"])).toThrow("Usage");
   });
 });

@@ -172,6 +172,13 @@ To introduce another wholesaler:
 3. Keep the web app and view consumers on that shared skin and brand data.
 4. Update the tables in this document to match the new skin.
 
+## Open WebUI host
+
+The external Open WebUI host uses its native elements and custom stylesheet hook, not `@app/ui`.
+Its Acme theme tokens, local fonts and responsive rules live in `hosts/openwebui/branding/custom.css`.
+These styles do not change the application or MCP view tokens.
+Keep upstream identity and license notices intact.
+
 ## Guidelines
 
 1. Use one primary action per view. Use secondary or ghost actions for the rest.

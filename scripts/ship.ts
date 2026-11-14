@@ -209,6 +209,22 @@ async function readPull() {
   }
 }
 
+/**
+ * A teammate's "Update branch" on GitHub pushes a merge of main onto the PR. Adopt that head when it
+ * only adds main on top of ours, keeping the PR's own change identical; anything else stops ship.
+ */
+async function adoptRemoteMerge(remote: string): Promise<boolean> {
+  await command("git", "fetch", "origin", "main", `refs/heads/${branch}`);
+  const descends = (await git("merge-base", "--is-ancestor", head, remote)).ok;
+  if (!descends) return false;
+  const main = await command("git", "rev-parse", "origin/main");
+  if (!(await equivalentHeads({ head: remote, main, reviewed: [head] })).length) return false;
+  await command("git", "merge", "--ff-only", remote);
+  head = remote;
+  console.log(`Adopted ${head.slice(0, 7)}: GitHub merged main into the branch.`);
+  return true;
+}
+
 let pull = await readPull();
 for (let attempt = 1; ; attempt++) {
   if (attempt > 6)
@@ -222,6 +238,7 @@ for (let attempt = 1; ; attempt++) {
   }
   await waitForGate(head);
   pull = await readPull();
+  if (pull.head.sha !== head && (await adoptRemoteMerge(pull.head.sha))) continue;
   if (pull.head.sha === head) {
     await command("git", "fetch", "origin", "main");
     if (risk === "ordinary") break;

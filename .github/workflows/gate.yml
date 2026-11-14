@@ -134,7 +134,12 @@ jobs:
           trap 'docker logs gate-smoke; docker rm -f gate-smoke; rm -f "$RUNNER_TEMP/image.env"' EXIT
           docker run --detach --name gate-smoke --network host --env-file "$RUNNER_TEMP/image.env" "gate-image:$GITHUB_SHA"
           curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --max-time 2 http://127.0.0.1:3000/api/health
-          test "$(docker exec gate-smoke id -u)" = 1000
+          docker exec gate-smoke /usr/local/bin/bun -e '
+            if (process.getuid() !== 1000) throw new Error("Expected runtime UID 1000");
+            for (const path of ["/bin/sh", "/bin/bash", "/sbin/apk", "/usr/bin/apt", "/usr/bin/apt-get"]) {
+              if (await Bun.file(path).exists()) throw new Error(`Unexpected runtime tool: ${path}`);
+            }
+          '
       - name: Scan final image
         run: |
           /tmp/trivy image --input evidence/image.tar --scanners vuln --pkg-types os,library --file-patterns 'node-pkg:node_modules/\.bun/.*/package\.json$' --format cyclonedx --output evidence/sbom.cdx.json

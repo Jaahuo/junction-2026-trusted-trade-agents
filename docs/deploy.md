@@ -52,9 +52,11 @@ Create infrastructure only for a new deployment:
 tofu -chdir=infra apply
 ```
 
-The image targets `linux/amd64`. Its build uses Bun 1.4.3 and Node 24.22.2. Its runtime uses Bun 1.4.3 on Alpine with pinned security updates. It installs production dependencies without automatic peer dependencies. Each runtime dependency must be declared explicitly; build tools stay in the build stage. It contains the application, migrations, fixtures, skill assets, built web app and views. It must not contain challenge data or secrets. Keep the GHCR package private.
+The image targets `linux/amd64`. Its build uses Bun 1.4.3 and Node 24.22.2. Its runtime uses the digest-pinned official Bun 1.4.3 distroless image as UID 1000. It has no OS shell or package manager. A separate stage installs production dependencies without automatic peer dependencies. Each runtime dependency must be declared explicitly; build tools stay outside the runtime. The final stage copies the application, migrations, fixtures, skill assets and built web/view assets. It excludes the unused compiled API binary and build-stage dependencies. It must not contain challenge data or secrets. Keep the GHCR package private.
 
 The root manifest declares Elysia's required peers (`typebox`, `exact-mirror` and `openapi-types`) explicitly. Knip excludes these declarations because Elysia consumes them indirectly. Do not remove them as unused packages. The image gate starts the production container against disposable PostgreSQL before it records release evidence.
+
+The image gate uses Bun to verify the runtime UID and the absence of common shells and package managers. It does not depend on `sh` or `id` inside the container. Use `docker exec trusted-trade /usr/local/bin/bun -e 'console.log(process.getuid())'` to inspect the UID. Rebuild the image for dependency or OS updates; do not install tools into the running container.
 
 For a manual deploy, select a published digest from a successful deployment record. Obtain a GitHub token with `read:packages` access. Enter the token without echoing it. The deploy script passes it to the host through standard input, not as a command argument. Verify the host's SSH fingerprint through the provider console before adding it to `~/.ssh/known_hosts`.
 

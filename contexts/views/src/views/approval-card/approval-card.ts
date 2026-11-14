@@ -263,6 +263,71 @@ export class ApprovalCard extends LitElement {
       .more-products[aria-expanded="true"] .icon {
         transform: rotate(180deg);
       }
+      .products-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-sm);
+      }
+      .link-button {
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--color-link);
+        font: inherit;
+        font-size: var(--font-size-xs);
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .product.flagged {
+        gap: var(--spacing-md);
+        margin: var(--spacing-md) 0;
+        padding: var(--spacing-lg);
+        border: 2px solid var(--color-border-brand);
+      }
+      .agent-help {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-sm);
+      }
+      .option {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: var(--spacing-md);
+        align-items: start;
+        padding: var(--spacing-md) var(--spacing-lg);
+        border-left: 4px solid var(--color-border-brand);
+        background: var(--color-bg-brand-subtle);
+      }
+      .radio {
+        width: 18px;
+        height: 18px;
+        margin-top: 2px;
+        border: 2px solid var(--color-border-brand);
+        border-radius: var(--radius-full);
+        background: var(--color-border-brand);
+        box-shadow: inset 0 0 0 3px var(--color-white);
+      }
+      .option-facts {
+        display: flex;
+        gap: var(--spacing-lg);
+        margin-top: var(--spacing-xs);
+      }
+      .recommended {
+        padding: var(--spacing-2xs) var(--spacing-sm);
+        border-radius: var(--radius-full);
+        background: var(--color-bg-success);
+        color: var(--color-text-success);
+      }
+      .talk {
+        align-self: flex-start;
+      }
+      .details-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--spacing-lg);
+      }
       .ordered-for {
         display: flex;
         flex-direction: column;
@@ -532,11 +597,12 @@ export class ApprovalCard extends LitElement {
     </section>`;
   }
 
-  /** For an order over the limit, one sentence on what approving means. */
+  /** The hint above the order-level agent help (v17), for an order over the limit. */
   private guidance(order: Order) {
     return order.reasons.includes("SPEND_OVER_LIMIT")
       ? html`<p class="body-small">
-          Approve the order as it is, or reject it so the agent can change it.
+          Edit products yourself, let the agent get it under the limit, or approve the order as it
+          is.
         </p>`
       : nothing;
   }
@@ -587,39 +653,146 @@ export class ApprovalCard extends LitElement {
     return null;
   }
 
+  /**
+   * v17 agent help: a ready prompt button and option chips. Display only for now: sending
+   * the prompt to the chat (MCP Apps sendMessage) is not wired yet.
+   */
+  private agentHelp(label: string, chips: string[]) {
+    return html`<div class="agent-help" part="agent-help">
+      <button type="button" class="btn secondary">${label}</button>
+      <p class="label-small secondary">Or tell it what to do:</p>
+      <div class="chips">
+        ${chips.map((chip) => html`<button type="button" class="chip">${chip}</button>`)}
+      </div>
+    </div>`;
+  }
+
+  /** The order-level agent help for the issue that applies to the whole order (v17). */
+  private orderHelp(order: Order) {
+    if (order.reasons.includes("SPEND_OVER_LIMIT"))
+      return this.agentHelp("Let the agent reduce it", [
+        "Remove the least needed",
+        "Choose cheaper brands",
+        "Order less of each",
+      ]);
+    if (order.reasons.some((r) => REQUOTE.has(r)))
+      return this.agentHelp("Let the agent find a better offer", [
+        "Keep the earlier delivery",
+        "Find a cheaper one",
+        "Remove the changed product",
+      ]);
+    if (order.reasons.includes("NEW_PRODUCT"))
+      return html`<p class="body-small">
+          Confirm the order to include the new product, or remove it with Edit products.
+        </p>
+        ${this.agentHelp("Let the agent find another", ["Use our usual product", "Remove it"])}`;
+    return nothing;
+  }
+
+  /** The decision block of a flagged product: its choices and agent help (v17). */
+  private lineDecision(order: Order, c: OfferClaims) {
+    const others = order.alternatives.length;
+    const otherChoices =
+      others === 0
+        ? nothing
+        : html`<button type="button" class="more-products">
+            Other choices (${others})${icon(chevronDown)}
+          </button>`;
+    if (c.replaces !== null)
+      return html`${otherChoices}
+      ${this.agentHelp("Let the agent find another", [
+        "Same brand only",
+        "Cheapest option",
+        ...(c.nextDeliveryDate === null ? [] : [`Wait until ${day(c.nextDeliveryDate)}`]),
+      ])}`;
+    if (c.shortfall === null) return nothing;
+    const pack = c.product.perSalesUnit;
+    const later = c.nextDeliveryDate;
+    const packs = (q: number) => (pack === null ? amount(c.quantity) : `${number(q)} packs`);
+    const missing = pack === null ? c.shortfall.value : Math.round(c.shortfall.value / pack.value);
+    return html`<h4 class="section-title">How to handle the missing ${amount(c.shortfall)}</h4>
+      ${
+        later === null
+          ? nothing
+          : html`<div class="option" part="option">
+              <span class="radio" aria-hidden="true"></span>
+              <div>
+                <p>Split delivery</p>
+                <dl class="option-facts body-small">
+                  <div>
+                    <dt class="label-small secondary">${day(c.deliveryDate)}</dt>
+                    <dd>${packs(c.quantity.value)}</dd>
+                  </div>
+                  <div>
+                    <dt class="label-small secondary">${day(later)}</dt>
+                    <dd>${packs(missing)}</dd>
+                  </div>
+                </dl>
+              </div>
+              <span class="recommended label-small">Recommended</span>
+            </div>`
+      }
+      ${otherChoices}
+      ${this.agentHelp("Let the agent sort it out", [
+        ...(later === null ? [] : [`All on ${day(later)}`]),
+        `Only ${packs(c.quantity.value)}`,
+        "Another product",
+      ])}`;
+  }
+
+  private productLine(order: Order, c: OfferClaims, flagged: boolean) {
+    const note = this.lineNote(order, c);
+    const pack = c.product.perSalesUnit;
+    return html`<li
+      class="product ${flagged ? "flagged" : ""}"
+      id="line-${c.offerId}"
+      tabindex="-1"
+    >
+      <p class="product-top">
+        <span class="product-name">${c.product.name}</span><span>${money(c.total.net)}</span>
+      </p>
+      <p class="product-amounts body-small">
+        <span>${amount(stdUnits(c))}</span>
+        ${
+          pack === null
+            ? nothing
+            : html`<span class="secondary">${number(c.quantity.value)} × ${amount(pack)}</span>`
+        }
+      </p>
+      ${
+        note === null
+          ? nothing
+          : html`<p class="product-note ${note.warning ? "warning" : ""}">
+              ${icon(note.warning ? info16Warning : info16)}${note.text}
+            </p>`
+      }
+      ${flagged ? this.lineDecision(order, c) : nothing}
+    </li>`;
+  }
+
+  /** v17 products: flagged lines first and always shown; ready lines collapse after three. */
   private products(order: Order) {
+    const pending = order.status === "pending_approval";
     const all = order.lines.map((l) => l.claims);
-    const visible = this.allProducts ? all : all.slice(0, SHOWN);
-    const hidden = all.length - SHOWN;
+    const isFlagged = (c: OfferClaims) => pending && (c.replaces !== null || c.shortfall !== null);
+    const flagged = all.filter(isFlagged);
+    const ready = all.filter((c) => !isFlagged(c));
+    const visible = this.allProducts ? ready : ready.slice(0, SHOWN);
+    const hidden = ready.length - SHOWN;
     return html`<section part="products" id="products" tabindex="-1">
-      <h3 class="section-title">Products</h3>
+      <div class="products-head">
+        <h3 class="section-title">Products</h3>
+        ${
+          pending
+            ? html`<button type="button" class="link-button" part="edit-products">
+                Edit products
+              </button>`
+            : nothing
+        }
+      </div>
       <ul class="product-list">
-        ${visible.map((c) => {
-          const note = this.lineNote(order, c);
-          const pack = c.product.perSalesUnit;
-          return html`<li class="product" id="line-${c.offerId}" tabindex="-1">
-            <p class="product-top">
-              <span class="product-name">${c.product.name}</span><span>${money(c.total.net)}</span>
-            </p>
-            <p class="product-amounts body-small">
-              <span>${amount(stdUnits(c))}</span>
-              ${
-                pack === null
-                  ? nothing
-                  : html`<span class="secondary"
-                      >${number(c.quantity.value)} × ${amount(pack)}</span
-                    >`
-              }
-            </p>
-            ${
-              note === null
-                ? nothing
-                : html`<p class="product-note ${note.warning ? "warning" : ""}">
-                    ${icon(note.warning ? info16Warning : info16)}${note.text}
-                  </p>`
-            }
-          </li>`;
-        })}
+        ${flagged.map((c) => this.productLine(order, c, true))}
+        ${visible.map((c) => this.productLine(order, c, false))}
       </ul>
       ${
         hidden > 0
@@ -667,7 +840,8 @@ export class ApprovalCard extends LitElement {
 
   private pendingBody(order: Order) {
     return html`${this.todoBox(order)} ${this.guidance(order)} ${this.whatChanged(order)}
-      ${this.products(order)} ${this.orderedFor(order)} ${this.openUntil(order)}
+      ${this.orderHelp(order)} ${this.products(order)} ${this.orderedFor(order)}
+      ${this.openUntil(order)}
       <div class="actions" part="actions">
         <button
           part="button approve"
@@ -687,7 +861,8 @@ export class ApprovalCard extends LitElement {
         >
           Reject
         </button>
-      </div>`;
+      </div>
+      <button type="button" class="btn ghost talk" part="button talk">Talk to the agent</button>`;
   }
 
   private rejectBody(order: Order) {
@@ -797,54 +972,45 @@ export class ApprovalCard extends LitElement {
       ${this.products(order)} ${this.orderedFor(order)}`;
   }
 
+  /** v17 "More details": a disclosure at the bottom of every card, collapsed by default. */
   private details(order: Order) {
-    const claims = order.lines[0]?.claims;
-    const pending = order.status === "pending_approval";
     const verified = order.audit.some((e) => e.event === "offer_verified");
-    const alternatives = order.alternatives.length;
-    const replaced = order.requotes.at(-1)?.previous.offerId;
+    const open = this.detailsOpen;
+    const log =
+      order.approvalUrl === null
+        ? null
+        : `${new URL(order.approvalUrl).origin}/views/order-timeline?order=${encodeURIComponent(order.orderId)}`;
     return html`<aside class="details" part="details">
       <button
         class="toggle body-small"
-        aria-expanded=${this.detailsOpen ? "true" : "false"}
+        aria-expanded=${open ? "true" : "false"}
         aria-controls="details-body"
-        @click=${() => (this.detailsOpen = !this.detailsOpen)}
+        @click=${() => (this.detailsOpen = !open)}
       >
-        <span class="more">More details</span>${icon(chevronDown)}
-        <span class="hint">Offer and signature</span>
+        <span class="more">${open ? "Fewer details" : "More details"}</span>${icon(chevronDown)}
+        ${open ? nothing : html`<span class="hint">Offer and signature</span>`}
       </button>
-      <div id="details-body" class="details-body ${this.detailsOpen ? "open" : ""}">
-        <div class="group">
-          <h3 class="body-small strong">Why this option</h3>
+      <div id="details-body" class="details-body ${open ? "open" : ""}">
+        <section class="group">
+          <h3 class="section-title">Your request</h3>
+          ${order.originalRequest === null ? nothing : html`<p>“${order.originalRequest}”</p>`}
           ${rows([
-            ["Request", order.originalRequest === null ? null : `“${order.originalRequest}”`],
-            [
-              "Alternatives",
-              alternatives === 0
-                ? "None offered"
-                : `${alternatives} more option${alternatives === 1 ? "" : "s"}`,
-            ],
+            ["Sent", when(new Date(order.createdAt))],
+            ["Sent by", order.agentId],
           ])}
-        </div>
-        <div class="group">
-          <h3 class="body-small strong">Offer and signature</h3>
+        </section>
+        <section class="group">
+          <h3 class="section-title">Offer</h3>
           ${rows([
-            ["Requested by", order.agentId],
-            ["Offer IDs", order.offerIds.join(", ")],
-            [
-              "Replaces",
-              replaced !== undefined && !order.offerIds.includes(replaced) ? replaced : null,
-            ],
-            ["Signature", verified ? "✓ Verified" : null],
-            ["Requested at", when(new Date(order.createdAt))],
-            pending
-              ? ["Valid until", claims === undefined ? null : when(new Date(claims.exp * 1000))]
-              : ["Decided at", order.decision === null ? null : when(new Date(order.decision.at))],
+            ["Offer no.", order.offerIds.join(", ")],
+            ["Signature", verified ? "Verified by Valio Aimo" : "Not verified"],
           ])}
+        </section>
+        <p class="details-links body-small">
+          ${log === null ? nothing : html`<a href=${log} target="_blank" rel="noreferrer">View full log</a>`}
           ${
-            pending && order.approvalUrl !== null
+            order.status === "pending_approval" && order.approvalUrl !== null
               ? html`<a
-                  class="body-small"
                   part="approval-link"
                   href=${order.approvalUrl}
                   target="_blank"
@@ -853,7 +1019,7 @@ export class ApprovalCard extends LitElement {
                 >`
               : nothing
           }
-        </div>
+        </p>
       </div>
     </aside>`;
   }

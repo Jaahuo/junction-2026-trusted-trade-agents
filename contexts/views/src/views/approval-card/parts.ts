@@ -128,8 +128,9 @@ export const cardStyles = css`
     align-items: center;
     gap: var(--spacing-md);
   }
+  /* v17 dev notes: logo left, status pill right. */
   .eyebrow-row.spread {
-    gap: var(--spacing-lg);
+    justify-content: space-between;
   }
   .pill {
     display: inline-flex;

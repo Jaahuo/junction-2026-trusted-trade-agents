@@ -407,7 +407,10 @@ describe("getOffers", () => {
     const second = valueOf(
       await getOffers(setup.deps, principal, request({ lines: [line(OAT, 6)] })),
     );
-    expect(setup.live.calls).toHaveLength(calls);
+    expect(setup.live.calls.slice(calls).map((call) => call.kind)).toEqual([
+      "availability",
+      "availability",
+    ]);
     expect(
       second.offers.find((offer) => offer.claims.replaces === OAT)?.claims.quantity.value,
     ).toBe(4);
@@ -652,56 +655,161 @@ describe("getOffers", () => {
     expect(setup.orders.calls).toEqual(["fake.off_test_1", "fake.off_test_2"]);
   });
 
-  test("a second request within validTo makes no upstream call", async () => {
+  test("a second request within the price cache life reads availability again and the price from the cache", async () => {
     const setup = fakeOffersDeps({ products: [fakeProduct(OAT)], live: quoted(OAT) });
 
     const first = valueOf(await getOffers(setup.deps, principal, request()));
-    const callsAfterFirst = setup.live.calls.length;
-    setup.clock.set("2026-11-18T07:59:59Z");
+    setup.clock.set("2026-11-14T10:04:59Z");
     const second = valueOf(await getOffers(setup.deps, principal, request()));
 
-    expect(callsAfterFirst).toBe(2);
-    expect(setup.live.calls).toHaveLength(2);
+    expect(setup.live.calls.map((call) => call.kind)).toEqual([
+      "availability",
+      "prices",
+      "availability",
+    ]);
     expect(second.offers[0]?.claims.unitPrice).toEqual(first.offers[0]?.claims.unitPrice);
     expect(setup.signer.signed).toHaveLength(2);
   });
 
-  test("a cached quote is not served after validTo, and after cutoffAt it gives NO_DELIVERY_DATE without an upstream call", async () => {
-    const stale = fakeOffersDeps({
-      products: [fakeProduct(OAT)],
-      live: quoted(
-        OAT,
-        { cutoffAt: "2026-11-18T00:00:00+00:00" },
-        { validTo: "2026-11-16T10:00:00+00:00" },
-      ),
-    });
-    valueOf(await getOffers(stale.deps, principal, request()));
-    stale.clock.set("2026-11-16T10:00:00Z");
-    valueOf(await getOffers(stale.deps, principal, request()));
+  test("a second get_offers after the cache life reads availability and the price again", async () => {
+    const setup = fakeOffersDeps({ products: [fakeProduct(OAT)], live: quoted(OAT) });
 
-    expect(stale.live.calls.map((call) => call.kind)).toEqual([
+    valueOf(await getOffers(setup.deps, principal, request()));
+    setup.clock.set("2026-11-14T10:05:00Z");
+    valueOf(await getOffers(setup.deps, principal, request()));
+
+    expect(setup.live.calls.map((call) => call.kind)).toEqual([
       "availability",
       "prices",
       "availability",
       "prices",
     ]);
+  });
 
-    const cut = fakeOffersDeps({
-      products: [fakeProduct(OAT)],
-      live: quoted(
-        OAT,
-        { cutoffAt: "2026-11-16T10:00:00+00:00" },
-        { validTo: "2026-11-18T00:00:00+00:00" },
-      ),
-    });
-    valueOf(await getOffers(cut.deps, principal, request()));
-    cut.clock.set("2026-11-16T10:00:00Z");
-    const afterCutoff = valueOf(await getOffers(cut.deps, principal, request()));
+  test("availability is never served from the cache past the cut-off", async () => {
+    const live = quoted(OAT, { cutoffAt: "2026-11-14T10:02:00+00:00" });
+    const setup = fakeOffersDeps({ products: [fakeProduct(OAT)], live });
 
-    expect(cut.live.calls).toHaveLength(2);
+    valueOf(await getOffers(setup.deps, principal, request()));
+    setup.clock.set("2026-11-14T10:02:00Z");
+    const afterCutoff = valueOf(await getOffers(setup.deps, principal, request()));
+
     expect(afterCutoff.offers).toEqual([]);
     expect(reasons(afterCutoff.omitted)).toEqual({ [OAT]: "NO_DELIVERY_DATE" });
-    expect(cut.signer.signed).toHaveLength(1);
+
+    // The cached price expired at the cut-off, so each call after it reads availability and the price live.
+    const next = live[OAT];
+    if (next === undefined) throw new Error("expected live data");
+    next.availability = { "*": fakeAvailability(OAT, { cutoffAt: "2026-11-15T10:00:00+00:00" }) };
+    const reopened = valueOf(await getOffers(setup.deps, principal, request()));
+
+    expect(reopened.offers).toHaveLength(1);
+    expect(setup.live.calls.map((call) => call.kind)).toEqual([
+      "availability",
+      "prices",
+      "availability",
+      "prices",
+      "availability",
+      "prices",
+    ]);
+  });
+
+  test("a cached price that expires while availability is read is read again", async () => {
+    const live = quoted(OAT);
+    const setup = fakeOffersDeps({ products: [fakeProduct(OAT)], live });
+    valueOf(await getOffers(setup.deps, principal, request()));
+
+    const next = live[OAT];
+    if (next === undefined) throw new Error("expected live data");
+    next.prices = { "*": fakePrice(OAT, { unitPrice: { net: 20, vatRate: 14, currency: "EUR" } }) };
+    setup.clock.set("2026-11-14T10:04:59Z");
+    const slow: WholesalerLive = {
+      getPrices: (query) => setup.live.getPrices(query),
+      getAvailability: async (query) => {
+        setup.clock.set("2026-11-14T10:05:01Z");
+        return setup.live.getAvailability(query);
+      },
+    };
+    const second = valueOf(await getOffers({ ...setup.deps, live: slow }, principal, request()));
+
+    expect(setup.live.calls.map((call) => call.kind)).toEqual([
+      "availability",
+      "prices",
+      "availability",
+      "prices",
+    ]);
+    expect(second.offers[0]?.claims.unitPrice.net).toBe(20);
+  });
+
+  test("a price is not served from the cache after validTo", async () => {
+    const setup = fakeOffersDeps({
+      products: [fakeProduct(OAT)],
+      live: quoted(OAT, {}, { validTo: "2026-11-14T10:01:00+00:00" }),
+    });
+    valueOf(await getOffers(setup.deps, principal, request()));
+    setup.clock.set("2026-11-14T10:01:00Z");
+    const after = valueOf(await getOffers(setup.deps, principal, request()));
+
+    expect(setup.live.calls.map((call) => call.kind)).toEqual([
+      "availability",
+      "prices",
+      "availability",
+      "prices",
+    ]);
+    expect(reasons(after.omitted)).toEqual({ [OAT]: "NO_PRICE" });
+  });
+
+  test("a cached price is keyed by the delivery date it was read for", async () => {
+    const live = quoted(OAT, { availableDate: "2026-11-20" });
+    const setup = fakeOffersDeps({ products: [fakeProduct(OAT)], live });
+
+    valueOf(await getOffers(setup.deps, principal, request()));
+    const next = live[OAT];
+    if (next === undefined) throw new Error("expected live data");
+    next.availability = { "*": fakeAvailability(OAT, { availableDate: "2026-11-21" }) };
+    valueOf(await getOffers(setup.deps, principal, request()));
+
+    expect(setup.live.calls.map((call) => [call.kind, call.query.requestedDate])).toEqual([
+      ["availability", "2026-11-20"],
+      ["prices", "2026-11-20"],
+      ["availability", "2026-11-20"],
+      ["prices", "2026-11-21"],
+    ]);
+  });
+
+  test("an offer states its gross price per standard unit, or null with no conversion", async () => {
+    const setup = fakeOffersDeps({
+      products: [fakeProduct(OAT, { perSalesUnit: { value: 2, unit: "LTR" } }), fakeProduct(RYE)],
+      live: quotedAll([OAT, RYE]),
+    });
+
+    const result = valueOf(
+      await getOffers(setup.deps, principal, request({ lines: [line(OAT), line(RYE)] })),
+    );
+
+    const claims = Object.fromEntries(result.offers.map((o) => [o.claims.productId, o.claims]));
+    expect(claims[OAT]?.pricePerStandardUnit).toEqual({ gross: 5.7, unit: "LTR" });
+    expect(claims[RYE]?.pricePerStandardUnit).toBeNull();
+  });
+
+  test("the offer states that the deposit is not included when the source has no deposit amount", async () => {
+    const setup = fakeOffersDeps({
+      products: [fakeProduct(OAT), fakeProduct(RYE)],
+      live: {
+        ...quoted(OAT, {}, { depositKnown: false }),
+        ...quoted(RYE, {}, { deposit: 0.25 }),
+      },
+    });
+
+    const result = valueOf(
+      await getOffers(setup.deps, principal, request({ lines: [line(OAT), line(RYE)] })),
+    );
+
+    const claims = Object.fromEntries(result.offers.map((o) => [o.claims.productId, o.claims]));
+    expect(claims[OAT]).toMatchObject({ deposits: 0, depositsIncluded: false });
+    expect(claims[OAT]?.total.gross).toBe(45.6);
+    expect(claims[RYE]).toMatchObject({ deposits: 1, depositsIncluded: true });
+    expect(claims[RYE]?.total.gross).toBe(46.6);
   });
 
   test("an omitted line is not cached", async () => {
@@ -993,7 +1101,7 @@ describe("getOffers", () => {
     ]);
   });
 
-  test("an offer served from the cache carries the same claims except iat/exp and a new offerId", async () => {
+  test("an offer priced from the cache carries the same claims except iat/exp and a new offerId", async () => {
     const setup = fakeOffersDeps({
       now: "2026-11-14T10:00:00Z",
       products: [fakeProduct(OAT)],
@@ -1001,17 +1109,21 @@ describe("getOffers", () => {
     });
 
     const first = valueOf(await getOffers(setup.deps, principal, request()));
-    setup.clock.set("2026-11-15T10:00:00Z");
+    setup.clock.set("2026-11-14T10:03:00Z");
     const second = valueOf(await getOffers(setup.deps, principal, request()));
 
     const firstClaims = first.offers[0]?.claims;
     if (firstClaims === undefined) throw new Error("expected a first offer");
-    expect(setup.live.calls).toHaveLength(2);
-    // exp is unchanged because it comes from the same cached validTo and cutoffAt.
+    expect(setup.live.calls.map((call) => call.kind)).toEqual([
+      "availability",
+      "prices",
+      "availability",
+    ]);
+    // exp is unchanged because it comes from the same validTo and cutoffAt.
     expect(second.offers[0]?.claims).toEqual({
       ...firstClaims,
       offerId: "off_test_2",
-      iat: Date.parse("2026-11-15T10:00:00Z") / 1000,
+      iat: Date.parse("2026-11-14T10:03:00Z") / 1000,
       exp: firstClaims.exp,
     });
     expect(second.offers[0]?.offerId).toBe("off_test_2");

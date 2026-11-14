@@ -1,5 +1,7 @@
 terraform {
   required_version = ">= 1.10"
+  # The path comes from `tofu init -backend-config=path=...`, outside any worktree (docs/deploy.md).
+  backend "local" {}
   required_providers {
     vultr = {
       source  = "vultr/vultr"

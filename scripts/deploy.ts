@@ -12,7 +12,7 @@ export interface Outputs {
   readonly database_url: string;
 }
 
-const SECRETS_FILE = ".env.deploy";
+const SECRETS_FILE = process.env["DEPLOY_ENV_FILE"] ?? ".env.deploy";
 const SECRET_NAMES = ["OFFER_SIGNING_JWK", "OFFER_SIGNING_KID", "BUYER_SIGNING_JWK"] as const;
 const PRIVATE_KEYS = ["OFFER_SIGNING_JWK", "BUYER_SIGNING_JWK"] as const;
 

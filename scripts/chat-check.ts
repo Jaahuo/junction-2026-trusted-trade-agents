@@ -20,6 +20,16 @@ const isObject = (value: unknown): value is Json =>
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
 
+type Quantity = { value: number; unit: string };
+type OrderLine = {
+  productId: string;
+  name: string;
+  quantity?: Quantity;
+  perSalesUnit?: Quantity;
+  requestedDate?: string;
+  deliveryDate?: string;
+};
+
 export type Step = { say: string } | { click: string } | { dialog: "confirm" | "cancel" };
 
 type Check =
@@ -27,7 +37,11 @@ type Check =
   | { notCalled: string }
   | { noError: string }
   | { order: "placed" | "pending_approval" | "rejected" | "any" | "none"; reason?: string }
-  | { maxOrders: number };
+  | { maxOrders: number }
+  | { callCount: { tool: string; count: number } }
+  | { quoteLines: number }
+  | { orderProducts: string[] }
+  | { orderContents: { products: string[]; quantity: Quantity; weekday: "Monday" } };
 
 /** `known` names the issue that tracks a failure the team accepts for now. */
 export type Expectation = Check & { known?: string };
@@ -65,6 +79,7 @@ export interface OrderState {
   orderId: string;
   status: string;
   reasons: string[];
+  lines?: OrderLine[];
 }
 
 function parseStep(value: unknown): Step {
@@ -83,6 +98,68 @@ function parseCheck(value: unknown): Check {
     if (typeof value["notCalled"] === "string") return { notCalled: value["notCalled"] };
     if (typeof value["noError"] === "string") return { noError: value["noError"] };
     if (typeof value["maxOrders"] === "number") return { maxOrders: value["maxOrders"] };
+    const callCount = value["callCount"];
+    if (
+      isObject(callCount) &&
+      typeof callCount["tool"] === "string" &&
+      typeof callCount["count"] === "number" &&
+      Number.isInteger(callCount["count"]) &&
+      callCount["count"] >= 0
+    )
+      return { callCount: { tool: callCount["tool"], count: callCount["count"] } };
+    if (
+      typeof value["quoteLines"] === "number" &&
+      Number.isInteger(value["quoteLines"]) &&
+      value["quoteLines"] > 0
+    )
+      return { quoteLines: value["quoteLines"] };
+    const contents = value["orderContents"];
+    if (isObject(contents)) {
+      const products = contents["products"];
+      const quantity = contents["quantity"];
+      if (
+        Array.isArray(products) &&
+        products.length > 0 &&
+        products.every(
+          (product): product is string => typeof product === "string" && product.length > 0,
+        ) &&
+        isObject(quantity) &&
+        typeof quantity["value"] === "number" &&
+        Number.isFinite(quantity["value"]) &&
+        quantity["value"] > 0 &&
+        typeof quantity["unit"] === "string" &&
+        quantity["unit"].length > 0 &&
+        contents["weekday"] === "Monday"
+      ) {
+        try {
+          for (const product of products) new RegExp(product, "i").test("");
+          return {
+            orderContents: {
+              products,
+              quantity: { value: quantity["value"], unit: quantity["unit"] },
+              weekday: "Monday",
+            },
+          };
+        } catch {
+          throw new Error(`Unknown expectation: ${JSON.stringify(value)}`);
+        }
+      }
+    }
+    const products = value["orderProducts"];
+    if (
+      Array.isArray(products) &&
+      products.length > 0 &&
+      products.every(
+        (product): product is string => typeof product === "string" && product.length > 0,
+      )
+    ) {
+      try {
+        for (const product of products) new RegExp(product, "i").test("");
+        return { orderProducts: products };
+      } catch {
+        throw new Error(`Unknown expectation: ${JSON.stringify(value)}`);
+      }
+    }
     const order = value["order"];
     if (
       order === "placed" ||
@@ -276,14 +353,35 @@ const label = (expectation: Expectation): string => {
   if ("notCalled" in expectation) return `did not call ${expectation.notCalled}`;
   if ("noError" in expectation) return `no ${expectation.noError}`;
   if ("maxOrders" in expectation) return `at most ${expectation.maxOrders} order(s)`;
+  if ("callCount" in expectation)
+    return `called ${expectation.callCount.tool} ${expectation.callCount.count} time(s)`;
+  if ("quoteLines" in expectation)
+    return `quote_offers has at least ${expectation.quoteLines} lines`;
+  if ("orderProducts" in expectation)
+    return `one order with products ${expectation.orderProducts.join(", ")}`;
+  if ("orderContents" in expectation)
+    return `accepted order with requested products, quantity and ${expectation.orderContents.weekday} deadline`;
   return `order ${expectation.order}${expectation.reason ? ` with ${expectation.reason}` : ""}`;
 };
+/** Next Monday, including today, in the timezone used by the host. */
+function monday(now: Date): string {
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Helsinki",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const date = new Date(`${today}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + ((8 - date.getUTCDay()) % 7));
+  return date.toISOString().slice(0, 10);
+}
 
 /** Checks one expectation against the tool calls and the stored orders; null means it holds. */
 function failure(
   expectation: Expectation,
   trace: Trace,
   orders: readonly OrderState[],
+  now: Date,
 ): string | null {
   const count = (tool: string) => trace.calls.filter((call) => call.tool === tool).length;
   if ("called" in expectation) return count(expectation.called) > 0 ? null : "it was not called";
@@ -297,6 +395,129 @@ function failure(
   }
   if ("maxOrders" in expectation)
     return orders.length <= expectation.maxOrders ? null : `${orders.length} orders were created`;
+  if ("callCount" in expectation) {
+    const calls = count(expectation.callCount.tool);
+    return calls === expectation.callCount.count ? null : `it was called ${calls} time(s)`;
+  }
+  if ("quoteLines" in expectation) {
+    const calls = trace.calls.filter((call) => call.tool === "quote_offers");
+    const lines = calls.length === 1 ? calls[0]?.args["lines"] : undefined;
+    return Array.isArray(lines) && lines.length >= expectation.quoteLines
+      ? null
+      : "expected one quote_offers call with at least the requested number of lines";
+  }
+  if ("orderContents" in expectation) {
+    const order = orders[0];
+    if (orders.length !== 1 || order === undefined)
+      return `expected one order, got ${orders.length}`;
+    if (order.status !== "placed" && order.status !== "pending_approval")
+      return `order ${order.orderId} is ${order.status}`;
+    const lines = order.lines ?? [];
+    const { products, quantity } = expectation.orderContents;
+    const patterns = products.map((product) => new RegExp(product, "i"));
+    const deadline = monday(now);
+    const searches = trace.calls.filter((call) => call.tool === "find_products");
+    if (
+      searches.length === 0 ||
+      searches.some((call) => {
+        const requested = call.args["quantity"];
+        return (
+          call.error !== null ||
+          call.args["deliverBy"] !== deadline ||
+          !isObject(requested) ||
+          requested["value"] !== quantity.value ||
+          requested["unit"] !== quantity.unit
+        );
+      })
+    )
+      return "search requests did not use the requested quantity and deadline";
+    const candidates = searches.flatMap((call) => {
+      try {
+        const result: unknown = JSON.parse(call.text);
+        return isObject(result)
+          ? asArray(result["results"]).flatMap((item) =>
+              isObject(item) ? asArray(item["candidates"]).filter(isObject) : [],
+            )
+          : [];
+      } catch {
+        return [];
+      }
+    });
+    const matches = (remaining: OrderLine[], index: number): boolean => {
+      if (index === patterns.length) return remaining.length === 0;
+      return remaining.some((line, i) => {
+        const q = line.quantity;
+        const per = line.perSalesUnit;
+        if (
+          !patterns[index]?.test(line.name) ||
+          q === undefined ||
+          per === undefined ||
+          per.unit !== quantity.unit ||
+          !Number.isFinite(per.value) ||
+          per.value <= 0 ||
+          !Number.isFinite(q.value) ||
+          q.value <= 0 ||
+          q.unit === "" ||
+          line.requestedDate !== deadline ||
+          !line.deliveryDate ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(line.deliveryDate) ||
+          line.deliveryDate > deadline
+        )
+          return false;
+        const candidate = candidates.find((item) => {
+          const ordered = item["orderQuantity"];
+          const equals = item["equals"];
+          return (
+            item["productId"] === line.productId &&
+            isObject(ordered) &&
+            ordered["value"] === q.value &&
+            ordered["unit"] === q.unit &&
+            isObject(equals) &&
+            equals["unit"] === quantity.unit &&
+            typeof equals["value"] === "number" &&
+            Number.isFinite(equals["value"]) &&
+            equals["value"] >= quantity.value &&
+            Math.abs(equals["value"] - q.value * per.value) < 1e-8
+          );
+        });
+        return (
+          candidate !== undefined &&
+          matches(
+            remaining.filter((_, j) => i !== j),
+            index + 1,
+          )
+        );
+      });
+    };
+    return lines.length === patterns.length &&
+      new Set(lines.map((line) => line.productId)).size === lines.length &&
+      lines.every((line) => line.productId !== "") &&
+      matches(lines, 0)
+      ? null
+      : "stored lines did not match requested products, quantities or deadline";
+  }
+  if ("orderProducts" in expectation) {
+    if (orders.length !== 1) return `expected one order, got ${orders.length}`;
+    const lines = orders[0]?.lines ?? [];
+    const patterns = expectation.orderProducts.map((product) => new RegExp(product, "i"));
+    const match = (remaining: typeof lines, index: number): boolean => {
+      if (index === patterns.length) return remaining.length === 0;
+      return remaining.some(
+        (line, i) =>
+          patterns[index]?.test(line.name) &&
+          match(
+            remaining.filter((_, j) => i !== j),
+            index + 1,
+          ),
+      );
+    };
+    return lines.length === patterns.length &&
+      new Set(lines.map((line) => line.productId)).size === lines.length &&
+      lines.every((line) => line.productId !== "") &&
+      match(lines, 0)
+      ? null
+      : `stored lines did not match: ${lines.map((line) => `${line.productId} (${line.name})`).join(", ") || "(none)"}`;
+  }
   const last = orders.at(-1);
   if (expectation.order === "any") return last === undefined ? "no order was created" : null;
   if (expectation.order === "none")
@@ -331,12 +552,13 @@ export const judge = (
   trace: Trace,
   orders: readonly OrderState[],
   problems: readonly string[] = [],
+  now: Date = new Date(),
 ): Verdict[] => [
   finished(trace, problems),
   ...expectations.map((expectation) => {
     const verdict: Verdict = {
       label: label(expectation),
-      failure: failure(expectation, trace, orders),
+      failure: failure(expectation, trace, orders, now),
     };
     if (expectation.known !== undefined) verdict.known = expectation.known;
     return verdict;
@@ -613,6 +835,26 @@ async function orderStates(api: string, ids: readonly string[]): Promise<OrderSt
       reasons: asArray(order["reasons"]).filter(
         (reason): reason is string => typeof reason === "string",
       ),
+      lines: asArray(order["lines"]).map((line) => {
+        const claims = isObject(line) && isObject(line["claims"]) ? line["claims"] : {};
+        const product = isObject(claims["product"]) ? claims["product"] : {};
+        const quantity = isObject(claims["quantity"]) ? claims["quantity"] : {};
+        const per = isObject(product["perSalesUnit"]) ? product["perSalesUnit"] : {};
+        return {
+          productId: asString(claims["productId"]),
+          name: asString(product["name"]),
+          quantity: {
+            value: typeof quantity["value"] === "number" ? quantity["value"] : NaN,
+            unit: asString(quantity["unit"]),
+          },
+          perSalesUnit: {
+            value: typeof per["value"] === "number" ? per["value"] : NaN,
+            unit: asString(per["unit"]),
+          },
+          requestedDate: asString(claims["requestedDate"]),
+          deliveryDate: asString(claims["deliveryDate"]),
+        };
+      }),
     });
   }
   return states;
@@ -655,9 +897,14 @@ async function main(): Promise<void> {
     await page.locator("#chat-input").waitFor({ timeout: 60_000 });
     for (const scenario of scenarios) {
       if (reset) await resetDatabase();
+      const started = new Date();
       const run = await runScenario(page, scenario, host, token, options.timeoutMs);
       const orders = await orderStates(api, orderIds(run.trace.calls));
-      const verdicts = judge(scenario.expect, run.trace, orders, run.problems);
+      const verdicts = judge(scenario.expect, run.trace, orders, run.problems, started);
+      await Bun.write(
+        `${OUT_DIR}/${scenario.name}-${Date.now()}.json`,
+        JSON.stringify({ trace: run.trace, orders, problems: run.problems, verdicts }, null, 2),
+      );
       console.log(`\n${scenario.name} (${run.seconds} s)`);
       let from = 0;
       for (const turn of run.trace.turns) {

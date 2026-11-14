@@ -23,6 +23,7 @@ import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { defineApprovalCard, reasonSummaries, type RuleChoice } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
+import { readCurrent, withCurrent } from "./current-state.ts";
 import { brandHeader, cardStyles, icon, money, orderName, vat, when } from "./parts.ts";
 import { VIEW } from "./strings.ts";
 
@@ -43,6 +44,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     pending: { state: true },
     remembered: { state: true },
     rules: { state: true },
+    unchecked: { state: true },
   };
 
   static override styles = [
@@ -219,6 +221,14 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   declare private remembered: ReadonlySet<string>;
   /** The mandate's substitution rules, read once when a declined order has a substitute. */
   declare private rules: SubstitutionRule[];
+  /** Orders whose current state the server could not give: their decisions stay off. */
+  declare private unchecked: ReadonlySet<string>;
+  /** True once the shown orders were read from the server after the tool result arrived. */
+  private checked = false;
+  /** Reads the orders again when the approver comes back to the chat or the tab. */
+  private readonly recheck = () => {
+    if (globalThis.document?.visibilityState !== "hidden") void this.refresh();
+  };
 
   constructor() {
     super();
@@ -231,6 +241,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     this.pending = { placing: false, request: null };
     this.remembered = new Set();
     this.rules = [];
+    this.unchecked = new Set();
   }
 
   override connectedCallback() {
@@ -241,6 +252,30 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         request: typeof args["originalRequest"] === "string" ? args["originalRequest"] : null,
       };
     });
+    globalThis.addEventListener?.("focus", this.recheck);
+    globalThis.document?.addEventListener("visibilitychange", this.recheck);
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    globalThis.removeEventListener?.("focus", this.recheck);
+    globalThis.document?.removeEventListener("visibilitychange", this.recheck);
+  }
+
+  /**
+   * Reads the shown orders from the server and shows each newer copy. A host replays the
+   * original tool result after a refresh, and a decision may come from another tab or the
+   * approval page, so the tool result alone can be out of date.
+   */
+  private async refresh() {
+    const source = this.source;
+    const state = this.state;
+    if (source === null || state.kind !== "done") return;
+    const { current, unread } = await readCurrent(source, state.data);
+    const latest = this.state;
+    if (latest.kind !== "done") return;
+    this.state = { kind: "done", data: withCurrent(latest.data, current) };
+    this.unchecked = unread;
   }
 
   /**
@@ -249,6 +284,10 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
    * need neither, so the host shows no tool call for them.
    */
   override updated() {
+    if (!this.checked && this.state.kind === "done") {
+      this.checked = true;
+      void this.refresh();
+    }
     const order = this.state.kind === "done" ? this.selectedOrder(this.state.data) : undefined;
     this.dispatchEvent(
       new CustomEvent("tt-approval-selection", { detail: order?.orderId ?? null }),
@@ -291,7 +330,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
    * is approved at once, unless it brings a reason the order did not have: then it is shown.
    */
   private async decide(order: Order, request: DecideApprovalRequest, thenApprove = false) {
-    if (this.source === null) return;
+    if (this.source === null || this.unchecked.has(order.orderId)) return;
     this.busyId = order.orderId;
     const result = await callAction(
       this.source,
@@ -303,6 +342,9 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     // A failed decision keeps the card and says why there (an expired offer, a conflict …).
     if (result.kind !== "done") {
       this.decisionError = { orderId: order.orderId, message: decisionFailure(result) };
+      // Already decided or gone: show the order as the server has it now.
+      if (result.kind === "error" && /^(CONFLICT|NOT_FOUND):/.test(result.message))
+        void this.refresh();
       return;
     }
     this.decisionError = null;
@@ -395,6 +437,9 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         this.decisionError = { orderId: order.orderId, message: decisionFailure(rejected) };
         return;
       }
+      const state = this.state;
+      if (state.kind === "done")
+        this.state = { kind: "done", data: replace(state.data, rejected.data) };
       void source.context?.(
         `Order ${order.orderId} was rejected on the approval card because the approver asked for a new offer. Place the new order for approval when you have it.`,
       );
@@ -549,9 +594,20 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
             </div>`
           : nothing
       }
+      ${
+        this.unchecked.has(open.orderId)
+          ? html`<div class="message" role="status" part="unchecked">
+              <p>${text.unchecked}</p>
+              <button class="btn ghost" @click=${() => void this.refresh()}>
+                ${text.checkAgain}
+              </button>
+            </div>`
+          : nothing
+      }
       <tt-approval-card
         .order=${open}
         ?busy=${this.busyId === open.orderId}
+        ?locked=${this.unchecked.has(open.orderId)}
         ?remembered=${this.remembered.has(open.orderId)}
         .rules=${this.rules}
         ?can-ask=${this.source?.message !== undefined}

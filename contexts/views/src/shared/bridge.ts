@@ -202,6 +202,16 @@ export function fixtureSource(fixture: unknown, now = () => new Date().toISOStri
     load: () => result,
     call: async (tool, args) => {
       if (tool === "get_mandate") return mandate;
+      if (tool === "get_order_status") {
+        const orderId = args["orderId"];
+        const order =
+          typeof orderId === "string"
+            ? (orders.get(orderId) ?? ordersIn(await result).find((o) => o.orderId === orderId))
+            : undefined;
+        if (order === undefined)
+          throw new Error(`NOT_FOUND: The harness has no order ${String(orderId)}.`);
+        return order;
+      }
       if (tool === "register_mandate") {
         const { limits, standingConstraints, exp } = RegisterMandateRequestSchema.parse(args);
         mandate = {

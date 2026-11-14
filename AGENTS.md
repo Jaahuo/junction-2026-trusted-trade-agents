@@ -18,6 +18,8 @@ Before creating any task or exploration worktree, fetch its upstream and use the
 | `bun run db:generate`        | Generate migrations after schema changes.                               |
 | `bun run db:reset`           | Reset this worktree's database and load demo data.                      |
 
+To run a script in another worktree, use `bun run --cwd <dir> <script>`. `bun --cwd <dir> run <script>` prints usage and exits 0 without running the script.
+
 ## Where code goes
 
 Feature code belongs in `contexts/<name>/src/`. Stay within the task's agreed writable scope.

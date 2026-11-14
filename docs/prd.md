@@ -454,6 +454,7 @@ The contract is vendor-neutral and each wholesaler hosts its own endpoint, with 
 
 - Delivery reliability and CO2 come from two CSV files, joined on product ID.
 - All calls send the API key in the `X-API-Key` header.
+- Assumption: Valio Aimo's production API authenticates clients with OAuth2. We do not build that flow because it is out of scope and not relevant to the demo; a production adapter would replace the API key with an OAuth2 access token.
 - Never query all products. Filter on static data first, then send the shortlist in one call. Rate limits are undisclosed, so cache results within their validity.
 - Products shipped from a supplier's warehouse always report an amount of 999999, which means the stock is unconfirmed.
 - The mock ignores the customer number. Customer-specific limits and terms are simulated in our layer, and the README says so.

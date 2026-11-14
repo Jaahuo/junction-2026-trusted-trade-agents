@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
-import { fixtures, type MandateDraft, type StoredMandate } from "@app/contract";
+import {
+  fixtures,
+  type MandateDraft,
+  type StoredMandate,
+  StoredMandateSchema,
+} from "@app/contract";
 import type { Source, ViewState } from "../../shared/bridge.ts";
 import { setLang } from "../../shared/locale.ts";
+import rulesFixture from "../../../fixtures/mandate-settings/rules.json";
 import { MandateSettings } from "./mandate-settings.ts";
 
 const isTemplate = (value: unknown): value is { strings: readonly string[]; values: unknown[] } =>
@@ -253,4 +259,58 @@ test("an answer outside the contract keeps the draft with an error", async () =>
   const text = textOf(view.render());
   expect(text).toContain("register_mandate answered outside the contract.");
   expect(text).toContain("Registration is not confirmed");
+});
+
+const withRules = StoredMandateSchema.parse(rulesFixture);
+
+/** A view that shows `stored` and records the tools it calls, each answered with `stored`. */
+const showing = (stored: StoredMandate) => {
+  const calls: { tool: string; args: Record<string, unknown> }[] = [];
+  const view = new Harness();
+  view.source = {
+    load: async () => stored,
+    call: async (tool, args) => {
+      calls.push({ tool, args });
+      return stored;
+    },
+  };
+  view.show({ kind: "done", data: stored });
+  return { view, calls };
+};
+
+test("substitution rules show both directions, each with Remove", () => {
+  const shown = textOf(showing(withRules).view.render());
+  expect(shown).toContain("Substitution rules");
+  expect(shown).toContain(
+    "Test plant-based yogurt unsweetened 400 g instead of Test plant-based yogurt 750 g",
+  );
+  expect(shown).toContain("Ordered without asking");
+  expect(shown).toContain("Not suggested");
+  expect(shown.match(/>\s*Remove\s*</g)).toHaveLength(2);
+});
+
+test("Remove reads the mandate and registers it again without that rule, keeping its expiry", async () => {
+  const { view, calls } = showing(withRules);
+  await clickHandler(view.render(), 'class="btn secondary"')?.();
+  // The mandate is read again first, so a newer version is not rolled back.
+  expect(calls).toEqual([
+    { tool: "get_mandate", args: {} },
+    {
+      tool: "register_mandate",
+      args: {
+        limits: {
+          ...withRules.mandate.limits,
+          substitutionRules: withRules.mandate.limits.substitutionRules?.slice(1),
+        },
+        standingConstraints: withRules.mandate.standingConstraints,
+        exp: withRules.mandate.exp,
+      },
+    },
+  ]);
+});
+
+test("a revoked mandate lists its rules without Remove", () => {
+  const shown = textOf(showing({ ...withRules, status: "revoked" }).view.render());
+  expect(shown).toContain("Substitution rules");
+  expect(shown).not.toMatch(/>\s*Remove\s*</);
 });

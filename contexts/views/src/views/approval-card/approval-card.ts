@@ -3,6 +3,8 @@ import {
   type OfferClaims,
   type Order,
   type ReasonCode,
+  samePair,
+  type SubstitutionRule,
 } from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { formatOrderNumber, ORDER_WORDING } from "@app/ui/format";
@@ -156,6 +158,36 @@ const substitutionOf = (order: Order, c: OfferClaims): Substitution | null => {
   const proposed = alternatives.filter((a) => a.replaces === c.productId);
   return proposed.length === 0 ? null : { original: c, options: proposed };
 };
+/** A substitution rule the human can make from a decided order; the view adds `decidedAt`. */
+export type RuleChoice = Omit<SubstitutionRule, "decidedAt">;
+/**
+ * The substitute pair of a decided order: after an approval only the pair the server offers
+ * (`standingOffer`), after a rejection the first substitute in the order.
+ */
+const ruleChoice = (order: Order): RuleChoice | null => {
+  const claims = [...order.lines, ...order.alternatives].map((l) => l.claims);
+  const offer = order.standingOffer;
+  const substitute = isApproved(order)
+    ? claims.find(
+        (c) =>
+          offer !== undefined &&
+          c.replaces !== null &&
+          samePair(offer, { replaces: c.replaces, productId: c.productId }),
+      )
+    : order.status === "declined"
+      ? claims.find((c) => c.replaces !== null)
+      : undefined;
+  if (substitute === undefined || substitute.replaces === null) return null;
+  const replacesName =
+    claims.find((c) => c.productId === substitute.replaces)?.product.name ?? offer?.replacesName;
+  return {
+    replaces: substitute.replaces,
+    productId: substitute.productId,
+    policy: isApproved(order) ? "auto" : "never",
+    productName: substitute.product.name,
+    ...(replacesName === undefined ? {} : { replacesName }),
+  };
+};
 /** A line that arrives after the requested date (`AVAILABILITY_DIFFERS`). */
 const isLate = (c: OfferClaims) => c.deliveryDate > c.requestedDate;
 const daysLate = (c: OfferClaims) =>
@@ -241,7 +273,9 @@ const typed = (e: Event) => (e.target instanceof HTMLInputElement ? Number(e.tar
  * One order for a human decision. Framework-agnostic: set `order`, `busy`, `canAsk` and
  * `orderLimit`, listen for `tt-decide` (detail: DecideApprovalRequest), `tt-confirm-changes`
  * (an edit to approve with its new quote), `tt-ask-agent` (detail: the message for the agent,
- * who then updates the order) and `tt-talk` (a message that starts a conversation). Restyle
+ * who then updates the order), `tt-talk` (a message that starts a conversation) and
+ * `tt-remember` (detail: RuleChoice; set `remembered` once it is saved, and `rules` to hide pairs that
+ * already have one). Restyle
  * through the tokens in shared/styles.ts or the `part` names.
  */
 export class ApprovalCard extends LitElement {
@@ -261,6 +295,9 @@ export class ApprovalCard extends LitElement {
     reduced: { state: true },
     rejecting: { state: true },
     confirming: { state: true },
+    remembered: { type: Boolean },
+    rules: { attribute: false },
+    ruleDismissed: { state: true },
   };
 
   static override styles = [
@@ -713,6 +750,14 @@ export class ApprovalCard extends LitElement {
       .result.danger .title {
         color: var(--color-text-danger);
       }
+      .rule {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-md);
+        padding: var(--spacing-lg);
+        background: var(--color-bg-brand-subtle);
+        color: var(--color-heading);
+      }
       /* "Sending": the busy primary button stays solid; only the others fade. */
       .btn.primary[aria-busy="true"]:disabled {
         background: var(--color-button);
@@ -825,6 +870,12 @@ export class ApprovalCard extends LitElement {
   declare private rejecting: "stop" | "alternatives" | null;
   /** The decision waiting for its second click, which states what happens. */
   declare private confirming: "approve" | "reject" | null;
+  /** True once the view has saved the rule offered on this decided order. */
+  declare remembered: boolean;
+  /** The mandate's substitution rules, when the view read them: a pair with a rule is not offered. */
+  declare rules: SubstitutionRule[];
+  /** "Keep asking" hides the offer. */
+  declare private ruleDismissed: boolean;
 
   constructor() {
     super();
@@ -843,6 +894,9 @@ export class ApprovalCard extends LitElement {
     this.reduced = null;
     this.rejecting = null;
     this.confirming = null;
+    this.remembered = false;
+    this.rules = [];
+    this.ruleDismissed = false;
   }
 
   /** A new order (or a new version of it) starts without changes or picks. */
@@ -861,6 +915,7 @@ export class ApprovalCard extends LitElement {
       this.requoting = false;
       this.rejecting = null;
       this.confirming = null;
+      if (changed.get("order")?.orderId !== this.order?.orderId) this.ruleDismissed = false;
     }
   }
 
@@ -1639,11 +1694,7 @@ export class ApprovalCard extends LitElement {
         <span>${text.orderTotal} <span class="vat">${vat("net")}</span></span
         ><span class="value" aria-live="polite">${money(this.total(order, "net"))}</span>
       </p>
-      ${
-        this.error === null
-          ? nothing
-          : html`<p class="message danger" role="alert" part="decision-error">${this.error}</p>`
-      }
+      ${this.errorMessage()}
       ${this.confirming === null ? this.actions(order) : this.confirmation(order, confirm)}
       ${
         this.canAsk
@@ -1841,6 +1892,7 @@ export class ApprovalCard extends LitElement {
           <p class="body-small">${result.text}</p>
         </div>
       </div>
+      ${this.ruleOffer(order)}
       ${
         isApproved(order)
           ? html`${rows([
@@ -1855,6 +1907,74 @@ export class ApprovalCard extends LitElement {
   }
 
   /**
+   * ✦ What the agent can learn from this decision: after the server's offer, stop asking for the
+   * substitute; after a rejection, stop suggesting it. The view saves it in the mandate.
+   */
+  private ruleOffer(order: Order) {
+    const choice = ruleChoice(order);
+    if (choice === null || this.ruleDismissed) return nothing;
+    if (!this.remembered && this.rules.some((rule) => samePair(rule, choice))) return nothing;
+    const text = pick(CARD);
+    const substitute = choice.productName ?? choice.productId;
+    const original = choice.replacesName ?? null;
+    if (this.remembered)
+      return html`<p class="rule body-small" part="rule" role="status">
+        ✦
+        ${
+          choice.policy === "auto"
+            ? text.standingSaved(substitute, original)
+            : text.neverSaved(substitute, original)
+        }
+      </p>`;
+    const remember = () =>
+      this.dispatchEvent(
+        new CustomEvent("tt-remember", { detail: choice, bubbles: true, composed: true }),
+      );
+    const auto = choice.policy === "auto";
+    return html`<div class="rule" part="rule">
+      <p class="body-small">
+        ✦
+        ${
+          auto
+            ? text.standingOffer(substitute, original, order.standingOffer?.timesApproved ?? 0)
+            : text.neverSuggest(substitute, original)
+        }
+      </p>
+      <div class="actions">
+        <button
+          type="button"
+          class="btn ${auto ? "primary" : "secondary"}"
+          ?disabled=${this.busy}
+          aria-busy=${this.busy ? "true" : "false"}
+          @click=${remember}
+        >
+          ${auto ? text.yesAutomatically : text.dontSuggestAgain}
+        </button>
+        ${
+          auto
+            ? html`<button
+                type="button"
+                class="btn ghost"
+                ?disabled=${this.busy}
+                @click=${() => (this.ruleDismissed = true)}
+              >
+                ${text.keepAsking}
+              </button>`
+            : nothing
+        }
+      </div>
+      ${this.errorMessage()}
+    </div>`;
+  }
+
+  /** Why the last decision or rule save failed; nothing when it did not. */
+  private errorMessage() {
+    return this.error === null
+      ? nothing
+      : html`<p class="message danger" role="alert" part="decision-error">${this.error}</p>`;
+  }
+
+  /**
    * P7/A6 signed receipt: "Order sent", the order rows, the wholesaler's signature on the
    * confirmation when the order has one, and the link to the order log.
    */
@@ -1866,6 +1986,7 @@ export class ApprovalCard extends LitElement {
         ${statusDisc("success")}
         <h3 class="section-title">${text.orderSent}</h3>
       </div>
+      ${this.ruleOffer(order)}
       <div class="receipt">
         ${rows([
           [text.orderNo, formatOrderNumber(order.orderId)],

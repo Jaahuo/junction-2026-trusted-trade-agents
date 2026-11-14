@@ -401,10 +401,13 @@ The card shows the original request, the proposed order lines, the rules that fi
 | Reject and stop                      | The order is declined; the agent stops and tells the user                                           |
 | Reject, allow alternatives           | The order is declined; the agent may look for alternatives                                          |
 | Change quantity or delivery date     | A new signed offer is issued and every check runs again                                             |
+| Reduce to fit the limit              | The card lowers the amounts to fit the order limit; the approver checks them and confirms the edit  |
 | Pick a different offered alternative | Same as above, on the chosen offer                                                                  |
 | Approve and remember                 | Pricing only: the approver registers a new mandate with the raised limit, signed by the demo server |
 
 An edit can never bypass a guardrail, because it always produces a new offer and a new check. Build approve and reject first.
+
+Decided: reducing an over-limit order is the approver's action on the card, not the agent's. "Reduce to fit the limit" fills the amount steppers with whole sales-unit amounts that keep the gross total within the limit and sends nothing; the approver confirms, which sends `edit` on the same pending order (`proposalVersion` + 1). The agent's conduct rule is unchanged: it never lowers a quantity to get around a limit, and it sends the user to the card instead.
 
 ### Views
 

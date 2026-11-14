@@ -277,3 +277,6 @@ export const findOrder = (
   principal: Principal,
   orderId: string,
 ): Promise<StoredOrder | null> => store.find(principal.customer, orderId);
+
+/** The token checks, the rule checks and their audit, for the approver's edits (SPEC-011). */
+export { auditOf, checkTokens, evaluateChecked };

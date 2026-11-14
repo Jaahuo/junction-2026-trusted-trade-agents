@@ -1,4 +1,11 @@
-import type { AuditEvent, Mandate, OfferClaims, Order } from "@app/contract";
+import type {
+  AuditEvent,
+  Mandate,
+  OfferClaims,
+  OffersResult,
+  Order,
+  RequoteRequest,
+} from "@app/contract";
 import type { Result } from "@app/kernel";
 import type { HistoryRow } from "../domain/evaluate.ts";
 
@@ -19,6 +26,13 @@ export type OfferVerifier = (token: string, now: Date) => Promise<VerifiedOffer>
 export interface MandatePort {
   /** The current mandate of the agent; null when the agent has none. */
   current(agentId: string): Promise<Result<Mandate | null, "UPSTREAM_FAILED">>;
+}
+
+export interface RequotePort {
+  /** New signed offers for the tokens with the changes applied (SPEC-006 `requote`). */
+  requote(
+    request: RequoteRequest,
+  ): Promise<Result<OffersResult, "BAD_REQUEST" | "UPSTREAM_FAILED">>;
 }
 
 export interface PaymentPort {

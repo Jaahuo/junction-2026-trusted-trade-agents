@@ -43,9 +43,9 @@ test("pick_alternative places the order with the substitute in place of the out-
   expect(placed.decision?.action).toBe("pick_alternative");
 });
 
-test("reject with stop records the rejection", () => {
+test("reject with stop declines the order, as the server does", () => {
   const rejected = harnessDecide(order, { ...base, decision: "reject", next: "stop" }, at);
-  expect(rejected.status).toBe("rejected");
+  expect(rejected.status).toBe("declined");
   expect(rejected.decision).toEqual({
     action: "reject",
     next: "stop",

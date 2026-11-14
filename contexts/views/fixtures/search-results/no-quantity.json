@@ -1,0 +1,38 @@
+{
+  "candidates": [
+    {
+      "productId": "invented_starfruit_oat_drink",
+      "gtin": null,
+      "name": "Starfruit oat drink",
+      "category": "invented_drinks",
+      "match": {
+        "lactose": "confirmed",
+        "soft:countryOfOrigin:fi": "confirmed"
+      },
+      "orderQuantity": null,
+      "equals": null,
+      "quantityReason": "Sales unit is not supported.",
+      "deliveryReliability": 0.92,
+      "co2PerKg": 0.6,
+      "substitutes": []
+    }
+  ],
+  "constraints": {
+    "hard": [
+      {
+        "attribute": "lactose",
+        "is": "free_from"
+      }
+    ],
+    "soft": [
+      {
+        "attribute": "countryOfOrigin",
+        "prefer": "fi"
+      }
+    ]
+  },
+  "mandate": {
+    "id": "invented_mandate_orchard",
+    "version": 1
+  }
+}

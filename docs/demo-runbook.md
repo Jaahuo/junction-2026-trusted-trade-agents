@@ -164,7 +164,7 @@ The chat check sends the demo sentences to the Buyer agent in Open WebUI through
 
 The check needs Google Chrome.
 It stops before the first sentence when the server, its MCP endpoint, the host or the model endpoint is down, or when Open WebUI is connected to another server.
-The [`chat-check` skill](../.agents/skills/chat-check/SKILL.md) explains each failure line and how to add a scenario.
+The [`verify` skill](../.agents/skills/verify/SKILL.md) explains each failure line and how to add a scenario.
 
 ## Restart check
 

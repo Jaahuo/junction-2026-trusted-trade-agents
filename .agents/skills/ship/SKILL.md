@@ -5,7 +5,7 @@ description: Ship a task through a pull request, with risk-appropriate review an
 
 # Ship a task
 
-Only the task owner commits, pushes and manages the PR. Integrate helpers' changes, run the applicable checks at the integrated end and exercise the real changed flow. Record results and limitations in the PR. Never bypass hooks or force-push.
+Only the task owner commits, pushes and manages the PR. Integrate helpers' changes, run the applicable checks at the integrated end and exercise the real changed flow, as [verify](../verify/SKILL.md) says. Record results and limitations in the PR. Never bypass hooks or force-push.
 
 Choose risk by impact, not folder: `ordinary` for reversible changes, `impact` for high-impact changes, `lock-in` for hard-to-reverse decisions. Use `bun scripts/ship.ts --risk ordinary`, substituting the appropriate risk. The default opens or updates a PR, not a merge. An ordinary PR needs green CI. An impact PR needs independent current-head GitHub approval or independent agent review evidence. A lock-in PR needs independent human GitHub approval on that head.
 

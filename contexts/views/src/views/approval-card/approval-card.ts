@@ -1,6 +1,7 @@
 import {
   type DecideApprovalRequest,
   type OfferClaims,
+  type OfferLine,
   type Order,
   type ReasonCode,
   samePair,
@@ -33,6 +34,14 @@ import {
   statusDisc,
   trustStyles,
 } from "../../shared/trust.ts";
+import {
+  details,
+  explain,
+  pricePerStdUnit,
+  shortReason,
+  statusOf,
+  statusWords,
+} from "../offer-comparison/model.ts";
 import { CARD } from "./card-strings.ts";
 import { productImage } from "./images.ts";
 import { reduceToFit } from "./reduce.ts";
@@ -192,6 +201,43 @@ const ruleChoice = (order: Order): RuleChoice | null => {
 };
 /** A line that arrives after the requested date (`AVAILABILITY_DIFFERS`). */
 const isLate = (c: OfferClaims) => c.deliveryDate > c.requestedDate;
+
+/**
+ * The reasons a pending order's line raises, in the order the row names them: over the limit
+ * on its own (gross, against the mandate's limit), a different amount or date, then the
+ * product's own audit reasons that the order still carries.
+ */
+const lineReasons = (order: Order, c: OfferClaims, limit: number | null): ReasonCode[] => {
+  const still = (reason: ReasonCode) => order.reasons.includes(reason);
+  const over =
+    still("SPEND_OVER_LIMIT") && limit !== null && c.total.gross > limit
+      ? (["SPEND_OVER_LIMIT"] as const)
+      : [];
+  const differs =
+    still("AVAILABILITY_DIFFERS") && (c.shortfall !== null || isLate(c))
+      ? (["AVAILABILITY_DIFFERS"] as const)
+      : [];
+  const own = order.audit.flatMap((e) =>
+    e.productId === c.productId && e.reason !== undefined && still(e.reason) ? [e.reason] : [],
+  );
+  return [...new Set<ReasonCode>([...over, ...differs, ...own])];
+};
+
+/** A pending line as an offer with the pre-check the order holds for it, so the offer
+ * comparison's rules (reason, price per l/kg, sentence, details) read it the same way. */
+const offerOf = (order: Order, c: OfferClaims, limit: number | null): OfferLine => {
+  const reasons = lineReasons(order, c, limit);
+  return {
+    offerId: c.offerId,
+    token: "",
+    claims: c,
+    precheck: { decision: reasons.length === 0 ? "auto" : "needs_approval", reasons },
+    rank: null,
+    comparison: null,
+  };
+};
+
+const STATUS_ICON = { auto: checkCircle, attention: warning16 } as const;
 const daysLate = (c: OfferClaims) =>
   Math.round((Date.parse(c.deliveryDate) - Date.parse(c.requestedDate)) / 86_400_000);
 /** A short line in sales units: what arrives on its date, what is missing, and both together. */
@@ -300,6 +346,7 @@ export class ApprovalCard extends LitElement {
     remembered: { type: Boolean },
     rules: { attribute: false },
     ruleDismissed: { state: true },
+    openLine: { state: true },
   };
 
   static override styles = [
@@ -842,6 +889,72 @@ export class ApprovalCard extends LitElement {
       .receipt .row dt {
         width: 140px;
       }
+      .line-offer {
+        padding-top: var(--spacing-xs);
+      }
+      .offer-toggle {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        width: 100%;
+        min-height: 44px;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .offer-status.auto .icon {
+        color: var(--color-text-success);
+      }
+      .offer-status.attention .icon,
+      .offer-reason,
+      .offer-sentence.attention {
+        color: var(--color-text-warning);
+      }
+      .offer-reason {
+        flex: 1;
+        font-size: var(--font-size-xs);
+      }
+      .offer-price {
+        margin-left: auto;
+        font-size: var(--font-size-xs);
+        white-space: nowrap;
+      }
+      .offer-toggle .chevron .icon {
+        color: var(--color-text-brand);
+      }
+      .offer-toggle[aria-expanded="true"] .chevron .icon {
+        transform: rotate(180deg);
+      }
+      .offer-details {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        padding-bottom: var(--spacing-sm);
+      }
+      .offer-sentence {
+        margin: 0;
+      }
+      .offer-facts {
+        display: grid;
+        gap: var(--spacing-xs);
+        margin: 0;
+      }
+      .offer-facts div {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+      }
+      .offer-facts dt {
+        color: var(--color-text-secondary);
+      }
+      .offer-facts dd {
+        margin: 0;
+        text-align: right;
+      }
     `,
   ];
 
@@ -878,6 +991,8 @@ export class ApprovalCard extends LitElement {
   declare rules: SubstitutionRule[];
   /** "Keep asking" hides the offer. */
   declare private ruleDismissed: boolean;
+  /** The offerId of the product row whose offer details are open; one at a time. */
+  declare private openLine: string | null;
 
   constructor() {
     super();
@@ -898,6 +1013,7 @@ export class ApprovalCard extends LitElement {
     this.confirming = null;
     this.remembered = false;
     this.rules = [];
+    this.openLine = null;
     this.ruleDismissed = false;
   }
 
@@ -1479,7 +1595,7 @@ export class ApprovalCard extends LitElement {
                     </div>`
                   : amounts
               }
-              ${this.lineTrust(order, head)}
+              ${this.lineTrust(order, head)} ${this.lineOffer(order, head)}
             </div>
           </div>`;
     return html`<li
@@ -1489,6 +1605,55 @@ export class ApprovalCard extends LitElement {
     >
       ${summary} ${flagged ? this.lineDecision(order, c) : nothing}
     </li>`;
+  }
+
+  /**
+   * The offer summary of a pending line: status icon, short reason and price per l/kg, with a
+   * chevron that opens the sentence and the offer's facts inline; one row open at a time.
+   */
+  private lineOffer(order: Order, c: OfferClaims) {
+    if (order.status !== "pending_approval") return nothing;
+    const text = pick(CARD);
+    const line = offerOf(order, c, this.orderLimit);
+    const status = statusOf(line);
+    const reason = shortReason(line);
+    const price = pricePerStdUnit(c);
+    const open = this.openLine === c.offerId;
+    const panel = `offer-${c.offerId}`;
+    const label = [statusWords(line), reason, price?.spoken ?? text.priceUnknown, text.offerDetails]
+      .filter((part) => part !== null)
+      .join(", ");
+    return html`<div class="line-offer">
+      <button
+        type="button"
+        class="offer-toggle"
+        aria-expanded=${open ? "true" : "false"}
+        aria-controls=${panel}
+        aria-label=${label}
+        @click=${() => (this.openLine = open ? null : c.offerId)}
+      >
+        <span class="offer-status ${status}">${icon(STATUS_ICON[status])}</span>
+        <span class="offer-reason">${reason ?? nothing}</span>
+        <span class="offer-price">${price?.shown ?? "—"}</span>
+        <span class="chevron">${icon(chevronDown)}</span>
+      </button>
+      ${
+        open
+          ? html`<div class="offer-details" id=${panel}>
+              <p class="offer-sentence body-small ${status}">${explain(line, this.orderLimit)}</p>
+              <dl class="offer-facts body-small">
+                ${details(line).map(
+                  ([name, value]) =>
+                    html`<div>
+                      <dt>${name}</dt>
+                      <dd>${value}</dd>
+                    </div>`,
+                )}
+              </dl>
+            </div>`
+          : nothing
+      }
+    </div>`;
   }
 
   /** The agent's reason for a product and its allergen chips (#74). */

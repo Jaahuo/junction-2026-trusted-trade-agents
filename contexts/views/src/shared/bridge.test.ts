@@ -16,8 +16,9 @@ const order: Order = { ...fixtures.order, lines: [], status: "placed", approvalU
 const mandate = fixtures.storedMandate;
 
 /** A fake MCP Apps host: records server-tool calls and delivers one tool result. */
-function fakeHost(answer: Awaited<ReturnType<Host["callServerTool"]>>) {
+function fakeHost(answer: Awaited<ReturnType<Host["callServerTool"]>>, accepts = true) {
   const calls: Parameters<Host["callServerTool"]>[0][] = [];
+  const messages: string[] = [];
   const listeners: ((structuredContent: unknown) => void)[] = [];
   const host: Host = {
     onToolResult: (listener) => listeners.push(listener),
@@ -25,11 +26,15 @@ function fakeHost(answer: Awaited<ReturnType<Host["callServerTool"]>>) {
       calls.push(request);
       return answer;
     },
+    sendMessage: async (text) => {
+      messages.push(text);
+      return accepts;
+    },
   };
   const deliver = (value: unknown) => {
     for (const listener of listeners) listener(value);
   };
-  return { host, calls, deliver };
+  return { host, calls, messages, deliver };
 }
 
 /** A fake fetch: records each request and answers with one JSON body. */
@@ -120,4 +125,22 @@ test("a failed action call gives the error state with the plain-page link", asyn
     kind: "error",
     plainUrl,
   });
+});
+
+test("host mode sends agent messages to the chat and fails when the host rejects one", async () => {
+  const { host, messages } = fakeHost({});
+  await hostSource(host).message?.("About the order: order less of each");
+  expect(messages).toEqual(["About the order: order less of each"]);
+
+  const rejecting = fakeHost({}, false);
+  expect(hostSource(rejecting.host).message?.("Hello")).rejects.toThrow("did not take");
+});
+
+test("plain mode has no chat to message", () => {
+  const source = plainSource("order-timeline", {
+    fetch: fakeFetch(order).fetch,
+    baseUrl,
+    query: new URLSearchParams(),
+  });
+  expect(source.message).toBeUndefined();
 });

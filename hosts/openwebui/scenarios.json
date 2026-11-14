@@ -11,6 +11,34 @@
     ]
   },
   {
+    "name": "multi-product",
+    "steps": [
+      {
+        "say": "We need 10 litres of whole milk, 10 litres of oat drink and 10 litres of cooking cream on Monday."
+      }
+    ],
+    "expect": [
+      { "maxOrders": 1 },
+      {
+        "orderContents": {
+          "products": [
+            "^(?!.*(?:cream|kerma|oat|kaura)).*(?:whole milk|full milk|täysmaito)",
+            "(?:oat drink|oat milk|kaurajuoma)",
+            "(?:cooking cream|ruokakerma)"
+          ],
+          "quantity": { "value": 10, "unit": "LTR" },
+          "weekday": "Monday"
+        }
+      },
+      { "callCount": { "tool": "place_order", "count": 1 } },
+      { "callCount": { "tool": "quote_offers", "count": 1 } },
+      { "quoteLines": 3 },
+      { "notCalled": "search_products" },
+      { "notCalled": "get_offers" },
+      { "notCalled": "get_order_status" }
+    ]
+  },
+  {
     "name": "plant-yogurt",
     "steps": [
       { "say": "We need 240 tubs of lactose-free plain plant yogurt delivered on Monday." }

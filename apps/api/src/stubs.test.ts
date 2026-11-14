@@ -33,7 +33,7 @@ const inputs: { [K in RouteKey]: RouteInput<K> } = {
   account: {},
   openapi: {},
 };
-const implemented = new Set<RouteKey>(["search", "facts"]);
+const implemented = new Set<RouteKey>(["search", "facts", "openapi"]);
 
 // A context leaves this test when it adds migrations: its own route tests then cover its routes
 // against a real database. The remaining stub contexts never contact the database.

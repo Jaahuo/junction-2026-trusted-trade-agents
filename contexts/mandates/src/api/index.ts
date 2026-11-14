@@ -46,15 +46,24 @@ export const createApi = (
       "/",
       {
         body: RegisterMandateRequestSchema,
-        response: { 200: StoredMandateSchema, 201: StoredMandateSchema },
+        response: { 200: StoredMandateSchema, 201: StoredMandateSchema, 400: ErrorEnvelopeSchema },
       },
       async ({ body, request, status }) => {
-        const { stored, replayed } = await registerMandate(
+        const result = await registerMandate(
           { store, sign },
           await principalFrom(request),
           body,
           now(),
         );
+        if (!result.ok) {
+          return status(400, {
+            error: {
+              code: "BAD_REQUEST" as const,
+              message: "Mandate expiry must be in the future.",
+            },
+          });
+        }
+        const { stored, replayed } = result.value;
         return replayed ? stored : status(201, stored);
       },
     )

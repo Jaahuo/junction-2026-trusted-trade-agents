@@ -21,18 +21,20 @@ export interface Registration {
   readonly replayed: boolean;
 }
 
+export type RegistrationError = "expired";
+
 export interface MandateStore {
   /**
    * In one transaction, serialised per owner: returns the mandate stored under `operationId` when
-   * there is one; otherwise revokes the owner's active mandate and stores the signed mandate that
-   * `next` builds from the highest stored version (0 when none).
+   * there is one; otherwise builds a signed mandate from the highest stored version (0 when none)
+   * and, if valid, revokes the owner's active mandate and stores the new mandate.
    */
   replaceActive(
     owner: MandateOwner,
     operationId: string | undefined,
-    next: (previousVersion: number) => Promise<SignedMandate>,
+    next: (previousVersion: number) => Promise<Result<SignedMandate, RegistrationError>>,
     registeredAt: Date,
-  ): Promise<Registration>;
+  ): Promise<Result<Registration, RegistrationError>>;
   findActive(owner: MandateOwner): Promise<StoredMandate | null>;
   /** Marks the owner's mandate revoked and returns it; null when the owner has no such mandate. */
   revoke(owner: MandateOwner, mandateId: string): Promise<StoredMandate | null>;
@@ -53,13 +55,16 @@ export const registerMandate = (
   request: RegisterMandateRequest,
   now: Date,
   mandateId: string = newMandateId(),
-): Promise<Registration> =>
+): Promise<Result<Registration, RegistrationError>> =>
   ports.store.replaceActive(
     ownerOf(principal),
     request.operationId,
     async (previousVersion) => {
+      if (request.exp !== undefined && request.exp <= Math.floor(now.getTime() / 1000)) {
+        return err("expired");
+      }
       const mandate = buildMandate({ principal, request, mandateId, previousVersion, now });
-      return { mandate, jws: await ports.sign(mandate) };
+      return ok({ mandate, jws: await ports.sign(mandate) });
     },
     now,
   );

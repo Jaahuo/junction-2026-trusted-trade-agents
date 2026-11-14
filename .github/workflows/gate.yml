@@ -1,38 +1,15 @@
 name: gate
 on:
   pull_request:
-  push:
-    branches: [main]
-  schedule:
-    - cron: "17 3 * * *"
-  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
-  quality:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'bun.lock') }}
-      - run: bun install --frozen-lockfile
-      - run: bun check
-      - run: bunx vp check
-      - run: bunx knip
-      - run: bunx jscpd
-      - run: |
-          bun scripts/db-generate.ts
-          if [ -n "$(git status --porcelain --untracked-files=all -- 'contexts/*/migrations')" ]; then
-            echo "Schema changed without a migration"
-            exit 1
-          fi
-
-  test:
-    runs-on: ubuntu-24.04
+  gate:
+    name: gate
+    runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 20
     services:
       postgres:
@@ -44,22 +21,32 @@ jobs:
         ports:
           - 5432:5432
         options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
           --health-cmd "pg_isready -U postgres -d test_db"
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 5
-    env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db
-      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db
+          --health-retries 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
-      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'bun.lock') }}
+          fetch-depth: 0
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
       - run: bun install --frozen-lockfile
+      - run: gitleaks git --redact --no-banner
+      - run: bun check
+      - run: bunx vp check
+      - run: bunx knip
+      - run: bunx jscpd
+      - run: |
+          bun scripts/db-generate.ts
+          if [ -n "$(git status --porcelain --untracked-files=all -- 'contexts/*/migrations')" ]; then
+            echo "Schema changed without a migration"
+            exit 1
+          fi
       - name: Run tests in an isolated process namespace
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db
         run: |
           sudo --preserve-env=PATH,HOME,DATABASE_URL,TEST_DATABASE_URL,MISE_LOG_LEVEL,MISE_TRUSTED_CONFIG_PATHS,MISE_YES \
             /usr/bin/unshare --mount --propagation private --pid --fork \
@@ -68,40 +55,3 @@ jobs:
               /usr/bin/mount --types proc proc /proc
               exec /usr/bin/setpriv --reuid="$1" --regid="$2" --init-groups bun test
             ' sh "$(id -u)" "$(id -g)"
-
-  secrets:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
-      - run: gitleaks git --redact --no-banner
-
-  gate:
-    name: gate
-    if: always()
-    needs: [quality, test, secrets]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - env:
-          QUALITY: ${{ needs.quality.result }}
-          TEST: ${{ needs.test.result }}
-          SECRETS: ${{ needs.secrets.result }}
-        run: |
-          for result in "$QUALITY" "$TEST" "$SECRETS"; do
-            if [ "$result" != success ]; then exit 1; fi
-          done
-
-  deploy:
-    name: deploy
-    needs: gate
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    permissions:
-      contents: read
-      actions: read
-      packages: write
-    uses: ./.github/workflows/deploy.yml
-    secrets: inherit

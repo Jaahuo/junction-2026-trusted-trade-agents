@@ -398,7 +398,7 @@ export const deployWarning = (runs: unknown): string | undefined => {
 /** Looks up the latest completed deploy of main; never fails, because the warning is advisory. */
 export const latestDeployWarning = async (): Promise<string | undefined> => {
   const result =
-    await $`gh run list --workflow deploy.yml --branch main --status completed --limit 1 --json conclusion,headSha,url`
+    await $`gh run list --workflow gate.yml --branch main --event push --status completed --limit 1 --json conclusion,headSha,url`
       .nothrow()
       .quiet();
   if (result.exitCode !== 0) return "Warning: could not read the latest deploy of main.";

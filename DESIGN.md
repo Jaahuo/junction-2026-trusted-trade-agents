@@ -107,6 +107,7 @@ Borders separate surfaces, shadows only lift what floats.
 MCP App views in `contexts/views` follow the Junction 2026 Figma file (Screens, "Approval request"), not the tables above. They are Lit web components with shadow DOM, so one element works in a chat host, the web app and any other framework.
 
 - Tokens: `contexts/views/src/shared/styles.ts`, named as the Figma variables (`--color-bg-brand`, `--spacing-xl` and so on). Change a value there when the design changes.
+- Fonts: Nunito (text) and Barlow Condensed (buttons), embedded as WOFF2 by `contexts/views/src/shared/fonts.ts`. A view loads no external font.
 - Shared parts: buttons (`.btn primary|secondary|ghost`), chips, fields, messages, spinner and empty state in the same file.
 - Native `<button>` and `<input>` are allowed inside a view's shadow DOM. Give each control a visible label.
 - A host page restyles a view through the tokens on the element or through its `part` names, never by reaching into the shadow DOM.

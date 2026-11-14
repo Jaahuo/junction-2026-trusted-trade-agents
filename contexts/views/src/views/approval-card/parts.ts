@@ -53,8 +53,8 @@ export const icon = (svg: string, label?: string) =>
 export const brandHeader = (eyebrow: string, title?: TemplateResult, facts?: TemplateResult) =>
   html`<header class="header" part="header">
     <div class="eyebrow-row">
+      ${icon(logo, "Valio Aimo")}<span class="divider" aria-hidden="true"></span>
       <p class="label-small eyebrow">${eyebrow}</p>
-      ${icon(logo, "Valio Aimo")}
     </div>
     ${title ?? nothing} ${facts ?? nothing}
   </header>`;
@@ -99,11 +99,16 @@ export const cardStyles = css`
     background: var(--color-bg-brand);
     color: var(--color-text-on-brand);
   }
+  /* v11: logo first, a thin divider, then the eyebrow. */
   .eyebrow-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-sm);
+    gap: var(--spacing-md);
+  }
+  .divider {
+    width: 1px;
+    height: 14px;
+    background: var(--color-text-on-brand-subtle);
   }
   .eyebrow {
     color: var(--color-text-on-brand-subtle);

@@ -106,7 +106,7 @@ export function renderOrderTimeline(order: Order): TemplateResult {
                     <h4 class="body-small">${text.events[event.event]}</h4>
                     ${event.reason ? html`<p class="body-small">${text.reason[event.reason]}</p>` : nothing}
                     ${event.rule ? html`<span class="body-small" title=${event.rule}>${text.supportRule}</span>` : nothing}
-                    ${event.detail ? html`<p class="body-small">${event.detail}</p>` : nothing}
+                    ${event.detail && (!event.reason || event.detail !== text.reason[event.reason]) ? html`<p class="body-small">${event.detail}</p>` : nothing}
                     ${
                       event.integrityOk === false
                         ? html`<p class="strong tampered">${text.entryChanged}</p>`

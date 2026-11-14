@@ -6,6 +6,7 @@ import {
   APPROVAL_REASONS,
   AUDIT_EVENTS,
   DEMO_ACCOUNT,
+  DraftMandateRequestSchema,
   ERROR_CODES,
   fixtures,
   MODEL_TOOLS,
@@ -15,6 +16,7 @@ import {
   PlaceOrderRequestSchema,
   REASON_TEXT,
   REJECT_REASONS,
+  MandateDraftSchema,
   ROUTES,
   SearchRequestSchema,
   TOOL_INPUT,
@@ -108,7 +110,7 @@ test("MODEL_TOOLS, VIEW_TOOLS, PAYMENT_TERMS, ORDER_STATUSES, reason lists, AUDI
   same(REJECT_REASONS, specList("REJECT_REASONS"));
   same(AUDIT_EVENTS, specList("AUDIT_EVENTS"));
   const table = routeTable();
-  expect(table).toHaveLength(15);
+  expect(table).toHaveLength(16);
   same(
     ROUTES.map(({ key, tool, method, path, context, output }) => ({
       key,
@@ -166,6 +168,18 @@ test("OrderSchema and PlaceOrderRequestSchema reject an unknown key such as stat
     PlaceOrderRequestSchema.safeParse({ ...fixtures.placeOrderRequest, status: "placed" }).success,
   ).toBe(false);
   expect(PlaceOrderRequestSchema.safeParse(fixtures.placeOrderRequest).success).toBe(true);
+});
+
+test("a mandate draft takes the register body without operationId and has the current mandate or null", () => {
+  const { operationId: _operationId, ...draft } = fixtures.registerMandateRequest;
+  expect(DraftMandateRequestSchema.safeParse(draft).success).toBe(true);
+  expect(DraftMandateRequestSchema.safeParse(fixtures.registerMandateRequest).success).toBe(false);
+  expect(DraftMandateRequestSchema.safeParse({ ...draft, mandateId: "mnd_1" }).success).toBe(false);
+  expect(MandateDraftSchema.safeParse({ draft, current: null }).success).toBe(true);
+  expect(MandateDraftSchema.safeParse({ draft }).success).toBe(false);
+  expect(MandateDraftSchema.safeParse({ ...fixtures.mandateDraft, registered: true }).success).toBe(
+    false,
+  );
 });
 
 test("DEMO_ACCOUNT equals the SPEC-015 values", () => {

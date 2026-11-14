@@ -1,4 +1,9 @@
-@import "tailwindcss";
-@import "@app/ui/theme.css" theme(static);
-@source "..";
-@source "../../../../packages/ui/src";
+@import "@app/ui/skin.css";
+@import "@app/ui/fonts.css";
+
+body {
+  margin: 0;
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+  font-family: var(--font-family-sans);
+}

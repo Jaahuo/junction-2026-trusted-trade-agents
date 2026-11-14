@@ -1,126 +1,175 @@
-# Junction 2026 design system
+# Aimo design system
 
-Read this before you build or change a screen.
-The tokens live in `packages/ui/src/theme.css` and the components in `packages/ui/src`.
-A test fails when this file and those two sources disagree.
+The web app and MCP App views share one Valio Aimo wholesaler skin.
+The source of truth is `packages/ui/src/skin.css`.
+`parts.css` defines shared buttons and status pills.
+`fonts.css` loads the bundled fonts.
+`theme.css` imports these files and maps skin tokens to Tailwind utilities.
+React components live in `packages/ui/src`; Lit views use the same skin and parts inside shadow DOM.
 
 ## Colors
 
-Use the token class, never a raw palette color such as `bg-blue-500`.
-To rebrand the app, change the values in `theme.css` and in this table.
+Use semantic tokens instead of raw palette colors.
+The lavender surface is an intentional part of the Aimo skin, not a separate theme.
 
-| Token                        | Value                    | Class examples                   | Use for                                                 |
-| ---------------------------- | ------------------------ | -------------------------------- | ------------------------------------------------------- |
-| `--color-background`         | `oklch(0.985 0.002 250)` | `bg-background`                  | Page background.                                        |
-| `--color-surface`            | `oklch(1 0 0)`           | `bg-surface`                     | Cards, inputs, dialogs, the top bar.                    |
-| `--color-foreground`         | `oklch(0.21 0.02 260)`   | `text-foreground`                | Main text.                                              |
-| `--color-muted`              | `oklch(0.52 0.02 260)`   | `text-muted`                     | Secondary text, hints, table headers.                   |
-| `--color-border`             | `oklch(0.91 0.01 260)`   | `border-border`, `divide-border` | Every border and divider.                               |
-| `--color-primary`            | `oklch(0.5 0.2 265)`     | `bg-primary`, `text-primary`     | The one main action per view, active navigation, links. |
-| `--color-primary-hover`      | `oklch(0.44 0.2 265)`    | `hover:bg-primary-hover`         | Hover state of primary.                                 |
-| `--color-primary-foreground` | `oklch(0.99 0 0)`        | `text-primary-foreground`        | Text on primary and danger fills.                       |
-| `--color-danger`             | `oklch(0.55 0.21 27)`    | `text-danger`, `bg-danger`       | Errors and destructive actions.                         |
-| `--color-success`            | `oklch(0.55 0.14 155)`   | `text-success`                   | Confirmed, healthy, done.                               |
-| `--color-warning`            | `oklch(0.7 0.15 75)`     | `bg-warning/20`                  | Needs attention, not broken.                            |
+| Token                          | Value       | Use                               |
+| ------------------------------ | ----------- | --------------------------------- |
+| `--color-bg-brand`             | `#005670`   | Brand backgrounds.                |
+| `--color-text-brand`           | `#005670`   | Brand text.                       |
+| `--color-heading`              | `#005670`   | Headings.                         |
+| `--color-link`                 | `#005670`   | Links.                            |
+| `--color-border-brand`         | `#005670`   | Brand borders and focus outline.  |
+| `--color-button`               | `#c0e021`   | Primary button fill.              |
+| `--color-button-text`          | `#003747`   | Primary button text.              |
+| `--color-light-purple-aimo`    | `#eee8f5`   | Lavender skin surface.            |
+| `--color-bg-attention`         | `#fff3b0`   | Attention pill background.        |
+| `--color-text`                 | `#23282d`   | Main text.                        |
+| `--color-text-secondary`       | `#555759`   | Secondary text.                   |
+| `--color-text-on-brand`        | `#ffffff`   | Text on brand fills.              |
+| `--color-text-on-brand-subtle` | `#d9e6ea`   | Secondary text on brand fills.    |
+| `--color-text-warning`         | `#92400e`   | Warning text.                     |
+| `--color-text-danger`          | `#b91c1c`   | Error text and danger buttons.    |
+| `--color-text-success`         | `#15803d`   | Success text.                     |
+| `--color-on-danger`            | `#ffffff`   | Text on danger fills.             |
+| `--color-white`                | `#ffffff`   | White surfaces.                   |
+| `--color-border`               | `#0000001a` | Borders and dividers.             |
+| `--color-border-strong`        | `#818181`   | Strong borders and disabled text. |
+| `--color-bg-brand-subtle`      | `#f2f7f8`   | Information background.           |
+| `--color-bg-subtle`            | `#f4f4f4`   | Page and neutral backgrounds.     |
+| `--color-bg-warning`           | `#fef3c7`   | Warning background.               |
+| `--color-bg-success`           | `#eaf8e9`   | Success background.               |
+| `--color-bg-danger`            | `#fdedeb`   | Error background.                 |
 
-Tints use opacity on a token, for example `bg-primary/10` or `border-danger/40`.
+The web theme maps `background`, `surface`, `foreground`, `muted`, `primary`,
+`primary-hover`, `primary-foreground`, `danger`, `success`, and `warning` utilities
+to these skin colors. `primary` is the link color; the primary button uses
+`--color-button` through the shared `.btn` rules.
 
 ## Typography
 
-One font: the Tailwind default sans stack (system UI font).
-Do not add a web font without updating this file.
+`fonts.css` bundles Latin WOFF2 files; no external font request is needed.
 
-| Role                 | Classes                                 | Where                                  |
-| -------------------- | --------------------------------------- | -------------------------------------- |
-| Page title           | `text-2xl font-semibold tracking-tight` | `PageHeader` only, one per screen.     |
-| Section title        | `text-lg font-semibold`                 | `CardTitle`, dialog title.             |
-| Body                 | default size, normal weight             | Content and list rows.                 |
-| Label and small text | `text-sm`, labels add `font-medium`     | `Field` labels, hints, tables, alerts. |
-| Badge                | `text-xs font-medium`                   | `Badge` only.                          |
+| Role                    | Font                                              | Weights            |
+| ----------------------- | ------------------------------------------------- | ------------------ |
+| Body and interface text | Nunito, then system UI sans-serif                 | 400, 600, 700, 800 |
+| Headings and buttons    | Barlow Condensed, then Arial Narrow or sans-serif | 400, 600, 700, 800 |
 
-## Spacing
+| Size token        | Value |
+| ----------------- | ----- |
+| `--font-size-2xs` | 12px  |
+| `--font-size-xs`  | 14px  |
+| `--font-size-sm`  | 16px  |
+| `--font-size-md`  | 18px  |
+| `--font-size-lg`  | 20px  |
+| `--font-size-xl`  | 24px  |
+| `--font-size-2xl` | 32px  |
 
-Use the Tailwind 4 px scale.
-Arbitrary values such as `p-[13px]` are lint errors.
+The weight tokens are `regular` 400, `semibold` 600, `bold` 700, and `extrabold` 800.
 
-| Where                           | Value                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------- |
-| Page container                  | `max-w-4xl px-6 py-8`, set by the app shell. Screens do not set their own. |
-| Between cards and sections      | `gap-4`                                                                    |
-| Inside a card                   | `p-5`, set by `Card`.                                                      |
-| Between a label and its control | `gap-1.5`, set by `Field`.                                                 |
-| Between controls in a row       | `gap-2`                                                                    |
-| Control height                  | `h-10`, small buttons `h-8`.                                               |
+`--letter-spacing-label` is 0.2px for labels.
 
-## Shape
+## Spacing and shape
 
-| Token         | Value     | Class        | Use for                                    |
-| ------------- | --------- | ------------ | ------------------------------------------ |
-| `--radius-md` | `0.5rem`  | `rounded-md` | Buttons, inputs, alerts, navigation items. |
-| `--radius-xl` | `0.75rem` | `rounded-xl` | Cards, tables, dialogs, empty states.      |
+| Spacing token   | Value |
+| --------------- | ----- |
+| `--spacing-2xs` | 2px   |
+| `--spacing-xs`  | 4px   |
+| `--spacing-sm`  | 8px   |
+| `--spacing-md`  | 12px  |
+| `--spacing-lg`  | 16px  |
+| `--spacing-xl`  | 24px  |
+| `--spacing-2xl` | 32px  |
 
-Badges are `rounded-full`.
-Use no other radius.
+| Shape token              | Value                         | Use                          |
+| ------------------------ | ----------------------------- | ---------------------------- |
+| `--border-radius-square` | 0px                           | Square surfaces and buttons. |
+| `--border-radius-md`     | 5px                           | Standard controls.           |
+| `--border-radius-lg`     | 10px                          | Larger rounded surfaces.     |
+| `--radius-full`          | 999px                         | Status pills.                |
+| `--radius-md`            | `var(--border-radius-md)`     | Tailwind medium radius.      |
+| `--radius-xl`            | `var(--border-radius-square)` | Tailwind extra-large radius. |
+
+The default border width, `--border-width-default`, is 1px.
+
+Cards are square. Shared primary, brand, and danger buttons are square.
+The shared button minimum height is `--size-button` (44px), its border is
+`--border-width-button` (2px), and its focus outline is `--size-focus-outline` (3px).
+Buttons use 8px vertical and 24px horizontal padding.
+
+## Buttons and status
+
+Shared buttons use Barlow Condensed, 18px bold uppercase text, and a visible focus outline.
+React `Button` supports `primary`, `secondary`, `ghost`, and `danger`.
+The shared CSS also provides `brand` for view consumers.
+Both React size options, `md` and `sm`, currently use the shared button dimensions.
+
+| Button      | Fill                  | Text                    | Border / shape                  |
+| ----------- | --------------------- | ----------------------- | ------------------------------- |
+| `primary`   | `--color-button`      | `--color-button-text`   | Square, transparent border.     |
+| `secondary` | `--color-white`       | `--color-text-brand`    | Brand border, 5px radius.       |
+| `ghost`     | Transparent           | `--color-text-brand`    | Transparent border, 5px radius. |
+| `brand`     | `--color-bg-brand`    | `--color-text-on-brand` | Square, transparent border.     |
+| `danger`    | `--color-text-danger` | `--color-on-danger`     | Square, transparent border.     |
+| Disabled    | `--color-bg-subtle`   | `--color-border-strong` | Transparent border.             |
+
+Pills use 12px bold text, a full radius, and 4px/12px/4px/8px padding.
+An unqualified pill uses the attention background and main text.
+
+| Status tone | Background                | Text                   |
+| ----------- | ------------------------- | ---------------------- |
+| `neutral`   | `--color-bg-subtle`       | `--color-text`         |
+| `info`      | `--color-bg-brand-subtle` | `--color-text-brand`   |
+| `success`   | `--color-bg-success`      | `--color-text-success` |
+| `warning`   | `--color-bg-warning`      | `--color-text-warning` |
+| `danger`    | `--color-bg-danger`       | `--color-text-danger`  |
 
 ## Components
 
-Import every component from `@app/ui`.
-Raw `<button>`, `<input>`, `<textarea>`, `<select>`, `<dialog>` and `<table>` in a screen are lint errors.
-On a component, `className` may only change layout (width, margin, flex, grid).
-If a component or variant is missing, add it to `packages/ui` and to this table in its own commit.
+Import React components from `@app/ui`.
+Use the shared components for controls and feedback.
 
-| Component    | Use for                                              | Notes                                                                                                       |
-| ------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `PageHeader` | Title, one-line description and page actions.        | First element of every screen.                                                                              |
-| `Card`       | A group of related content.                          | Add `CardTitle` when the card needs a heading.                                                              |
-| `CardTitle`  | The heading of a card.                               |                                                                                                             |
-| `Button`     | Every action.                                        | Variants: `primary`, `secondary`, `ghost`, `danger`. Sizes: `md`, `sm`. Set `loading` while a request runs. |
-| `Field`      | Label, hint and error around one control.            | Pass the error text in `error`.                                                                             |
-| `Input`      | One line of text.                                    | Wrap in `Field`.                                                                                            |
-| `Textarea`   | Several lines of text.                               | Wrap in `Field`.                                                                                            |
-| `Select`     | One choice from a short list.                        | Wrap in `Field`.                                                                                            |
-| `Table`      | Rows of comparable records.                          | Use `Th` and `Td` for cells.                                                                                |
-| `Th`         | A header cell.                                       |                                                                                                             |
-| `Td`         | A body cell.                                         |                                                                                                             |
-| `Badge`      | A status word.                                       | Tones: `neutral`, `info`, `success`, `warning`, `danger`.                                                   |
-| `Alert`      | A message that stays on the page.                    | Same tones as `Badge` except `neutral`. Optional `title`.                                                   |
-| `EmptyState` | A list or screen with no data yet.                   | Say what to do next, and add the action when there is one.                                                  |
-| `Spinner`    | Loading with no layout to show yet.                  | `Button` shows its own.                                                                                     |
-| `Dialog`     | A short task or a confirmation over the page.        | Put the actions in `footer`, primary action last.                                                           |
-| `toast`      | Feedback for an action that just finished or failed. | `toast.success(text)` and `toast.error(text)`.                                                              |
-| `Toaster`    | Renders toasts.                                      | Mounted once by the app shell. Do not add another.                                                          |
-| `cn`         | Joins class names inside `packages/ui`.              |                                                                                                             |
+| Component    | Use for                                       | Notes                                                                                |
+| ------------ | --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `PageHeader` | Title, description and page actions.          | Use one per screen.                                                                  |
+| `Card`       | A group of related content.                   | Add `CardTitle` when it needs a heading.                                             |
+| `CardTitle`  | A card heading.                               |                                                                                      |
+| `Button`     | Actions.                                      | Variants: `primary`, `secondary`, `ghost`, `danger`. Set `loading` during a request. |
+| `Field`      | Label, hint and error around one control.     | Pass the error text in `error`.                                                      |
+| `Input`      | One line of text.                             | Wrap in `Field`.                                                                     |
+| `Textarea`   | Several lines of text.                        | Wrap in `Field`.                                                                     |
+| `Select`     | One choice from a short list.                 | Wrap in `Field`.                                                                     |
+| `Table`      | Rows of comparable records.                   | Use `Th` and `Td` for cells.                                                         |
+| `Th`         | A header cell.                                |                                                                                      |
+| `Td`         | A body cell.                                  |                                                                                      |
+| `Badge`      | A status word.                                | Tones: `neutral`, `info`, `success`, `warning`, `danger`.                            |
+| `Alert`      | A message that stays on the page.             | Tones: `info`, `success`, `warning`, `danger`. Optional `title`.                     |
+| `EmptyState` | A list or screen with no data yet.            | Say what to do next and add an action when needed.                                   |
+| `Spinner`    | Loading with no layout to show yet.           | `Button` shows its own.                                                              |
+| `Dialog`     | A short task or a confirmation over the page. | Put actions in `footer`, primary action last.                                        |
+| `toast`      | Feedback for a finished or failed action.     | Use `toast.success(text)` or `toast.error(text)`.                                    |
+| `Toaster`    | Renders toasts.                               | The app shell mounts it once.                                                        |
+| `cn`         | Joins class names inside `packages/ui`.       |                                                                                      |
 
-## Elevation
+## Views and another wholesaler
 
-The interface is flat.
-Borders separate surfaces, shadows only lift what floats.
+Lit views use shadow DOM and share the skin, fonts, and parts with the web app.
+View consumers import the same brand data and asset as the web app.
+Use visible labels for controls and keep keyboard focus visible.
+Use tokens and exposed `part` names for host customization.
 
-| Level    | Class       | Use for                                  |
-| -------- | ----------- | ---------------------------------------- |
-| Flat     | none        | Page, top bar, inputs, tables.           |
-| Raised   | `shadow-sm` | `Card`.                                  |
-| Floating | `shadow-xl` | `Dialog`, over a `bg-black/40` backdrop. |
+To introduce another wholesaler:
 
-## Views
-
-MCP App views in `contexts/views` follow the Junction 2026 Figma file (Screens, "Approval request"), not the tables above. They are Lit web components with shadow DOM, so one element works in a chat host, the web app and any other framework.
-
-- Tokens: `contexts/views/src/shared/styles.ts`, named as the Figma variables (`--color-bg-brand`, `--spacing-xl` and so on). Change a value there when the design changes.
-- Fonts: Nunito (text) and Barlow Condensed (buttons), embedded as WOFF2 by `contexts/views/src/shared/fonts.ts`. A view loads no external font.
-- Shared parts: buttons (`.btn primary|secondary|ghost`), chips, fields, messages, spinner and empty state in the same file.
-- Native `<button>` and `<input>` are allowed inside a view's shadow DOM. Give each control a visible label.
-- A host page restyles a view through the tokens on the element or through its `part` names, never by reaching into the shadow DOM.
-- The Figma file is the source of truth. Its newest iteration is the current design.
+1. Replace the values in the single shared `packages/ui/src/skin.css`.
+2. Replace the brand name and logo asset referenced by `packages/ui/src/brand.ts`.
+3. Keep the web app and view consumers on that shared skin and brand data.
+4. Update the tables in this document to match the new skin.
 
 ## Guidelines
 
-1. Each view has one `primary` button. Every other action is `secondary` or `ghost`.
-2. Destructive actions use `danger` and ask for confirmation in a `Dialog`.
-3. Every request shows its state: `loading` on the button, `Spinner` or `EmptyState` in the list, and the error next to its cause.
-4. Show a validation error in the `Field` it belongs to. Show a failed action with `toast.error`. Never show a raw error code.
-5. Write interface text in sentence case, short and concrete: "Add note", not "Submit".
-6. Every control has a visible label through `Field`. A placeholder is not a label.
-7. Keep the keyboard working: forms submit on Enter, and the focus ring stays visible.
-8. Do not use inline styles, arbitrary values or colors outside the token table.
-9. Design for a 1000 px wide laptop window first. Nothing may scroll sideways at 400 px.
+1. Use one primary action per view. Use secondary or ghost actions for the rest.
+2. Confirm destructive actions before they run.
+3. Show loading and error states near the action or control.
+4. Write short, concrete interface text in sentence case.
+5. Give each control a visible label. A placeholder is not a label.
+6. Keep forms and focus states usable with a keyboard.
+7. Design for a 1000px laptop window first. Avoid horizontal scrolling at 400px.

@@ -124,6 +124,8 @@ They combine concise ordering replies with structured recipe planning.
 The main project's ordering skill and reason-code reference are embedded in both system prompts.
 Valio Aimo recipe reads are off by default pending permission.
 For an authorized manual deployment, set `VALIO_AIMO_RECIPE_PERMISSION=True` in the deployment process environment.
+For automatic deployments, set the `production` environment variable with `gh variable set VALIO_AIMO_RECIPE_PERMISSION --env production --body True`.
+Unset or false values keep recipe reads disabled.
 The deploy forwards that flag to provisioning and the chat container.
 The MCP connection supplies purchasing tools; the server controls approval and buying authority.
 The presets do not create a buyer account or grant purchasing rights.

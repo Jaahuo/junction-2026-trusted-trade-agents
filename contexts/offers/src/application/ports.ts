@@ -1,6 +1,5 @@
 import type { Result } from "@app/kernel";
 import type {
-  AvailabilityQuote,
   FactsRequest,
   FactsResult,
   Mandate,
@@ -28,20 +27,16 @@ export interface OfferSigner {
   ): Promise<{ token: string; claims: OfferClaims }>;
   jwks(): Promise<{ keys: PublicJwk[] }>;
 }
-export interface CachedQuote {
-  availability: AvailabilityQuote;
-  price: PriceQuote;
+/** requestedDate = the pricing date, which is the delivery date the price was read for. */
+export interface PriceKey {
+  customer: string;
+  requestedDate: string;
+  productId: string;
 }
+/** Prices only: availability is always read live (SPEC-005). */
 export interface QuoteCache {
-  get(
-    key: { customer: string; requestedDate: string; productId: string },
-    now: Date,
-  ): CachedQuote | undefined;
-  set(
-    key: { customer: string; requestedDate: string; productId: string },
-    quote: CachedQuote,
-    expiresAt: Date,
-  ): void;
+  get(key: PriceKey, now: Date): PriceQuote | undefined;
+  set(key: PriceKey, price: PriceQuote, expiresAt: Date): void;
 }
 export interface OffersDeps {
   /** null: no live price source is configured, so no line can be priced. */

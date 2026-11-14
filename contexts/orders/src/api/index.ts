@@ -31,6 +31,7 @@ import type { StoredOrder } from "../application/ports.ts";
 import { mandateClient } from "../infra/mandate-client.ts";
 import { processOfferVerifier } from "../infra/offer-verifier.ts";
 import { postgresOrderStore } from "../infra/order-store.ts";
+import { envReceiptSigner } from "../infra/receipt-signer.ts";
 import { refusingPayment } from "../infra/payment/refusing-payment.ts";
 import { seed } from "./seed.ts";
 
@@ -42,7 +43,7 @@ const principalFrom = async (request: Request): Promise<Principal> => {
 
 /** The approval page of a pending order, under the base URL of this read. */
 const approvalUrl = (baseUrl: string, orderId: string): string =>
-  `${baseUrl}/approvals?order=${encodeURIComponent(orderId)}`;
+  `${baseUrl}/approvals/${encodeURIComponent(orderId)}`;
 
 const toOrder = (
   { idempotencyKey: _key, requested: _requested, ...order }: StoredOrder,
@@ -94,6 +95,7 @@ const defaultDeps = (db: Db): ApiDeps => {
       current: (agentId) => (mandates ??= mandateClient(`${selfBaseUrl()}/api`)).current(agentId),
     },
     payment: refusingPayment,
+    signReceipt: envReceiptSigner,
     now: () => new Date(),
     publicBaseUrl,
   };

@@ -123,6 +123,7 @@ Run these from the worktree that serves the demo, in order:
    Each run starts with `bun run db:reset`, so repeated runs never use up the credit limit.
    Each step prints `ok <step>`; a failure prints `FAIL step <step>` with the HTTP status and error code, and exits 1.
    The run leaves a placed order, so run `bun run db:reset` once more before you record.
+   Wait a few seconds between smoke scripts and before the first chat request to avoid upstream rate limits.
 
 ### Smoke script options
 
@@ -134,6 +135,38 @@ Run these from the worktree that serves the demo, in order:
 
 The server, not the script, reads `WHOLESALER_LIVE`; start it with `WHOLESALER_LIVE=mock`.
 If `offers` fails with `omitted: NO_PRICE`, the server has no live price source: check `WHOLESALER_LIVE` and `VALIO_AIMO_API_KEY`.
+
+## Check the chat host
+
+The smoke script proves the REST routes.
+It does not show what the model does with the tools: a model can pick another product, change an offer token while it copies it, or stop before it places the order.
+The chat check sends the demo sentences to the Buyer agent in Open WebUI through a real browser and reports the tool calls, the stored order and the reply.
+
+1. Start the server and Open WebUI as [the buyer agent prompt page](buyer-agent-prompt.md#start-open-webui-with-the-prompt) says.
+   Open WebUI must point at this worktree's API.
+2. Run the check:
+
+   ```sh
+   bun scripts/chat-check.ts
+   ```
+
+   Each scenario prints, per sentence, the seconds, the tool calls and the reply, then `ok` or `FAIL` for each expectation; the command exits 1 when one fails.
+   A `FAIL` with `(known: #n)` is a defect that the issue tracks.
+
+3. Run `bun run db:reset` once more before you record: the check leaves orders.
+
+| Option               | Effect                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `--only <name>`      | Run one scenario of `hosts/openwebui/scenarios.json`.                                 |
+| `--scenarios <file>` | Use another scenario file.                                                            |
+| `--api <url>`        | Test another server than this worktree's. The check then does not reset the database. |
+| `--no-reset`         | Skip `bun run db:reset` before each scenario.                                         |
+| `--headed`           | Show the browser.                                                                     |
+| `--timeout <s>`      | Seconds to wait for one reply. Default: 480.                                          |
+
+The check needs Google Chrome.
+It stops before the first sentence when the server, its MCP endpoint, the host or the model endpoint is down, or when Open WebUI is connected to another server.
+The [`verify` skill](../.agents/skills/verify/SKILL.md) explains each failure line and how to add a scenario.
 
 ## Restart check
 

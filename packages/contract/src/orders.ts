@@ -34,13 +34,40 @@ export const AuditEventSchema = z.strictObject({
   rule: z.string().optional(),
   reason: ReasonCodeSchema.optional(),
   detail: z.string().optional(),
+  hash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  previousHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable()
+    .optional(),
+  /** The product a check applies to, for a reason about one product (a new product, CO₂ …). */
+  productId: z.string().optional(),
+  /** False when the entry no longer matches its signature (SPEC-010 audit integrity). */
+  integrityOk: z.boolean().optional(),
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
+
+const ALLERGEN_RELATIONS = ["free_from", "contains", "may_contain"] as const;
+
+/** An allergen fact of a line; `status` is its relation to the buyer's hard rules. */
+const LineAllergenSchema = z.strictObject({
+  allergen: z.string(),
+  type: z.enum(ALLERGEN_RELATIONS),
+  status: z.enum(["default", "warning", "error"]),
+  /** The buyer's rule it meets or breaks, such as "no egg". */
+  rule: z.string().optional(),
+});
 
 export const OrderLineSchema = z.strictObject({
   offerId: z.string(),
   token: z.string(),
   claims: OfferClaimsSchema,
+  /** One sentence from the agent on why it picked this product. */
+  rationale: z.string().optional(),
+  allergens: z.array(LineAllergenSchema).optional(),
 });
 export type OrderLine = z.infer<typeof OrderLineSchema>;
 
@@ -90,8 +117,44 @@ export const OrderSchema = z.strictObject({
   nextDeliveryDate: DateSchema.nullable(),
   audit: z.array(AuditEventSchema),
   createdAt: TimeSchema,
+  receipt: z.string().optional(),
+  auditAnchor: z
+    .strictObject({ hash: z.string().regex(/^[0-9a-f]{64}$/), count: z.number().int().positive() })
+    .optional(),
+  /** What the order is for, written by the agent from the buyer's request. */
+  purpose: z.string().optional(),
+  offerSignature: z
+    .strictObject({ state: z.enum(["verified", "expired", "invalid"]), validUntil: TimeSchema })
+    .optional(),
+  receiptSignature: z
+    .strictObject({
+      state: z.enum(["verified", "pending", "invalid"]),
+      signedAt: TimeSchema.nullable(),
+    })
+    .optional(),
+  auditIntegrity: z.enum(["intact", "unverified", "broken"]).optional(),
 });
 export type Order = z.infer<typeof OrderSchema>;
+
+export const OrderReceiptClaimsSchema = z.strictObject({
+  iss: z.string(),
+  orderId: OrderSchema.shape.orderId,
+  customer: OrderSchema.shape.customer,
+  agentId: OrderSchema.shape.agentId,
+  accountId: OrderSchema.shape.accountId,
+  offerIds: OrderSchema.shape.offerIds,
+  lines: OrderSchema.shape.lines,
+  mandateId: OrderSchema.shape.mandateId,
+  mandateVersion: OrderSchema.shape.mandateVersion,
+  paymentTerms: OrderSchema.shape.paymentTerms,
+  total: OrderSchema.shape.total,
+  decision: OrderSchema.shape.decision,
+  createdAt: OrderSchema.shape.createdAt,
+  placedAt: TimeSchema,
+  auditAnchor: OrderSchema.shape.auditAnchor.unwrap(),
+  status: z.literal("placed"),
+});
+export type OrderReceiptClaims = z.infer<typeof OrderReceiptClaimsSchema>;
 
 export const PendingListSchema = z.strictObject({ orders: z.array(OrderSchema) });
 export type PendingList = z.infer<typeof PendingListSchema>;

@@ -27,13 +27,18 @@ interface ProductSum {
   std: number | null;
 }
 
+/** Std units of one line; null when its unit size is missing or not a positive number. */
+const lineStdOf = (claim: OfferClaims): number | null => {
+  const per = claim.product.perSalesUnit;
+  return per !== null && Number.isFinite(per.value) && per.value > 0
+    ? claim.quantity.value * per.value
+    : null;
+};
+
 const sumByProduct = (claims: OfferClaims[]): Map<string, ProductSum> => {
   const products = new Map<string, ProductSum>();
   for (const claim of claims) {
-    const lineStd =
-      claim.product.perSalesUnit === null
-        ? null
-        : claim.quantity.value * claim.product.perSalesUnit.value;
+    const lineStd = lineStdOf(claim);
     const known = products.get(claim.productId);
     if (known === undefined) {
       products.set(claim.productId, {
@@ -43,10 +48,16 @@ const sumByProduct = (claims: OfferClaims[]): Map<string, ProductSum> => {
         perSalesUnit: claim.product.perSalesUnit,
         std: lineStd,
       });
-    } else {
-      known.claims.push(claim);
+      continue;
+    }
+    known.claims.push(claim);
+    if (claim.quantity.unit === known.salesUnit) {
       known.sales += claim.quantity.value;
       known.std = known.std === null || lineStd === null ? null : known.std + lineStd;
+    } else {
+      // Lines in different units cannot be summed, so the product counts as over every quantity cap.
+      known.sales = Number.POSITIVE_INFINITY;
+      known.std = null;
     }
   }
   return products;
@@ -164,6 +175,30 @@ export const nextDeliveryDateAfterCutoff = (claims: OfferClaims[], now: Date): s
     .filter((claim) => cutoffPassed(claim, now))
     .flatMap((claim) => (claim.nextDeliveryDate === null ? [] : [claim.nextDeliveryDate]))
     .toSorted()[0] ?? null;
+
+/** Reasons about the order as a whole, even when a line raises them. */
+const ORDER_LEVEL: ReadonlySet<ReasonCode> = new Set(["PAYMENT_TERMS"]);
+
+/**
+ * The buyer-limit reasons each product raises, so the audit can name the product a check
+ * failed for (a new product, CO₂ above the maximum …). Order-level reasons are left out.
+ */
+export const reasonsByProduct = (
+  claims: OfferClaims[],
+  mandate: Mandate | null,
+  history: HistoryRow[],
+): Map<string, ReasonCode[]> => {
+  const byProduct = new Map<string, ReasonCode[]>();
+  if (mandate === null) return byProduct;
+  const historyOf = (productId: string) => history.filter((row) => row.productId === productId);
+  for (const claim of claims) {
+    const reasons = buyerLimitReasons(claim, mandate, historyOf).filter(
+      (reason) => !ORDER_LEVEL.has(reason),
+    );
+    byProduct.set(claim.productId, [...(byProduct.get(claim.productId) ?? []), ...reasons]);
+  }
+  return byProduct;
+};
 
 const isReject = (reason: ReasonCode): boolean =>
   REJECT_REASONS.some((rejectReason) => rejectReason === reason);

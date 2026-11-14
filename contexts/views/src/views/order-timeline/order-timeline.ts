@@ -1,100 +1,117 @@
-import { type Order, REASON_TEXT } from "@app/contract";
+import type { Order } from "@app/contract";
 import {
   formatDeliveryDate,
   formatMoney,
   formatOrderNumber,
   formatQuantity,
   formatTimestamp,
-  ORDER_ACTORS,
-  ORDER_OUTCOMES,
-  ORDER_STATUS_LABELS,
+  ORDER_WORDING,
 } from "@app/ui/format";
 import { css, html, nothing, type TemplateResult } from "lit";
+import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import { type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
+import agent16 from "../../shared/icons/agent-16.svg?raw";
+import { lang, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
+import { statusDisc, type Tone, trustStyles } from "../../shared/trust.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 
-const events: Record<Order["audit"][number]["event"], string> = {
-  order_requested: "Order requested",
-  order_refused: "Order refused",
-  offer_verified: "Offer verified",
-  check_passed: "Check passed",
-  check_failed: "Check failed",
-  sent_to_approval: "Sent for approval",
-  approved: "Approved",
-  declined: "Declined",
-  requoted: "Offer requoted",
-  edited: "Order edited",
-  payment_authorized: "Payment authorized",
-  payment_failed: "Payment failed",
-  placed: "Order placed",
-  rejected: "Order rejected",
-};
+import { TIMELINE } from "./strings.ts";
+
+/** The audit integrity strip (#74): the server's signature check of the whole log. */
+function integrityStrip(order: Order) {
+  const integrity = order.auditIntegrity;
+  if (integrity === undefined) return nothing;
+  const text = pick(TIMELINE);
+  const changed = order.audit.filter((e) => e.integrityOk === false).length;
+  const [tone, message]: [Tone, string] =
+    integrity === "intact"
+      ? ["success", text.logIntact(order.audit.length)]
+      : integrity === "unverified"
+        ? ["warning", text.logUnverified]
+        : ["danger", text.logBroken(changed)];
+  return html`<p class="strip ${tone} strong" role="status" aria-live="polite">
+    ${statusDisc(tone, true)}<span>${message}</span>
+  </p>`;
+}
 
 /** Render the order record without adding actions to the audit view. */
 export function renderOrderTimeline(order: Order): TemplateResult {
   const decision = order.decision;
+  const text = pick(TIMELINE);
+  const words = pick(ORDER_WORDING);
+  const l = lang();
   return html`<section class="timeline" part="done">
     <header class="header">
       <div>
-        <p class="eyebrow">Order timeline</p>
-        <h2 title=${order.orderId}>Order ${formatOrderNumber(order.orderId)}</h2>
+        <p class="eyebrow">${text.eyebrow}</p>
+        <h2 title=${order.orderId}>${text.order(formatOrderNumber(order.orderId, l))}</h2>
       </div>
-      <p class="status">${ORDER_STATUS_LABELS[order.status]}</p>
+      <p class="status">${words.statuses[order.status]}</p>
     </header>
-    <section class="decision" aria-label="Order summary">
-      <h3>Order summary</h3>
-      <p>Total: ${formatMoney(order.total.gross, "EUR", "gross")}</p>
+    <section class="decision" aria-label=${text.summaryLabel}>
+      <h3>${text.summaryLabel}</h3>
+      <p>${text.total(formatMoney(order.total.gross, "EUR", "gross", l))}</p>
       <ul>
         ${order.lines.map(
           ({ claims }) =>
             html`<li>
               <p class="strong" title=${claims.productId}>${claims.product.name}</p>
               <p>
-                <span title=${claims.quantity.unit}>${formatQuantity(claims.quantity)}</span> ·
-                ${formatDeliveryDate(claims.deliveryDate)}
+                <span title=${claims.quantity.unit}>${formatQuantity(claims.quantity, l)}</span> ·
+                ${formatDeliveryDate(claims.deliveryDate, l)}
               </p>
             </li>`,
         )}
       </ul>
     </section>
-    ${order.status === "placed" ? html`<p class="decision">${ORDER_OUTCOMES.placed}</p>` : nothing}
+    ${order.status === "placed" ? html`<p class="decision">${words.outcomes.placed}</p>` : nothing}
     ${
       decision?.action === "reject"
         ? html`<div class="decision">
-            <p class="strong">Approval declined</p>
+            <p class="strong">${text.approvalDeclined}</p>
             <p>
               ${
                 decision.next === "stop"
-                  ? ORDER_OUTCOMES.stop
+                  ? words.outcomes.stop
                   : decision.next === "alternatives"
-                    ? ORDER_OUTCOMES.alternatives
-                    : "The next action was not recorded."
+                    ? words.outcomes.alternatives
+                    : text.nextNotRecorded
               }
             </p>
-            ${decision.note ? html`<p>Note: ${decision.note}</p>` : nothing}
+            ${decision.note ? html`<p>${text.note(decision.note)}</p>` : nothing}
           </div>`
         : nothing
     }
-    <section aria-label="Audit events">
-      <h3>Activity</h3>
+    <section class="log" aria-label=${text.orderLog}>
+      <h3>${text.orderLog}</h3>
+      ${integrityStrip(order)}
       ${
         order.audit.length === 0
-          ? html`<p class="secondary">No activity recorded.</p>`
+          ? html`<p class="secondary">${text.noActivity}</p>`
           : html`<ol class="events">
               ${order.audit.map(
                 (event) =>
-                  html`<li>
-                    <div class="event-heading">
-                      <h4>${events[event.event]}</h4>
-                      <span class="secondary body-small">
-                        <time datetime=${event.at}>${formatTimestamp(event.at)}</time>
-                      </span>
-                    </div>
-                    <p class="secondary body-small">${ORDER_ACTORS[event.actor]}</p>
-                    ${event.reason ? html`<p>${REASON_TEXT[event.reason]}</p>` : nothing}
-                    ${event.rule ? html`<span class="body-small" title=${event.rule}>Support rule available</span>` : nothing}
-                    ${event.detail ? html`<p class="body-small">${event.detail}</p>` : nothing}
+                  html`<li class=${event.integrityOk === false ? "broken" : ""}>
+                    <p class="label-small secondary event-meta">
+                      ${
+                        event.actor === "agent"
+                          ? html`<span class="agent" aria-hidden="true"
+                              >${unsafeSVG(agent16)}</span
+                            >`
+                          : nothing
+                      }<time datetime=${event.at}>${formatTimestamp(event.at, l)}</time>
+                      · ${words.actors[event.actor]}
+                    </p>
+                    <h4 class="body-small">${text.events[event.event]}</h4>
+                    ${event.reason ? html`<p class="body-small">${text.reason[event.reason]}</p>` : nothing}
+                    ${event.rule ? html`<span class="body-small" title=${event.rule}>${text.supportRule}</span>` : nothing}
+                    ${event.detail && (!event.reason || event.detail !== text.reason[event.reason]) ? html`<p class="body-small">${event.detail}</p>` : nothing}
+                    ${
+                      event.integrityOk === false
+                        ? html`<p class="strong tampered">${text.entryChanged}</p>`
+                        : nothing
+                    }
                   </li>`,
               )}
             </ol>`
@@ -103,8 +120,8 @@ export function renderOrderTimeline(order: Order): TemplateResult {
     ${
       order.requotes.length === 0
         ? nothing
-        : html`<section class="requotes" aria-label="Requoted offers">
-            <h3>Requoted offers</h3>
+        : html`<section class="requotes" aria-label=${text.requotedOffers}>
+            <h3>${text.requotedOffers}</h3>
             <ul>
               ${order.requotes.map(
                 (quote) =>
@@ -115,26 +132,26 @@ export function renderOrderTimeline(order: Order): TemplateResult {
                     ${
                       quote.previous.productId !== quote.current.productId
                         ? html`<p class="body-small" title=${quote.previous.productId}>
-                            Previous product: ${quote.previous.product.name}
+                            ${text.previousProduct(quote.previous.product.name)}
                           </p>`
                         : nothing
                     }
                     <p>
-                      Unit price:
-                      ${formatMoney(quote.previous.unitPrice.net, quote.previous.unitPrice.currency, "net")}
+                      ${text.unitPrice}
+                      ${formatMoney(quote.previous.unitPrice.net, quote.previous.unitPrice.currency, "net", l)}
                       →
-                      ${formatMoney(quote.current.unitPrice.net, quote.current.unitPrice.currency, "net")}
+                      ${formatMoney(quote.current.unitPrice.net, quote.current.unitPrice.currency, "net", l)}
                     </p>
                     <p>
-                      Total:
-                      ${formatMoney(quote.previous.total.gross, quote.previous.unitPrice.currency, "gross")}
+                      ${text.totalLabel}
+                      ${formatMoney(quote.previous.total.gross, quote.previous.unitPrice.currency, "gross", l)}
                       →
-                      ${formatMoney(quote.current.total.gross, quote.current.unitPrice.currency, "gross")}
+                      ${formatMoney(quote.current.total.gross, quote.current.unitPrice.currency, "gross", l)}
                     </p>
                     <p class="secondary body-small">
-                      <time datetime=${quote.at}>${formatTimestamp(quote.at)}</time>
+                      <time datetime=${quote.at}>${formatTimestamp(quote.at, l)}</time>
                     </p>
-                    ${quote.reasons.map((reason) => html`<p>${REASON_TEXT[reason]}</p>`)}
+                    ${quote.reasons.map((reason) => html`<p>${text.reason[reason]}</p>`)}
                   </li>`,
               )}
             </ul>
@@ -146,6 +163,7 @@ export function renderOrderTimeline(order: Order): TemplateResult {
 class OrderTimeline extends ViewElement<ViewEntryOf<"order-timeline">> {
   static override styles = [
     base,
+    trustStyles,
     css`
       .timeline {
         padding: var(--spacing-xl);
@@ -206,18 +224,55 @@ class OrderTimeline extends ViewElement<ViewEntryOf<"order-timeline">> {
         padding: 0;
         list-style: none;
       }
-      .events li {
-        padding: 0 0 var(--spacing-lg) var(--spacing-lg);
-        border-left: 2px solid var(--color-border-brand);
+      .log .strip {
+        margin-bottom: var(--spacing-lg);
       }
-      .events li:last-child {
-        padding-bottom: 0;
-      }
-      .event-heading {
+      /* Entries, oldest first: an 8 px dot, "time · actor", then the event. */
+      .events {
         display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
-        gap: var(--spacing-xs) var(--spacing-md);
+        flex-direction: column;
+        gap: var(--spacing-xs);
+      }
+      .events li {
+        position: relative;
+        padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-xs) var(--spacing-xl);
+        border-radius: var(--border-radius-md);
+      }
+      .events li::before {
+        position: absolute;
+        top: 7px;
+        left: var(--spacing-sm);
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full);
+        background: var(--color-border-strong);
+        content: "";
+      }
+      .events li.broken {
+        background: var(--color-bg-danger);
+      }
+      .events li.broken::before {
+        background: var(--color-text-danger);
+      }
+      .event-meta {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-2xs);
+      }
+      .event-meta .agent {
+        display: inline-flex;
+        color: var(--color-text-brand);
+      }
+      .event-meta .agent svg {
+        width: 12px;
+        height: 12px;
+      }
+      .events h4 {
+        font-weight: 400;
+      }
+      .tampered {
+        margin-top: var(--spacing-xs);
+        color: var(--color-text-danger);
       }
       .requotes {
         margin-top: var(--spacing-xl);

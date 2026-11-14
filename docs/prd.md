@@ -122,7 +122,7 @@ Three roles exist. Through the MCP tools, the agent can never approve its own or
 
 ## Tools
 
-Nine tools cover the flow: six the model can call and three that only a view calls. Each tool is also a REST endpoint with the same JSON Schema, published as an OpenAPI document.
+Ten tools cover the flow: seven the model can call and three that only a view calls. Each tool is also a REST endpoint with the same JSON Schema, published as an OpenAPI document.
 
 | Tool                     | Caller            | Input                                                                                                                                                  | Returns                                                                                                          |
 | ------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
@@ -131,6 +131,7 @@ Nine tools cover the flow: six the model can call and three that only a view cal
 | `place_order`            | Agent             | One or more signed offer tokens, optional alternative offer tokens, optional original request text, idempotency key                                    | Order with status: placed, pending approval or rejected, plus reason codes                                       |
 | `get_order_status`       | Agent             | Order ID                                                                                                                                               | Current status and the audit record                                                                              |
 | `get_mandate`            | Agent             | None                                                                                                                                                   | The limits currently in force for this agent                                                                     |
+| `draft_mandate`          | Agent             | Proposed limits and standing constraints, from the terms the human gave                                                                                | The draft next to the current limits. Nothing is registered: the human registers it in the mandate view          |
 | `register_mandate`       | Approver          | The mandate as JSON; the demo server signs it with the simulated buyer key                                                                             | Mandate ID. The previous mandate is revoked.                                                                     |
 | `revoke_mandate`         | Approver          | Mandate ID                                                                                                                                             | Confirmation                                                                                                     |
 | `list_pending_approvals` | Agent or approver | None                                                                                                                                                   | Orders waiting for a decision                                                                                    |
@@ -416,7 +417,7 @@ Each view is an MCP App: a tool declares a `ui://` resource, and the host render
 | 2        | Offer comparison | `get_offers`                                         | Options side by side: price per litre or kilogram, delivery date, reliability, CO2, pre-check result |
 | 3        | Order timeline   | `get_order_status`                                   | The audit record in readable form                                                                    |
 | 4        | Search results   | `search_products`                                    | Candidates, how each matched, and the quantity to order                                              |
-| 5        | Mandate settings | `get_mandate`                                        | The limits, editable in the view                                                                     |
+| 5        | Mandate settings | `get_mandate`, `draft_mandate`                       | The limits in force, or the agent's draft with a Register button for the human                       |
 
 - Tools always return structured data and text as well, so hosts without MCP Apps still complete the flow.
 - The card in the chat and the approval page show the same information and call the same decision action. An order pending approval returns its `approvalUrl`, the address of the approval page.

@@ -2,8 +2,8 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn.ts";
 
 const control =
-  "w-full rounded-md border border-border bg-surface px-3 text-foreground placeholder:text-muted " +
-  "focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-primary disabled:opacity-50";
+  "w-full rounded-md border border-[var(--color-border-strong)] bg-surface px-3 text-foreground placeholder:text-muted " +
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input {...props} className={cn(control, "h-10", className)} />;

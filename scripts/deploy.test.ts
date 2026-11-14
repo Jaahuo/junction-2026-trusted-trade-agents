@@ -7,6 +7,7 @@ import {
   chatEnv,
   chatSettings,
   deployEnv,
+  deployWarning,
   type Outputs,
   parseEnv,
   push,
@@ -145,6 +146,7 @@ test("the deploy skips the chat host until the inference key is set", () => {
     secretKey: "session-key",
     adminEmail: "admin@example.com",
     adminPassword: "admin-password",
+    recipePermission: "False",
   });
 });
 
@@ -159,6 +161,11 @@ test("the chat host runs with login on, sign-up off and the hosted inference end
   const env = chatEnv(outputs, chat);
   expect(env.get("WEBUI_AUTH")).toBe("True");
   expect(env.get("ENABLE_SIGNUP")).toBe("False");
+  expect(env.get("ENABLE_OLLAMA_API")).toBe("False");
+  expect(env.get("ENABLE_TITLE_GENERATION")).toBe("False");
+  expect(env.get("ENABLE_FOLLOW_UP_GENERATION")).toBe("False");
+  expect(env.get("ENABLE_TAGS_GENERATION")).toBe("False");
+  expect(env.has("ENABLE_VOICE")).toBe(false);
   expect(env.get("WEBUI_URL")).toBe("https://chat.203-0-113-7.sslip.io");
   expect(env.get("OPENAI_API_BASE_URL")).toBe(
     "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1",
@@ -177,6 +184,12 @@ test("Caddy serves the chat host on its own subdomain when the chat runs", () =>
 test("the chat unit keeps its data in a volume and listens on loopback only", () => {
   expect(CHAT_SERVICE).toContain("-p 127.0.0.1:8080:8080");
   expect(CHAT_SERVICE).toContain("-v trusted-trade-chat:/app/backend/data");
+  expect(CHAT_SERVICE).toContain(
+    "-v /opt/trusted-trade-chat/branding/custom.css:/app/backend/open_webui/static/custom.css:ro",
+  );
+  expect(CHAT_SERVICE).toContain(
+    "-v /opt/trusted-trade-chat/branding:/app/backend/open_webui/static/acme:ro",
+  );
   expect(CHAT_SERVICE).toContain("--env-file /etc/trusted-trade-chat.env");
   expect(CHAT_SERVICE).toContain("ghcr.io/open-webui/open-webui:v0.13.3");
 });
@@ -199,16 +212,90 @@ test("push rejects untrusted image references before loading secrets or touching
   for (const image of [
     "",
     `${repo}:latest`,
-    `${repo}:${"A".repeat(40)}`,
-    `${repo}:${"a".repeat(39)}`,
-    `ghcr.io/other/image:${"a".repeat(40)}`,
-    `${repo}@sha256:${"a".repeat(64)}`,
+    `${repo}:${"a".repeat(40)}`,
+    `${repo}@sha256:${"A".repeat(64)}`,
+    `${repo}@sha256:${"a".repeat(63)}`,
+    `ghcr.io/other/image@sha256:${"a".repeat(64)}`,
+    `${repo}@sha256:${"a".repeat(64)};touch /tmp/injected`,
   ]) {
     expect(await failure(push(outputs, { DEPLOY_IMAGE: image }))).toMatch(/DEPLOY_IMAGE/);
   }
-  expect(await failure(push(outputs, { DEPLOY_IMAGE: `${repo}:${"a".repeat(40)}` }))).toMatch(
-    /DEPLOY_REGISTRY_USER/,
-  );
+  expect(
+    await failure(push(outputs, { DEPLOY_IMAGE: `${repo}@sha256:${"a".repeat(64)}` })),
+  ).toMatch(/DEPLOY_REGISTRY_USER/);
+});
+
+test("push uses the exact digest and strict host checking, and stops on a digest mismatch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "deploy-push-"));
+  const previous = { ...process.env };
+  const image = `ghcr.io/jaahuo/junction-2026-trusted-trade-agents@sha256:${"a".repeat(64)}`;
+  const imageId = `sha256:${"c".repeat(64)}`;
+  const server = Bun.serve({ port: 0, fetch: () => new Response("ok") });
+  try {
+    const log = join(root, "commands");
+    const input = join(root, "input");
+    await writeFile(
+      join(root, "ssh"),
+      '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\ncase "$*" in\n  *"docker container inspect"*) printf "%s %s\\n" "$FAKE_CONTAINER_IMAGE" "$FAKE_CONTAINER_RUNNING";;\n  *"docker image inspect"*) printf "%s\\n%s\\n" "$FAKE_IMAGE_ID" "$FAKE_DIGEST";;\n  *"install -m"*) cat >> "$FAKE_INPUT";;\nesac\n',
+    );
+    await writeFile(join(root, "rsync"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\n');
+    await chmod(join(root, "ssh"), 0o755);
+    await chmod(join(root, "rsync"), 0o755);
+    process.env["PATH"] = `${root}:${previous["PATH"] ?? ""}`;
+    process.env["DEPLOY_ENV"] = keys;
+    process.env["FAKE_LOG"] = log;
+    process.env["FAKE_INPUT"] = input;
+    process.env["FAKE_DIGEST"] = image;
+    process.env["FAKE_IMAGE_ID"] = imageId;
+    process.env["FAKE_CONTAINER_IMAGE"] = imageId;
+    process.env["FAKE_CONTAINER_RUNNING"] = "true";
+    const settings = {
+      DEPLOY_IMAGE: image,
+      DEPLOY_REGISTRY_USER: "user",
+      DEPLOY_REGISTRY_TOKEN: "token",
+    };
+    const localOutputs = { ...outputs, public_base_url: `http://127.0.0.1:${server.port}` };
+    await push(localOutputs, settings);
+    const commands = await readFile(log, "utf8");
+    expect(commands).toContain(`docker pull '${image}'`);
+    expect(commands).toContain("StrictHostKeyChecking=yes");
+    expect(commands).not.toContain("StrictHostKeyChecking=accept-new");
+    expect(await readFile(input, "utf8")).toContain(`TRUSTED_TRADE_IMAGE="${image}"`);
+
+    process.env["FAKE_CONTAINER_IMAGE"] = `sha256:${"d".repeat(64)}`;
+    expect(await failure(push(localOutputs, settings))).toMatch(/Running container image hash/);
+    process.env["FAKE_CONTAINER_IMAGE"] = imageId;
+    process.env["FAKE_CONTAINER_RUNNING"] = "false";
+    expect(await failure(push(localOutputs, settings))).toMatch(/running state/);
+    process.env["FAKE_CONTAINER_RUNNING"] = "true";
+
+    await writeFile(log, "");
+    process.env["FAKE_IMAGE_ID"] = "invalid";
+    expect(await failure(push(localOutputs, settings))).toMatch(/invalid SHA-256 image ID/);
+    expect(await readFile(log, "utf8")).not.toContain("systemctl stop trusted-trade");
+    process.env["FAKE_IMAGE_ID"] = imageId;
+    await writeFile(log, "");
+    process.env["FAKE_DIGEST"] =
+      `ghcr.io/jaahuo/junction-2026-trusted-trade-agents@sha256:${"b".repeat(64)}`;
+    expect(await failure(push(localOutputs, settings))).toMatch(/requested repository digest/);
+    expect(await readFile(log, "utf8")).not.toContain("systemctl stop trusted-trade");
+  } finally {
+    await server.stop();
+    for (const name of [
+      "PATH",
+      "DEPLOY_ENV",
+      "FAKE_LOG",
+      "FAKE_INPUT",
+      "FAKE_DIGEST",
+      "FAKE_IMAGE_ID",
+      "FAKE_CONTAINER_IMAGE",
+      "FAKE_CONTAINER_RUNNING",
+    ]) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("data transfer sends files to the literal remote data directory", async () => {
@@ -247,4 +334,27 @@ test("the service runs the persisted digest on loopback with read-only host data
     "ExecStop=/usr/bin/docker stop --time 30 trusted-trade\nTimeoutStopSec=40\n",
   );
   expect(() => renderService({ ...outputs, app_dir: "/opt/a:b" })).toThrow(/app_dir/);
+});
+
+const deployRun = (conclusion: string) => [
+  {
+    conclusion,
+    headSha: "4dd8571c935a769c38b296e033b52130e8d2055f",
+    url: "https://example.test/runs/1",
+  },
+];
+
+test("deployWarning warns only when the latest completed deploy of main failed", () => {
+  expect(deployWarning(deployRun("failure"))).toBe(
+    "Warning: the latest deploy of main (4dd8571) ended in failure, so the hosted demo may be stale. See https://example.test/runs/1.",
+  );
+  expect(deployWarning(deployRun("timed_out"))).toContain("timed_out");
+  expect(deployWarning(deployRun("startup_failure"))).toContain("startup_failure");
+  expect(deployWarning(deployRun("success"))).toBeUndefined();
+  expect(deployWarning(deployRun("cancelled"))).toBeUndefined();
+  expect(deployWarning([])).toBeUndefined();
+  expect(deployWarning({})).toBeUndefined();
+  expect(deployWarning([{ conclusion: "failure" }])).toBe(
+    "Warning: the latest deploy of main (?) ended in failure, so the hosted demo may be stale. See the deploy workflow.",
+  );
 });

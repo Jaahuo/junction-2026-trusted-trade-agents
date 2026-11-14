@@ -13,5 +13,15 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(bun check)",
+      "Bash(bunx vp check)",
+      "Bash(gh project list *)",
+      "Bash(gh project item-list *)",
+      "Bash(gh project view *)"
+    ]
   }
 }

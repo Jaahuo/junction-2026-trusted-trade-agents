@@ -1,19 +1,38 @@
-import { formatMoney, formatQuantity, formatTimestamp, ORDER_TERMS } from "@app/ui/format";
-import { css, html } from "lit";
-import { unsafeSVG } from "lit/directives/unsafe-svg.js";
-import { plainPageUrl, type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
+import type { MandateDraft, StoredMandate } from "@app/contract";
+import { brand } from "@app/ui/brand";
+import { formatMoney, formatTimestamp, ORDER_WORDING } from "@app/ui/format";
+import { css, html, nothing } from "lit";
+import {
+  callAction,
+  plainPageUrl,
+  type Source,
+  type ViewData,
+  type ViewEntryOf,
+  viewEntry,
+} from "../../shared/bridge.ts";
+import { lang, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { loadMandate } from "./loader.ts";
 import {
   categoriesText,
+  co2Text,
+  draftRows,
   effectiveStatus,
   expiryDelay,
+  inForce,
+  isDraft,
+  isNoCurrentMandate,
+  percentText,
   policyText,
+  registeredContext,
+  registerInput,
+  registersDraft,
+  softText,
   substitutionText,
   thresholdText,
 } from "./presentation.ts";
+import { MANDATE } from "./strings.ts";
 
 const row = (label: string, value: string) =>
   html`<div class="row">
@@ -21,7 +40,15 @@ const row = (label: string, value: string) =>
     <dd>${value}</dd>
   </div>`;
 
-class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
+export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
+  // No decorators: the bundler leaves them untransformed.
+  static override properties = {
+    ...ViewElement.properties,
+    registering: { state: true },
+    registerError: { state: true },
+    currentUnknown: { state: true },
+  };
+
   static override styles = [
     base,
     css`
@@ -102,6 +129,15 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
       details dl {
         margin-top: var(--spacing-md);
       }
+      .proposed {
+        font-weight: 600;
+      }
+      .in-force {
+        display: block;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-xs);
+        margin-top: var(--spacing-2xs);
+      }
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -119,6 +155,20 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
   readonly entry = viewEntry("mandate-settings");
   private expiryTimer: number | undefined;
   private renderedStatus: "active" | "expired" | "revoked" | null = null;
+  declare private registering: boolean;
+  /** Why the last Register failed, shown next to the button; `unconfirmed` when the outcome is unknown. */
+  declare private registerError: { message: string; unconfirmed: boolean } | null;
+  /** True after a Register whose outcome no check settled: the view cannot tell which limits are in force. */
+  declare private currentUnknown: boolean;
+  /** Created at the first Register of a draft and kept, so a retry is a replay (SPEC-008). */
+  private operationId: string | null = null;
+
+  constructor() {
+    super();
+    this.registering = false;
+    this.registerError = null;
+    this.currentUnknown = false;
+  }
 
   override connectedCallback() {
     // The shared shell loads on connect; this view must distinguish the current endpoint's 404.
@@ -138,7 +188,10 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
     clearTimeout(this.expiryTimer);
     const state = this.state;
     if (!this.isConnected || state.kind !== "done" || this.renderedStatus === null) return;
-    const delay = expiryDelay(state.data.mandate.exp, this.renderedStatus);
+    // A draft shows its current mandate as in force only until that mandate expires.
+    const exp = isDraft(state.data) ? state.data.current?.mandate.exp : state.data.mandate.exp;
+    if (exp === undefined) return;
+    const delay = expiryDelay(exp, this.renderedStatus);
     if (delay !== null) this.expiryTimer = window.setTimeout(() => this.requestUpdate(), delay);
   }
 
@@ -149,46 +202,86 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
     this.state = await loadMandate(source, retry);
   }
 
+  private async register(draft: MandateDraft) {
+    const source = this.source;
+    if (source === null || this.registering) return;
+    this.operationId ??= `op_view_${crypto.randomUUID()}`;
+    this.registering = true;
+    this.registerError = null;
+    const result = await callAction(
+      source,
+      "register_mandate",
+      registerInput(draft.draft, this.operationId),
+      null,
+    );
+    if (result.kind === "done") return this.registered(source, result.data);
+    // The register may have committed before its answer was lost: the mandate in force tells.
+    const check = await callAction(source, "get_mandate", {}, null);
+    if (check.kind === "done" && registersDraft(check.data, draft))
+      return this.registered(source, check.data);
+    this.registering = false;
+    const none =
+      check.kind === "error" &&
+      (check.message.startsWith("NOT_FOUND:") || isNoCurrentMandate(new Error(check.message)));
+    // The check is the latest word on the mandate in force; without one, nothing is claimed.
+    if (check.kind === "done" || none)
+      this.state = {
+        kind: "done",
+        data: { ...draft, current: check.kind === "done" ? check.data : null },
+      };
+    this.currentUnknown = check.kind !== "done" && !none;
+    this.registerError = {
+      message: result.kind === "error" ? result.message : "",
+      unconfirmed: this.currentUnknown,
+    };
+  }
+
+  private registered(source: Source, stored: StoredMandate) {
+    this.registering = false;
+    this.currentUnknown = false;
+    this.state = { kind: "done", data: stored };
+    void source.context?.(registeredContext(stored));
+  }
+
   private header() {
+    const text = pick(MANDATE);
     return html`<header class="header" part="header">
       <div class="brand">
-        <span class="logo" role="img" aria-label="Valio Aimo">${unsafeSVG(logo)}</span
-        ><span>Agent settings</span>
+        <img class="logo" src=${brand.logo} alt=${brand.name} /><span>${text.agentSettings}</span>
       </div>
-      <h2 class="title">Agent limits</h2>
+      <h2 class="title">${text.title}</h2>
     </header>`;
   }
 
   override render() {
     const state = this.state;
     if (state.kind === "done") return this.renderDone(state.data);
+    const text = pick(MANDATE);
     return html`<article class="card" part=${state.kind}>
       ${this.header()}
       <div class="body">
         ${
           state.kind === "loading"
             ? html`<p role="status">
-                <span class="spinner" aria-hidden="true"></span> Loading agent limits…
+                <span class="spinner" aria-hidden="true"></span> ${text.loading}
               </p>`
             : state.kind === "empty"
               ? html`<section>
-                  <h3>No current mandate</h3>
-                  <p>
-                    The agent has no current authority to place orders. Ask an approver to set up a
-                    mandate.
-                  </p>
+                  <h3>${text.noMandateTitle}</h3>
+                  <p>${text.noMandateBody}</p>
                 </section>`
               : html`<section role="alert">
-                  <h3>Agent limits could not be loaded</h3>
-                  <p>Try again or open the limits page.</p>
+                  <h3>${text.loadFailedTitle}</h3>
+                  <p>${text.loadFailedBody}</p>
                   <div class="actions">
-                    <button class="btn primary" @click=${() => this.reload(true)}>Try again</button
+                    <button class="btn primary" @click=${() => this.reload(true)}>
+                      ${text.tryAgain}</button
                     ><a
                       class="btn ghost"
                       href=${plainPageUrl("mandate-settings", document.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ?? location.origin) ?? "/views/mandate-settings"}
                       target="_blank"
                       rel="noreferrer"
-                      >Open limits page</a
+                      >${text.openLimitsPage}</a
                     >
                   </div>
                 </section>`
@@ -197,83 +290,150 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
     </article>`;
   }
 
-  protected override renderDone(record: ViewData<"mandate-settings">) {
+  protected override renderDone(data: ViewData<"mandate-settings">) {
+    return isDraft(data) ? this.renderDraft(data) : this.renderStored(data);
+  }
+
+  private renderDraft(record: MandateDraft) {
+    const text = pick(MANDATE);
+    const current = this.currentUnknown ? null : inForce(record);
+    this.renderedStatus =
+      record.current === null || this.currentUnknown ? null : effectiveStatus(record.current);
+    return html`<article class="card" part="draft">
+      ${this.header()}
+      <div class="body">
+        <div class="status inactive" part="status">
+          <p class="strong">${text.draftStatus}</p>
+          <p>${text.draftNote}</p>
+        </div>
+        <section>
+          <h3>${text.proposedLimits}</h3>
+          <p class="secondary">
+            ${
+              this.currentUnknown
+                ? text.draftUnknownCurrent
+                : current === null
+                  ? text.draftNoCurrent
+                  : text.draftCompare(current.mandate.version)
+            }
+          </p>
+          <dl>
+            ${draftRows({ ...record, current }).map(
+              (item) =>
+                html`<div class="row">
+                  <dt>${item.label}</dt>
+                  <dd>
+                    <span class=${item.current === null ? "" : "proposed"}>${item.proposed}</span>
+                    ${
+                      item.current === null
+                        ? nothing
+                        : html`<span class="in-force">${text.inForce(item.current)}</span>`
+                    }
+                  </dd>
+                </div>`,
+            )}
+          </dl>
+        </section>
+        ${
+          this.registerError === null
+            ? nothing
+            : html`<div class="message danger" role="alert" part="register-error">
+                <p class="strong">
+                  ${this.registerError.unconfirmed ? text.registerUnconfirmedTitle : text.registerFailedTitle}
+                </p>
+                <p>${this.registerError.message}</p>
+                <p>
+                  ${this.registerError.unconfirmed ? text.registerUnconfirmedBody : text.registerFailedBody}
+                </p>
+              </div>`
+        }
+        <div class="actions">
+          <button
+            class="btn primary"
+            aria-busy=${this.registering ? "true" : "false"}
+            ?disabled=${this.registering || this.source === null}
+            @click=${() => this.register(record)}
+          >
+            ${this.registering ? text.registering : text.register}
+          </button>
+        </div>
+        <p class="secondary">${text.humanOnly}</p>
+      </div>
+    </article>`;
+  }
+
+  private renderStored(record: StoredMandate) {
     const { mandate } = record;
     const { limits, standingConstraints } = mandate;
     const status = effectiveStatus(record);
     this.renderedStatus = status;
     const hard = standingConstraints.hard;
     const soft = standingConstraints.soft;
+    const text = pick(MANDATE);
+    const terms = pick(ORDER_WORDING).terms;
+    const l = lang();
     return html`<article class="card" part="done">
       ${this.header()}
       <div class="body">
         <div class="status ${status === "active" ? "" : "inactive"}" part="status">
-          <p class="strong">
-            ${status === "active" ? "Active" : status === "revoked" ? "Revoked" : "Expired"} ·
-            Version ${mandate.version}
-          </p>
-          <p>
-            ${status === "active" ? "Automatic placement is subject to these limits and other fixed checks." : "No current authority: these historical limits are not in force and cannot authorize orders."}
-          </p>
+          <p class="strong">${text.status[status]} · ${text.version(mandate.version)}</p>
+          <p>${status === "active" ? text.activeNote : text.inactiveNote}</p>
         </div>
-        ${status === "active" ? html`` : html`<h3>Previous limits and policies</h3>`}
+        ${status === "active" ? html`` : html`<h3>${text.previousLimits}</h3>`}
         <section>
-          <h3>Order limits</h3>
+          <h3>${text.orderLimits}</h3>
           <dl>
-            ${row(ORDER_TERMS.limit, `${formatMoney(limits.maxOrderTotal.value, limits.maxOrderTotal.currency, limits.maxOrderTotal.basis)} per order, including VAT and deposits. At or below this limit, automatic placement is allowed subject to other checks; above it, approval is required.`)}
-            ${row("Categories", `${categoriesText(limits.categories)}. ${limits.categories === null ? "All categories are eligible for automatic placement, subject to other checks." : limits.categories.length === 0 ? "No categories are eligible for automatic placement; approval is required." : "Listed categories are eligible for automatic placement, subject to other checks; other categories require approval."}`)}
-            ${row("Substitutions", substitutionText(limits.substitutions))}
-            ${row("Products not previously ordered by this customer", policyText(limits.newProducts))}
+            ${row(terms.limit, text.perOrder(formatMoney(limits.maxOrderTotal.value, limits.maxOrderTotal.currency, limits.maxOrderTotal.basis, l)))}
+            ${row(text.categories, `${categoriesText(limits.categories)}. ${limits.categories === null ? text.categoriesAll : limits.categories.length === 0 ? text.categoriesNone : text.categoriesListed}`)}
+            ${row(text.substitutions, substitutionText(limits.substitutions))}
+            ${row(text.newProducts, policyText(limits.newProducts))}
           </dl>
         </section>
         <section>
-          <h3>Product data</h3>
+          <h3>${text.productData}</h3>
           <dl>
-            ${row("Minimum delivery reliability", `${thresholdText(limits.minDeliveryReliability, (value) => new Intl.NumberFormat("en-FI", { style: "percent", maximumFractionDigits: 4 }).format(value))} ${limits.minDeliveryReliability === null ? "" : "At or above the minimum, automatic placement is allowed subject to other checks; below it, approval is required."}`)}
-            ${row("Maximum estimated CO₂-equivalent per kg", `${thresholdText(limits.maxCo2PerKg, (value) => `${formatQuantity({ value, unit: "KGM" })} CO₂-eq per kg`)} ${limits.maxCo2PerKg === null ? "" : "At or below the maximum, automatic placement is allowed subject to other checks; above it, approval is required."}`)}
-            ${row("Missing allergen data", `${policyText(limits.allergenData.ifNoData)} when an allergen constraint is unknown. Contradicted or missing matches still require approval.`)}
+            ${row(text.minReliability, `${thresholdText(limits.minDeliveryReliability, percentText)} ${limits.minDeliveryReliability === null ? "" : text.reliabilityRule}`)}
+            ${row(text.maxCo2, `${thresholdText(limits.maxCo2PerKg, co2Text)} ${limits.maxCo2PerKg === null ? "" : text.co2Rule}`)}
+            ${row(text.missingAllergen, text.allergenRule(policyText(limits.allergenData.ifNoData)))}
           </dl>
         </section>
         <section>
-          <h3>Payment terms</h3>
+          <h3>${text.paymentTerms}</h3>
           <dl>
-            ${row("Invoice", policyText(limits.paymentTerms.invoice))}
-            ${row(ORDER_TERMS.paymentOnOrder, policyText(limits.paymentTerms.pay_on_order))}
+            ${row(text.invoice, policyText(limits.paymentTerms.invoice))}
+            ${row(terms.paymentOnOrder, policyText(limits.paymentTerms.pay_on_order))}
           </dl>
         </section>
         <section>
-          <h3>Standing constraints</h3>
-          <p class="strong">Required</p>
+          <h3>${text.standingConstraints}</h3>
+          <p class="strong">${text.required}</p>
           ${
             hard.length === 0
-              ? html`<p>None</p>`
+              ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${hard.map(() => html`<li>Free from lactose</li>`)}
+                  ${hard.map(() => html`<li>${text.freeFromLactose}</li>`)}
                 </ul>`
           }
-          <p class="strong">Preferred</p>
+          <p class="strong">${text.preferred}</p>
           ${
             soft.length === 0
-              ? html`<p>None</p>`
+              ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${soft.map((item) => html`<li>${item.attribute === "countryOfOrigin" ? "Country of origin" : item.attribute === "category" ? "Category" : item.attribute}: ${item.prefer}</li>`)}
+                  ${soft.map((item) => html`<li>${softText(item)}</li>`)}
                 </ul>`
           }
         </section>
         <section>
-          <h3>Validity</h3>
+          <h3>${text.validity}</h3>
           <dl>
-            ${row("Issued", formatTimestamp(new Date(mandate.iat * 1000).toISOString()))}${row("Expires", formatTimestamp(new Date(mandate.exp * 1000).toISOString()))}
+            ${row(text.issued, formatTimestamp(new Date(mandate.iat * 1000).toISOString(), l))}${row(text.expires, formatTimestamp(new Date(mandate.exp * 1000).toISOString(), l))}
           </dl>
         </section>
-        <p class="secondary">
-          This view is read-only. An approver must authorize changes. Unusual quantities and
-          unconfirmed stock can still require approval; other checks also apply.
-        </p>
+        <p class="secondary">${text.readOnly}</p>
         <details>
-          <summary>Technical details</summary>
+          <summary>${text.technicalDetails}</summary>
           <dl>
-            ${row("Mandate ID", mandate.mandateId)}${row("Customer", mandate.iss)}${row("Agent", mandate.agent)}${row("Signed by", mandate.signedBy)}${row("Registered", formatTimestamp(record.registeredAt))}
+            ${row(text.mandateId, mandate.mandateId)}${row(text.customer, mandate.iss)}${row(text.agent, mandate.agent)}${row(text.signedBy, mandate.signedBy)}${row(text.registered, formatTimestamp(record.registeredAt, l))}
           </dl>
         </details>
       </div>

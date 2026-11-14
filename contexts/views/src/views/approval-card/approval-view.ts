@@ -218,9 +218,6 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       await this.decide(updated, { decision: "approve", proposalVersion: updated.proposalVersion });
     // The model learns the decision made on the card, so it does not say the order still waits.
     if (updated.status !== "pending_approval") void this.source.context?.(decisionContext(updated));
-    // The agent confirms a placed order in the chat.
-    if (request.decision !== "reject" && updated.status === "placed")
-      void this.source.message?.(`I confirmed order ${order.orderId}.`);
   }
 
   /** Sends the card's message to the agent in the chat; with `update` the card waits for it. */

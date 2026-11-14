@@ -57,12 +57,12 @@ const line = (availableDate: string | null, availableAmount = 10, salesBlock = f
 const product = (
   productId: string,
   scheduleLines: ReturnType<typeof line>[],
-  extra: { closingTime?: string | null; salesBlock?: boolean } = {},
+  extra: { closingTime?: string | null; salesBlock?: boolean; logisticModel?: string | null } = {},
 ) => ({
   productId,
   closingTime: extra.closingTime ?? null,
   salesBlock: extra.salesBlock ?? false,
-  logisticModel: "Stock",
+  logisticModel: extra.logisticModel === undefined ? "Stock" : extra.logisticModel,
   scheduleLines,
 });
 
@@ -171,23 +171,68 @@ describe("availability mapping", () => {
     expect(further[0]?.body.products.toSorted()).toEqual(["p-empty-further", "p-single"]);
   });
 
-  test("999999 gives stock unconfirmed", async () => {
+  // Shaped from a recorded live response of 2026-11-14 for a supplier-warehouse product; the id is invented.
+  test("the recorded live supplier-warehouse amount maps to unconfirmed", async () => {
+    const { live } = harness(() =>
+      json({
+        timeNow: "2026-11-14T16:51:47+0200",
+        requestedDate: "2026-11-16T00:00:00+0200",
+        products: [
+          {
+            productId: "p-terminal",
+            closingTime: "2026-11-15T14:00:00+0200",
+            salesBlock: false,
+            logisticModel: "Terminal",
+            scheduleLines: [
+              {
+                salesBlock: false,
+                availableAmount: 999999,
+                availableDate: "2026-11-16",
+                salesUnit: "ST",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const value = await availabilityOf(live, query(["p-terminal"]));
+    expect(value.quotes[0]).toMatchObject({ amount: 999999, stock: "unconfirmed" });
+  });
+
+  test("a Stock product is confirmed at any amount, including the large amounts of plentiful stock", async () => {
+    const amounts = [10, 999999, 1999999999, 9999999999];
+    const { live } = harness(({ body }) =>
+      json(
+        availabilityBody(
+          body.requestedDate === "2026-11-16"
+            ? amounts.map((amount) => product(`p-${amount}`, [line("2026-11-16", amount)]))
+            : [],
+        ),
+      ),
+    );
+    const value = await availabilityOf(live, query(amounts.map((amount) => `p-${amount}`)));
+    expect(value.quotes.map((quote) => quote.stock)).toEqual(amounts.map(() => "confirmed"));
+  });
+
+  test("999999 with no logisticModel gives stock unconfirmed", async () => {
     const { live } = harness(({ body }) =>
       json(
         availabilityBody(
           body.requestedDate === "2026-11-16"
             ? [
-                product("p-terminal", [line("2026-11-16T00:00:00", 999999)]),
-                product("p-stock", [line("2026-11-16T00:00:00", 999998)]),
+                product("p-unknown", [line("2026-11-16", 999999)], { logisticModel: null }),
+                product("p-other", [line("2026-11-16", 999998)], { logisticModel: null }),
               ]
             : [],
         ),
       ),
     );
-    const value = await availabilityOf(live, query(["p-terminal", "p-stock"]));
-    const byId = new Map(value.quotes.map((quote) => [quote.productId, quote]));
-    expect(byId.get("p-terminal")).toMatchObject({ amount: 999999, stock: "unconfirmed" });
-    expect(byId.get("p-stock")).toMatchObject({ amount: 999998, stock: "confirmed" });
+    const value = await availabilityOf(live, query(["p-unknown", "p-other"]));
+    const byId = new Map(value.quotes.map((quote) => [quote.productId, quote.stock]));
+    expect(Object.fromEntries(byId)).toEqual({
+      "p-unknown": "unconfirmed",
+      "p-other": "confirmed",
+    });
   });
 
   test("the further query runs at most once per product per call", async () => {
@@ -262,6 +307,7 @@ describe("price mapping", () => {
         productId: "p-ok",
         unitPrice: { net: 14.4, vatRate: 14, currency: "EUR" },
         deposit: 0,
+        depositKnown: false,
         comparisonPrice: null,
         validTo: "2026-11-30T23:59:59+02:00",
       },
@@ -425,6 +471,7 @@ describe("live format", () => {
         productId: "p-live",
         unitPrice: { net: 1.56, vatRate: 13.5, currency: "EUR" },
         deposit: 0,
+        depositKnown: false,
         comparisonPrice: { value: 1.56, unit: "LTR" },
         validTo: "9999-12-31T00:00:00+02:00",
       },

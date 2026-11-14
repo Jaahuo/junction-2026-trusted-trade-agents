@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import type { TradeRest, ViewName, ViewPages } from "../application/tools.ts";
 import { createRoot } from "./index.ts";
-import { type McpDeps, viewToolsMode } from "./mcp-server.ts";
+import { type McpDeps, VIEWS_NOT_IN_CHAT, viewToolsMode } from "./mcp-server.ts";
 
 const placed: Order = { ...fixtures.order, status: "placed", approvalUrl: null };
 
@@ -140,28 +140,41 @@ describe("tools/list", () => {
     expect(() => viewToolsMode("hidden")).toThrow("MCP_VIEW_TOOLS");
   });
 
-  test("every tool's inputSchema is TOOL_INPUT[tool] and its outputSchema is TOOL_OUTPUT[tool]", async () => {
+  test("every tool's inputSchema is TOOL_INPUT[tool], plus language on a tool with a view, and its outputSchema is TOOL_OUTPUT[tool]", async () => {
     for (const tool of await mcp().listTools()) {
       const name = z.enum([...MODEL_TOOLS, ...VIEW_TOOLS]).parse(tool.name);
+      const input = z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" });
+      const hasView = VIEWS.some(
+        (view) => !VIEWS_NOT_IN_CHAT.has(view.view) && view.tools.some((entry) => entry === name),
+      );
       expect({ name, input: tool.inputSchema, output: tool.outputSchema }).toEqual({
         name,
-        input: z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" }),
+        input: hasView
+          ? {
+              ...input,
+              properties: {
+                ...input["properties"],
+                language: { type: "string", description: expect.any(String) },
+              },
+            }
+          : input,
         output: z.toJSONSchema(TOOL_OUTPUT[name], { target: "draft-7", io: "output" }),
       });
     }
   });
 
-  test("each tool in VIEWS declares the view's ui:// resource", async () => {
+  test("each tool in VIEWS declares the view's ui:// resource, except views not in the chat", async () => {
     const tools = await mcp().listTools();
     for (const view of VIEWS) {
       for (const name of view.tools) {
         const tool = tools.find((entry) => entry.name === name);
         expect({ name, uri: tool === undefined ? undefined : uiOf(tool)?.resourceUri }).toEqual({
           name,
-          uri: view.uri,
+          uri: VIEWS_NOT_IN_CHAT.has(view.view) ? undefined : view.uri,
         });
       }
     }
+    expect(VIEWS_NOT_IN_CHAT.has("offer-comparison")).toBe(true);
   });
 });
 
@@ -180,6 +193,13 @@ describe("tools/call", () => {
     const { callTool, calls } = mcp();
     const result = await callTool("search_products", fixtures.searchRequest);
     expect(result.structuredContent).toEqual(fixtures.searchResult);
+    expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
+  });
+
+  test("language reaches no REST route: search_products sends the request without it", async () => {
+    const { callTool, calls } = mcp();
+    const result = await callTool("search_products", { ...fixtures.searchRequest, language: "fi" });
+    expect(result.isError).toBeUndefined();
     expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
   });
 

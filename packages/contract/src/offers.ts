@@ -30,7 +30,14 @@ export const OfferClaimsSchema = z.strictObject({
   quantity: QuantitySchema,
   unitPrice: PriceQuoteSchema.shape.unitPrice,
   deposits: z.number(),
+  /** false: the wholesaler gives no deposit amount, so `deposits` and `total` leave deposits out. */
+  depositsIncluded: z.boolean().optional(),
   total: MoneyTotalSchema,
+  /** Gross price (VAT, no deposit) per litre or kilogram; null when no conversion is known. SPEC-006. */
+  pricePerStandardUnit: z
+    .strictObject({ gross: z.number(), unit: z.enum(["LTR", "KGM"]) })
+    .nullable()
+    .optional(),
   deliveryDate: DateSchema,
   requestedDate: DateSchema,
   nextDeliveryDate: DateSchema.nullable(),

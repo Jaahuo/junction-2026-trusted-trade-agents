@@ -174,7 +174,7 @@ RestartSec=2
 WantedBy=multi-user.target
 `;
 
-const SSH = ["-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"];
+const SSH = ["-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes"];
 
 /** Parses `tofu output -json`; CI passes the same JSON in DEPLOY_OUTPUTS because it has no state. */
 export const parseOutputs = (json: string): Outputs => {
@@ -283,10 +283,8 @@ export const push = async (
   settings: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<void> => {
   const image = settings["DEPLOY_IMAGE"] ?? "";
-  if (!new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}:[0-9a-f]{40}$`).test(image))
-    throw new Error(
-      "DEPLOY_IMAGE must be the trusted GHCR repository tagged with a full lowercase SHA",
-    );
+  if (!new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}$`).test(image))
+    throw new Error("DEPLOY_IMAGE must be the trusted GHCR repository pinned by sha256 digest");
   const user = settings["DEPLOY_REGISTRY_USER"] ?? "";
   const token = settings["DEPLOY_REGISTRY_TOKEN"] ?? "";
   if (!user || !token || /[\r\n]/.test(user) || /[\r\n]/.test(token))
@@ -304,15 +302,18 @@ trap 'rm -rf "$config"' EXIT
 export DOCKER_CONFIG="$config"
 docker login ghcr.io --username ${shellQuote(user)} --password-stdin >&2
 docker pull ${shellQuote(image)} >&2
+docker image inspect --format '{{.Id}}' ${shellQuote(image)}
 docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${shellQuote(image)}
 `;
-  const digests = await $`ssh ${SSH} ${host} ${pull} < ${new Response(token)}`.text();
-  const digest = digests
-    .split("\n")
-    .find((line) =>
-      new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}$`).test(line),
-    );
-  if (!digest) throw new Error("Pulled image has no trusted repository digest");
+  const [expectedImageId, ...digests] = (
+    await $`ssh ${SSH} ${host} ${pull} < ${new Response(token)}`.text()
+  )
+    .trim()
+    .split("\n");
+  if (expectedImageId === undefined || !/^sha256:[0-9a-f]{64}$/.test(expectedImageId))
+    throw new Error("Pulled image has an invalid SHA-256 image ID");
+  if (!digests.includes(image))
+    throw new Error("Pulled image does not contain the requested repository digest");
   const remoteShell = `ssh ${SSH.join(" ")}`;
   if (existsSync("data")) await transferData("data/", host, outputs.app_dir, remoteShell);
   // Everything slow or network-bound for the chat host happens before the app stops.
@@ -326,12 +327,20 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   await $`ssh ${SSH} ${host} systemctl stop trusted-trade`;
   await $`ssh ${SSH} ${host} ${`chown -R 1000:1000 ${dir}/data && chmod -R u+rX ${dir}/data`}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
-  await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${digest}"\n`)}`;
+  await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${image}"\n`)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade.service < ${new Response(unit)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs, chat !== undefined))}`;
   // The Vultr Ubuntu image enables ufw with only SSH open.
   await $`ssh ${SSH} ${host} ${"ufw allow 80/tcp && ufw allow 443/tcp && systemctl daemon-reload && systemctl enable --now trusted-trade && systemctl reload caddy"}`;
   await waitForHealth(outputs.public_base_url);
+  const runningImage = (
+    await $`ssh ${SSH} ${host} ${"docker container inspect --format '{{.Image}} {{.State.Running}}' trusted-trade"}`.text()
+  ).trim();
+  if (runningImage !== `${expectedImageId} true`)
+    throw new Error(
+      "Running container image hash or running state does not match the expected image",
+    );
+  console.log(`verified container image: ${expectedImageId} (${image})`);
   if (chat) {
     // The chat restarts only after the app is healthy, so it never adds to the app's downtime.
     await $`ssh ${SSH} ${host} ${"systemctl daemon-reload && systemctl enable trusted-trade-chat && systemctl restart trusted-trade-chat"}`;

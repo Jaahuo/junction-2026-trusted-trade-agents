@@ -62,6 +62,13 @@ const operation = (route: Route) => {
   const body = withoutProperties(withoutDialect(route.input.toJSONSchema({ io: "input" })), params);
   return {
     operationId: route.key,
+    ...("notImplemented" in route
+      ? {
+          summary: "Not implemented",
+          description: "Not implemented yet: always answers 501 NOT_IMPLEMENTED.",
+          "x-not-implemented": true,
+        }
+      : {}),
     ...(route.tool === null ? {} : { "x-mcp-tool": route.tool }),
     tags: [route.context],
     ...(params.length === 0

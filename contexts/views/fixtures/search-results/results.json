@@ -30,6 +30,7 @@
       },
       "orderQuantity": null,
       "equals": null,
+      "quantityReason": "Sales unit conversion is unavailable.",
       "deliveryReliability": null,
       "co2PerKg": null,
       "substitutes": []

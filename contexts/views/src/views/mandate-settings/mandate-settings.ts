@@ -3,9 +3,9 @@ import { formatMoney, formatQuantity, formatTimestamp, ORDER_WORDING } from "@ap
 import { css, html } from "lit";
 import { plainPageUrl, type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
 import { lang, pick } from "../../shared/locale.ts";
+import { preferred, required } from "../../shared/constraints.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
-import { required } from "../search-results/search-results.ts";
 import { loadMandate } from "./loader.ts";
 import {
   categoriesText,
@@ -255,7 +255,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
             soft.length === 0
               ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${soft.map((item) => html`<li>${item.attribute === "countryOfOrigin" ? text.countryOfOrigin : item.attribute === "category" ? text.category : item.attribute}: ${item.prefer}</li>`)}
+                  ${soft.map((item) => html`<li>${preferred(item.attribute, item.prefer)}</li>`)}
                 </ul>`
           }
         </section>

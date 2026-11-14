@@ -237,6 +237,7 @@ describe("partial stock and substitutes", () => {
     });
     const result = valueOf(await getOffers(setup.deps, principal, request()));
     expect(result.offers.map((offer) => offer.claims.productId)).toEqual([ORIGINAL, kept]);
+    expect(setup.catalog.requests.flatMap((req) => req.productIds)).not.toContain(blocked);
   });
 
   test("ranks by soft match, price per standard unit, reliability and CO2, retaining at most three", async () => {

@@ -1,4 +1,9 @@
-import type { MandateDraft, StoredMandate } from "@app/contract";
+import {
+  type MandateDraft,
+  samePair,
+  type StoredMandate,
+  type SubstitutePair,
+} from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { formatMoney, formatTimestamp, ORDER_WORDING } from "@app/ui/format";
 import { css, html, nothing } from "lit";
@@ -11,6 +16,7 @@ import {
   viewEntry,
 } from "../../shared/bridge.ts";
 import { lang, pick } from "../../shared/locale.ts";
+import { saveRules } from "../../shared/substitution-rules.ts";
 import { required } from "../../shared/constraints.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
@@ -157,7 +163,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
         align-items: center;
         justify-content: space-between;
         gap: var(--spacing-md);
-        border-bottom: 1px solid var(--color-border);
+        border-bottom: var(--border-width-default) solid var(--color-border);
         padding-bottom: var(--spacing-sm);
       }
       @media (max-width: 400px) {
@@ -265,25 +271,12 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     void source.context?.(registeredContext(stored));
   }
 
-  /** Registers the mandate again without the rule at `index`, then shows the new version. */
-  private async revoke(record: StoredMandate, index: number) {
+  /** Registers the current mandate again without the rule for `pair`, then shows the new version. */
+  private async revoke(pair: SubstitutePair) {
     const source = this.source;
     if (source === null) return;
-    const { limits, standingConstraints, exp } = record.mandate;
     this.revoking = true;
-    const saved = await callAction(
-      source,
-      "register_mandate",
-      {
-        limits: {
-          ...limits,
-          substitutionRules: (limits.substitutionRules ?? []).filter((_, i) => i !== index),
-        },
-        standingConstraints,
-        exp,
-      },
-      null,
-    );
+    const saved = await saveRules(source, (rules) => rules.filter((rule) => !samePair(rule, pair)));
     this.revoking = false;
     this.revokeFailed = saved.kind !== "done";
     if (saved.kind === "done") this.registered(source, saved.data);
@@ -298,7 +291,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
       <h3>${text.substitutionRules}</h3>
       <p class="secondary">${text.substitutionRulesNote}</p>
       <ul class="rules">
-        ${rules.map((rule, index) => {
+        ${rules.map((rule) => {
           const since = formatTimestamp(rule.decidedAt, l);
           return html`<li>
             <div>
@@ -314,7 +307,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
                 ? html`<button
                     class="btn secondary"
                     ?disabled=${this.revoking}
-                    @click=${() => this.revoke(record, index)}
+                    @click=${() => this.revoke(rule)}
                   >
                     ${text.revoke}
                   </button>`
@@ -323,7 +316,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
           </li>`;
         })}
       </ul>
-      ${this.revokeFailed ? html`<p role="alert">${text.revokeFailed}</p>` : nothing}
+      ${this.revokeFailed ? html`<p class="message danger" role="alert">${text.revokeFailed}</p>` : nothing}
     </section>`;
   }
 

@@ -341,6 +341,22 @@ test("a declined substitute offers one tap to stop suggesting it", () => {
   expect(visible(card)).toContain(text.neverSaved(SUBSTITUTE, ORIGINAL));
 });
 
+test("a pair that already has a rule is not offered again", () => {
+  const text = pick(CARD);
+  const { card } = cardFor(declinedSubstitution);
+  card.rules = [
+    {
+      replaces: "prod_test_yogurt_750",
+      productId: "prod_test_yogurt_400",
+      policy: "never",
+      decidedAt: "2026-11-14T10:00:00+00:00",
+    },
+  ];
+  expect(visible(card)).not.toContain(text.dontSuggestAgain);
+  card.remembered = true;
+  expect(visible(card)).toContain(text.neverSaved(SUBSTITUTE, ORIGINAL));
+});
+
 test("the rule offers follow the view language", () => {
   setLang("fi");
   try {

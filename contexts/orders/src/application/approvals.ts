@@ -144,9 +144,7 @@ const standingOffer = async (
   );
   if (line === undefined || line.claims.replaces === null) return undefined;
   const pair = { replaces: line.claims.replaces, productId: line.claims.productId };
-  const approved = (await tx.withPair(order.customer, pair)).filter(
-    (past) => past.decision?.action === "approve",
-  );
+  const approved = await tx.approvedWithPair(order.customer, pair);
   if (approved.length < STANDING_OFFER_AFTER) return undefined;
   const replacesName = approved
     .flatMap((past) => past.lines)

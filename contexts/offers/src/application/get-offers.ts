@@ -308,8 +308,15 @@ export async function getOffers(
     current?.limits.substitutions === "never"
       ? []
       : eligible.filter((original) => original.shortfall !== null);
+  // A substitute the human said not to suggest again.
+  const blocked = (replaces: string, productId: string): boolean =>
+    (current?.limits.substitutionRules ?? []).some(
+      (rule) => rule.policy === "never" && samePair(rule, { replaces, productId }),
+    );
   const substituteIds = unique(
-    substituteOrigins.flatMap((original) => original.product.substitutes),
+    substituteOrigins.flatMap((original) =>
+      original.product.substitutes.filter((id) => !blocked(original.product.productId, id)),
+    ),
   ).filter((id) => !factsById.has(id) && !unknown.has(id));
   if (substituteIds.length > 0) {
     const read = await deps.catalog.facts({ productIds: substituteIds, hard: constraints.hard });
@@ -317,11 +324,6 @@ export async function getOffers(
     for (const product of read.value.products) factsById.set(product.productId, product);
     for (const id of read.value.unknown) unknown.add(id);
   }
-  // A substitute the human said not to suggest again.
-  const blocked = (replaces: string, productId: string): boolean =>
-    (current?.limits.substitutionRules ?? []).some(
-      (rule) => rule.policy === "never" && samePair(rule, { replaces, productId }),
-    );
   const possible: { origin: Dated; product: ProductFacts; quantity: OfferClaims["quantity"] }[] =
     [];
   for (const origin of substituteOrigins) {

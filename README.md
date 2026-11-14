@@ -60,6 +60,7 @@ The server serves `/.well-known/jwks.json` once signed offers ([#14](https://git
 - **Key custody is simulated.** The server signs the registered mandate with a demo buyer key on the buyer's behalf; real key custody on the buyer's side is out of scope.
 - **The mock ignores the customer number.** Customer-specific limits, credit and payment terms are simulated in our layer.
 - **A sales block after quoting holds until the offer expires.** An offer stays valid until it expires even if the product is blocked after quoting; validation at placement arrives with [#30](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/30).
+- **Offer totals leave deposits out.** The wholesaler's price API gives no deposit amount, and the product data names deposit materials without a price, so every offer says `depositsIncluded: false` and the spend limit is checked on a total without deposits; mentor question in [#76](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/76).
 - **Count sales units are whole units.** Search rounds cases, pieces and packs up to whole sales units and preserves lot multiples. The dataset's fractional `allowedLotSize` values do not establish that customers may split a case; mentor confirmation is pending ([#76](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/76)).
 
 ## Demo host

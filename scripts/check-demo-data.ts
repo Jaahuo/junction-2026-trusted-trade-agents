@@ -1,27 +1,8 @@
-import { DemoProductsSchema } from "../packages/contract/src/index.ts";
+import { loadCatalogProducts, readDemoProducts } from "../contexts/catalog/src/api/index.ts";
+import { closeDb, env, openDb } from "../packages/server-kit/src/index.ts";
+import { currentDatabase } from "./runtime.ts";
 
-// Targeted shortlist only: two requests per run, each containing at most 40 IDs.
-const CANDIDATES = [
-  "464201",
-  "464398",
-  "464306",
-  "463335",
-  "464073",
-  "464401",
-  "464237",
-  "463203",
-  "477050",
-  "462775",
-  "464440",
-  "465039",
-  "469363",
-  "473142",
-  "466238",
-  "462626",
-  "464768",
-  "465147",
-  "471762",
-];
+// Two requests per run, each containing at most 40 product IDs.
 const BASE_URL = "https://junction26.valioaimo.fi";
 
 type Availability = {
@@ -36,31 +17,33 @@ type Price = {
   comparisonPrice?: { value: number } | null;
   comparisonUnit?: string | null;
 };
-type Product = {
-  id: string;
-  salesUnit?: string;
-  substitutions?: { substituteProduct: string }[];
-  synkkaData?: {
-    classifications?: { name?: string; values?: { id?: string }[] }[];
-    unitConversions?: { synkkaPackagingType?: string; volume?: { unit: string; value: number } }[];
-  };
-};
 
-const USAGE = "Usage: check-demo-data.ts --date YYYY-MM-DD [--ids id1,id2,...]";
+const USAGE =
+  "Usage: check-demo-data.ts --date YYYY-MM-DD [--ids id1,id2,...] [--database-env NAME]";
 
 /** `--ids` replaces the shortlist for one exploratory run; without it the demo products are checked. */
-export function parseArgs(args: readonly string[]): { date: string; ids: readonly string[] } {
+export function parseArgs(args: readonly string[]): {
+  date: string;
+  ids?: readonly string[];
+  databaseEnv?: string;
+} {
   let date: string | undefined;
-  let ids: readonly string[] = CANDIDATES;
+  let ids: readonly string[] | undefined;
+  let databaseEnv: string | undefined;
   for (let index = 0; index < args.length; index += 2) {
     const value = args[index + 1];
     if (value === undefined) throw new Error(USAGE);
     if (args[index] === "--date") date = value;
     else if (args[index] === "--ids") ids = value.split(",").filter((id) => id !== "");
+    else if (args[index] === "--database-env") databaseEnv = value;
     else throw new Error(USAGE);
   }
   if (date === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(USAGE);
-  return { date, ids };
+  return {
+    date,
+    ...(ids === undefined ? {} : { ids }),
+    ...(databaseEnv === undefined ? {} : { databaseEnv }),
+  };
 }
 
 export function validateCandidates(ids: readonly string[]) {
@@ -92,7 +75,7 @@ const UNLIMITED = 999999;
 /** A safe upper bound for scenario 3; the demo account itself has no credit check (SPEC-015). */
 const CREDIT_LIMIT_GROSS = 5000;
 
-/** A requested quantity in sales units: the sales unit itself, or litres through the consumer-unit volume. */
+/** A requested quantity in sales units, or litres through the sales-unit volume. */
 export function salesUnits(
   quantity: { value: number; unit: string },
   row: Pick<Row, "volume">,
@@ -140,17 +123,41 @@ export function isLate(row: Pick<Row, "date">, date: string): boolean {
   return row.date !== null && row.date.slice(0, 10) > date;
 }
 
-const csv = async (path: string) =>
-  new Map(
-    (await Bun.file(path).text())
-      .trim()
-      .split(/\r?\n/)
-      .slice(1)
-      .map((line) => {
-        const [id, value] = line.split(",");
-        return [id, Number(value)] as const;
-      }),
-  );
+export function selectDatabaseUrl(
+  baseUrl: string | undefined,
+  local: { url: string; port: number } | undefined,
+  explicit: string | undefined,
+): string {
+  if (explicit !== undefined) return explicit;
+  if (local === undefined) throw new Error("Select the target with --database-env NAME.");
+  if (baseUrl !== undefined) {
+    const target = new URL(baseUrl);
+    if (
+      target.protocol !== "http:" ||
+      !["localhost", "127.0.0.1", "[::1]"].includes(target.hostname) ||
+      Number(target.port || 80) !== local.port ||
+      target.pathname !== "/" ||
+      target.search !== "" ||
+      target.hash !== "" ||
+      target.username !== "" ||
+      target.password !== ""
+    )
+      throw new Error(
+        "Application target is not this worktree. Select its database with --database-env NAME.",
+      );
+  }
+  return local.url;
+}
+
+export async function demoDatabaseUrl(baseUrl?: string, databaseEnv?: string): Promise<string> {
+  if (databaseEnv !== undefined) {
+    const explicit = env(databaseEnv);
+    if (explicit === undefined)
+      throw new Error(`Missing database environment variable: ${databaseEnv}`);
+    return selectDatabaseUrl(baseUrl, undefined, explicit);
+  }
+  return selectDatabaseUrl(baseUrl, await currentDatabase(), undefined);
+}
 
 async function main() {
   const key = Bun.env["VALIO_AIMO_API_KEY"];
@@ -160,13 +167,29 @@ async function main() {
     return;
   }
   const apiKey: string = key;
-  const { date, ids } = parseArgs(process.argv.slice(2));
+  const { date, ids: explicitIds, databaseEnv } = parseArgs(process.argv.slice(2));
+  const db = openDb(await demoDatabaseUrl(undefined, databaseEnv));
+  const [products, demo] = await (async () => {
+    try {
+      return await Promise.all([loadCatalogProducts(db), readDemoProducts(db)]);
+    } finally {
+      await closeDb(db);
+    }
+  })();
+  if (!demo) throw new Error("Demo products are not configured in the catalogue database.");
+  const scenarios = [demo.s1, demo.s2, demo.s3, demo.late, ...demo.triedForS3];
+  const scenarioIds = scenarios.flatMap((scenario) =>
+    scenario === null ? [] : [scenario.productId],
+  );
+  const ids = explicitIds ?? [
+    ...new Set([
+      ...scenarioIds,
+      ...products
+        .filter((product) => scenarioIds.includes(product.productId))
+        .flatMap((product) => product.substitutes),
+    ]),
+  ];
   validateCandidates(ids);
-  const products: Product[] = await Bun.file("data/valio_aimo_junction26_product_data.json").json();
-  const demoFile = Bun.file("data/demo-products.json");
-  const demo = (await demoFile.exists()) ? DemoProductsSchema.parse(await demoFile.json()) : null;
-  const reliability = await csv("data/valio_aimo_junction26_delivery_reliability.csv");
-  const co2 = await csv("data/valio_aimo_junction26_carbon_footprint.csv");
   let requests = 0;
   async function post(path: string) {
     if (++requests > 30) throw new Error("Request ceiling exceeded");
@@ -188,20 +211,13 @@ async function main() {
   const availability: { products: Availability[] } = await post("/api/availability");
   const prices: { products: Price[] } = await post("/api/price");
   const rows = ids.map((id) => {
-    const product = products.find((item) => item.id === id);
-    const lactose =
-      product?.synkkaData?.classifications?.some(
-        (c) => c.name === "nutritionalClaim" && c.values?.some((v) => v.id === "FREE_FROM_LACTOSE"),
-      ) ?? false;
-    const volume = product?.synkkaData?.unitConversions?.find(
-      (u) => u.synkkaPackagingType === "BASE_UNIT_OR_EACH",
-    )?.volume;
+    const product = products.find((item) => item.productId === id);
     const row = Object.assign(mapRow(id, availability.products, prices.products), {
-      reliability: reliability.get(id) ?? null,
-      co2: co2.get(id) ?? null,
-      lactose,
-      volume: volume?.unit === "LTR" ? volume.value : null,
-      substitutes: product?.substitutions?.map((s) => s.substituteProduct) ?? [],
+      reliability: product?.deliveryReliability ?? null,
+      co2: product?.co2PerKg ?? null,
+      lactose: product?.claims.has("FREE_FROM_LACTOSE") ?? false,
+      volume: product?.perSalesUnit?.unit === "LTR" ? product.perSalesUnit.value : null,
+      substitutes: product ? [...product.substitutes] : [],
     });
     console.log(JSON.stringify(row));
     return row;
@@ -232,7 +248,7 @@ async function main() {
     }
     if (demo.s3) {
       const s3 = demo.s3;
-      const product = products.find((item) => item.id === s3.productId);
+      const product = products.find((item) => item.productId === s3.productId);
       const row = rows.find((r) => r.productId === s3.productId);
       const ok =
         row !== undefined &&

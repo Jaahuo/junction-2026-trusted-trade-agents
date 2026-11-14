@@ -243,15 +243,8 @@ const IMAGE_REPOSITORY = "ghcr.io/jaahuo/junction-2026-trusted-trade-agents";
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
 export const renderService = (outputs: Outputs): string => {
-  if (!outputs.app_dir.startsWith("/") || /[:\r\n]/.test(outputs.app_dir))
-    throw new Error("app_dir must be an absolute path without colons or newlines");
   if (!Number.isInteger(outputs.app_port) || outputs.app_port < 1 || outputs.app_port > 65535)
     throw new Error("Invalid app_port");
-  const mount = `${outputs.app_dir}/data:/app/data:ro`
-    .replaceAll("\\", "\\\\")
-    .replaceAll('"', '\\"')
-    .replaceAll("%", "%%")
-    .replaceAll("$", "$$");
   return `[Unit]
 Description=Trusted trade agents API
 After=docker.service network-online.target
@@ -262,7 +255,7 @@ ConditionPathExists=/etc/trusted-trade-image.env
 
 [Service]
 EnvironmentFile=/etc/trusted-trade-image.env
-ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:${outputs.app_port}:3000 -v "${mount}" \${TRUSTED_TRADE_IMAGE}
+ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:${outputs.app_port}:3000 \${TRUSTED_TRADE_IMAGE}
 ExecStop=/usr/bin/docker stop --time 30 trusted-trade
 TimeoutStopSec=40
 Restart=on-failure
@@ -271,15 +264,6 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 `;
-};
-
-export const transferData = async (
-  source: string,
-  host: string,
-  appDir: string,
-  remoteShell: string,
-): Promise<void> => {
-  await $`rsync -az -e ${remoteShell} ${source} ${`${host}:${appDir}/data/`}`;
 };
 
 export const push = async (
@@ -305,9 +289,8 @@ export const push = async (
   const unit = renderService(outputs);
   const envFile = renderEnvFile(await loadDeployEnv(outputs));
   const host = `root@${outputs.public_ip}`;
-  const dir = shellQuote(outputs.app_dir);
   await $`ssh ${SSH} ${host} cloud-init status --wait`.quiet();
-  await $`ssh ${SSH} ${host} ${`set -eu; if ! command -v docker >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io; fi; systemctl enable --now docker; mkdir -p ${dir}/data`}`;
+  await $`ssh ${SSH} ${host} ${"set -eu; if ! command -v docker >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io; fi; systemctl enable --now docker"}`;
   const pullImage = async (reference: string): Promise<string> => {
     const pull = `set -eu
 config=$(mktemp -d)
@@ -335,8 +318,6 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
     ).trim();
     if (role !== "openwebui") throw new Error("DEPLOY_CHAT_IMAGE is not an Open WebUI image");
   }
-  const remoteShell = `ssh ${SSH.join(" ")}`;
-  if (existsSync("data")) await transferData("data/", host, outputs.app_dir, remoteShell);
   // Everything slow or network-bound for the chat host happens before the app stops.
   if (chat) {
     await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat.env < ${new Response(renderEnvFile(chatEnv(outputs, chat)))}`;
@@ -344,7 +325,6 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
     await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade-chat.service < ${new Response(CHAT_SERVICE)}`;
   }
   await $`ssh ${SSH} ${host} systemctl stop trusted-trade`;
-  await $`ssh ${SSH} ${host} ${`chown -R 1000:1000 ${dir}/data && chmod -R u+rX ${dir}/data`}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${image}"\n`)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade.service < ${new Response(unit)}`;

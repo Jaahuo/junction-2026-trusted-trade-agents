@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import {
   DEMO_ACCOUNT,
   type DemoProducts,
@@ -6,14 +5,12 @@ import {
   fixtures,
   type Quantity,
 } from "@app/contract";
-import { contextsDir, type Db } from "@app/server-kit";
+import { type Db, type SeedInputs } from "@app/server-kit";
 import type { HistoryRow } from "../domain/evaluate.ts";
 import { appendOrderAudit } from "../application/commit-placement.ts";
 import type { StoredOrder } from "../application/ports.ts";
 import { postgresOrderStore } from "../infra/order-store.ts";
 import { history } from "../infra/schema.ts";
-
-const demoProductsPath = resolve(contextsDir, "..", "data", "demo-products.json");
 
 const times = (rows: number, productId: string, quantity: Quantity): HistoryRow[] =>
   Array.from({ length: rows }, () => ({ productId, quantity }));
@@ -78,16 +75,14 @@ const approvedSubstitute = (
  */
 export const seedHistory = async (
   db: Db,
-  options: { path?: string; warn?: (message: string) => void } = {},
+  options: { demo?: unknown; warn?: (message: string) => void } = {},
 ): Promise<void> => {
-  const path = options.path ?? demoProductsPath;
   const warn = options.warn ?? console.error;
-  const file = Bun.file(path);
-  if (!(await file.exists())) {
-    warn(`${path} is missing, so the demo customer gets no order history.`);
+  if (options.demo === undefined || options.demo === null) {
+    warn("No imported demo metadata, so the demo customer gets no order history.");
     return;
   }
-  const demo = DemoProductsSchema.parse(await file.json());
+  const demo = DemoProductsSchema.parse(options.demo);
   const rows = [
     ...times(3, demo.s1.productId, demo.s1.quantity),
     ...times(3, demo.s2.productId, fifth(demo.s2.quantity)),
@@ -121,4 +116,5 @@ export const seedHistory = async (
   );
 };
 
-export const seed = (db: Db): Promise<void> => seedHistory(db);
+export const seed = (db: Db, inputs?: SeedInputs): Promise<void> =>
+  seedHistory(db, { demo: inputs?.demoProducts });

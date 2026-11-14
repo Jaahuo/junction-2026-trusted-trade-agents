@@ -205,11 +205,11 @@ async function validRuntime(): Promise<Runtime> {
   return runtime;
 }
 
-export async function currentDatabase(): Promise<{ url: string; name: string }> {
+export async function currentDatabase(): Promise<{ url: string; name: string; port: number }> {
   const runtime = await validRuntime();
   if (process.env["DATABASE_URL"] && process.env["DATABASE_URL"] !== runtime.url)
     throw new Error("DATABASE_URL differs from the owned worktree database; refusing reset.");
-  return { url: runtime.url, name: runtime.name };
+  return { url: runtime.url, name: runtime.name, port: runtime.port };
 }
 
 export async function loadRuntime(): Promise<void> {

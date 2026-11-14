@@ -2,7 +2,6 @@
 package_update: true
 packages:
   - caddy
-  - rsync
   - docker.io
 write_files:
   - path: /etc/systemd/system/trusted-trade.service
@@ -17,7 +16,7 @@ write_files:
 
       [Service]
       EnvironmentFile=/etc/trusted-trade-image.env
-      ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:${app_port}:3000 -v "${app_dir}/data:/app/data:ro" $${TRUSTED_TRADE_IMAGE}
+      ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:${app_port}:3000 $${TRUSTED_TRADE_IMAGE}
       ExecStop=/usr/bin/docker stop --time 30 trusted-trade
       TimeoutStopSec=40
       Restart=on-failure
@@ -34,6 +33,5 @@ write_files:
 %{ endif ~}
 runcmd:
   - systemctl enable --now docker.service
-  - mkdir -p ${app_dir}/data
   - systemctl daemon-reload
   - systemctl enable trusted-trade.service

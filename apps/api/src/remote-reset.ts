@@ -10,6 +10,7 @@ import {
   mountContext,
   openDb,
 } from "@app/server-kit";
+import { migrateCatalogue, readDemoProducts } from "@ctx/catalog/api";
 
 const quote = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 
@@ -50,13 +51,15 @@ const dropContextObjects = async (db: Db, names: readonly string[]): Promise<voi
 };
 
 export const resetContexts = async (db: Db, contexts: readonly ContextModule[]): Promise<void> => {
+  await migrateCatalogue(db);
+  const demoProducts = await readDemoProducts(db);
   await dropContextObjects(
     db,
-    contexts.map((context) => context.name),
+    contexts.filter((context) => context.name !== "catalog").map((context) => context.name),
   );
   for (const context of contexts) {
     await mountContext(db, context);
-    await context.seed?.(db);
+    await context.seed?.(db, { demoProducts });
     console.log(
       `reset ${context.name}${context.seed === undefined ? "" : " and loaded demo data"}`,
     );

@@ -1,7 +1,4 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { type DemoProducts, OrderSchema } from "@app/contract";
 import {
   localOfferKeys,
@@ -151,20 +148,13 @@ test("seeded history does not interfere with the first placed order's audit chai
       late: null,
       triedForS3: [],
     };
-    const dir = await mkdtemp(join(tmpdir(), "orders-receipt-seed-"));
-    try {
-      const path = join(dir, "demo-products.json");
-      await Bun.write(path, JSON.stringify(demo));
-      await seedHistory(db, { path, warn: () => undefined });
-      expect(await db.select().from(history)).toHaveLength(6);
-      expect(await db.select().from(orders)).toHaveLength(0);
-      const order = await orderOf(await place(app, [await sign()]));
-      expect(order.status).toBe("placed");
-      expect(
-        (await verifyAuditChain(`order:${order.orderId}`, order.audit, order.auditAnchor)).ok,
-      ).toBe(true);
-      expect((await verifyOrderIntegrity(order, localOfferKeys(jwks))).ok).toBe(true);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    await seedHistory(db, { demo, warn: () => undefined });
+    expect(await db.select().from(history)).toHaveLength(6);
+    expect(await db.select().from(orders)).toHaveLength(0);
+    const order = await orderOf(await place(app, [await sign()]));
+    expect(order.status).toBe("placed");
+    expect(
+      (await verifyAuditChain(`order:${order.orderId}`, order.audit, order.auditAnchor)).ok,
+    ).toBe(true);
+    expect((await verifyOrderIntegrity(order, localOfferKeys(jwks))).ok).toBe(true);
   }));

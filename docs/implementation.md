@@ -20,7 +20,7 @@ flowchart LR
 ```
 
 - **Open discovery.** An agent reads `/.well-known/trusted-trade.json` and finds the MCP endpoint, the OpenAPI 3.1 document, the public keys (JWKS), the ordering skill and the reason codes.
-- **The server checks the rules.** The buyer's limits are an AP2-style mandate. Twelve reason codes say why an order needs a person, for example spend limit, substitute, new product or unconfirmed allergen. The agent cannot skip a check or approve its own order: the decision tools are visible only to the approval card.
+- **The server checks the rules.** The buyer's limits are an AP2-style mandate. Thirteen reason codes send an order to a person, for example spend limit, substitute, new product or unconfirmed allergen. Eight more reject it, for example an invalid or expired offer. The agent cannot skip a check or approve its own order: the decision tools are visible only to the approval card.
 - **Signed offers and receipts.** Each offer is an ES256 JWS with an ID and an expiry, and each offer works once. Anyone can verify it with the published key. Each order gets a signed receipt that covers the latest entry of a SHA-256 audit hash chain.
 - **The person fixes the order instead of rejecting it.** On the approval card the approver changes an amount, picks another product or reduces an over-limit order to fit. The server gets new signed offers and runs every check again. A proposal version makes sure that only one decision counts.
 - **The agent earns trust.** After a buyer approves the same substitute three times, the card asks: "Let the agent do this without asking?" Yes adds a rule for that product pair to the buyer's mandate, and later orders go through with an audit line that says why. "Don't suggest again" adds a rule that blocks the substitute. Only the buyer can add or remove these rules, in the agent limits view.
@@ -61,7 +61,7 @@ The server then checks every choice, so a wrong model choice cannot become an un
 
 **How we improved its outputs.**
 
-- The system prompt embeds the project's ordering skill and the twelve reason codes, so the model explains a stop in the server's terms.
+- The system prompt embeds the project's ordering skill and the reason codes, so the model explains a stop in the server's terms.
 - A browser check ([`scripts/chat-check.ts`](../scripts/chat-check.ts)) sends the demo sentences to the model in Open WebUI. It reports the tool calls, the stored order and the reply.
 - The check found that about one reply in seven stopped inside the model's reasoning, because the 4,096-token output limit ran out. We raised it to 16,384. After that, the check passed 7 of 7 scenarios twice in a row on Nemotron ([#290](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/290), [PR #297](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/pull/297)).
 - We changed the tools so that a model has less to copy and less to guess:

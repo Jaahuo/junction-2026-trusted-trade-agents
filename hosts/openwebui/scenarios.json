@@ -11,6 +11,19 @@
     ]
   },
   {
+    "name": "advance-friday-next-week",
+    "steps": [{ "say": "Please order 20 litres of whole milk for delivery on Friday next week." }],
+    "expect": [
+      { "called": "find_products" },
+      { "called": "quote_offers" },
+      { "called": "place_order" },
+      { "noError": "OFFER_INVALID" },
+      { "order": "pending_approval" },
+      { "orderProducts": ["^(?!.*(?:cream|kerma|oat|kaura)).*(?:whole milk|full milk|täysmaito)"] },
+      { "maxOrders": 1 }
+    ]
+  },
+  {
     "name": "multi-product",
     "steps": [
       {

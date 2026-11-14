@@ -11,11 +11,13 @@ import {
   fixtures,
   MODEL_TOOLS,
   ORDER_STATUSES,
+  OrderListSchema,
   OrderSchema,
   PAYMENT_TERMS,
   PlaceOrderRequestSchema,
   REASON_TEXT,
   REJECT_REASONS,
+  RefusalListSchema,
   MandateDraftSchema,
   ROUTES,
   SearchRequestSchema,
@@ -110,7 +112,6 @@ test("MODEL_TOOLS, VIEW_TOOLS, PAYMENT_TERMS, ORDER_STATUSES, reason lists, AUDI
   same(REJECT_REASONS, specList("REJECT_REASONS"));
   same(AUDIT_EVENTS, specList("AUDIT_EVENTS"));
   const table = routeTable();
-  expect(table).toHaveLength(18);
   same(
     ROUTES.map(({ key, tool, method, path, context, output }) => ({
       key,
@@ -168,6 +169,20 @@ test("OrderSchema and PlaceOrderRequestSchema reject an unknown key such as stat
     PlaceOrderRequestSchema.safeParse({ ...fixtures.placeOrderRequest, status: "placed" }).success,
   ).toBe(false);
   expect(PlaceOrderRequestSchema.safeParse(fixtures.placeOrderRequest).success).toBe(true);
+});
+
+test("activity list schemas accept their public shapes and reject extra fields", () => {
+  expect(OrderListSchema.safeParse({ orders: [fixtures.order] }).success).toBe(true);
+  expect(OrderListSchema.safeParse({ orders: [], extra: true }).success).toBe(false);
+  expect(
+    RefusalListSchema.safeParse({ refusals: [{ id: 1, at: "2026-01-01", code: "OFFER_INVALID" }] })
+      .success,
+  ).toBe(true);
+  expect(
+    RefusalListSchema.safeParse({
+      refusals: [{ id: 1, at: "2026-01-01", code: "OFFER_INVALID", extra: true }],
+    }).success,
+  ).toBe(false);
 });
 
 test("a mandate draft takes the register body without operationId and has the current mandate or null", () => {

@@ -71,6 +71,10 @@ The main project's embedded ordering skill defines tool arguments and recovery r
 Local setup reads the skill and reason-code reference from the same checkout, not from another server. Hosted provisioning reads them from the chat image.
 The persona and combined base prompt follow those references in the system prompt.
 
+Each preset has three ready-made prompts: automatic buying, a €100,000 purchase that requests human approval, and an ingredient substitution.
+Acme Kitchens uses restaurant and hotel scenarios. Acme Bakery uses bread, pastry and cake scenarios.
+All suggestions request delivery on the next available date.
+
 Recipe arithmetic is deterministic and has no purchasing or network access.
 Valio Aimo recipe fetching stays off unless `VALIO_AIMO_RECIPE_PERMISSION=True` confirms usage permission.
 A permission refusal must not be bypassed through public web tools.

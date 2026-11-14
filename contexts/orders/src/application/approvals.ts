@@ -194,7 +194,8 @@ const approve = async (
           actor: "server",
           event: "check_failed",
           reason: "MANDATE_INVALID",
-          detail: REASON_TEXT.MANDATE_INVALID,
+          rule: "Current mandate",
+          detail: `${REASON_TEXT.MANDATE_INVALID} No current mandate is available; previous mandate ${order.mandateId ?? "unknown"}, version ${order.mandateVersion ?? "unknown"}.`,
         },
         { at, actor: "server", event: "rejected", reason: "MANDATE_INVALID" },
       ],
@@ -508,48 +509,49 @@ const samePack = (previous: OfferClaims, current: OfferClaims): boolean => {
 };
 
 /**
- * The one verdict on a re-quote: per product, where the new offer is worse than the line the
- * approver saw. `price`: a higher net unit price with deposits, a higher gross unit price, another
- * pack size (it changes what one unit buys), or deposits that became unknown (an unknown amount is
- * never cheaper). `availability`: a later delivery date, another amount or unit, or a new shortfall.
- * An edit changes amounts on purpose, so it uses `price` only; an approval uses both.
+ * The one verdict on a re-quote: the lines where the new offer is worse than the line the approver
+ * saw. `price`: a higher net unit price with deposits, a higher gross unit price, another pack size
+ * (it changes what one unit buys), or deposits that became unknown (an unknown amount is never
+ * cheaper). `availability`: a later delivery date, another amount or unit, or a new shortfall. An
+ * edit changes amounts on purpose, so it uses `price` only; an approval uses both.
  */
-const worsened = (pairs: Pair[]): { price: string[]; availability: string[] } => {
-  const price = new Set<string>();
-  const availability = new Set<string>();
-  for (const { previous, current } of pairs) {
-    if (previous === null) continue;
-    const before = previous.claims;
-    const after = current.claims;
+const worsened = (pairs: Pair[]): { price: Pair[]; availability: Pair[] } => {
+  const price: Pair[] = [];
+  const availability: Pair[] = [];
+  for (const pair of pairs) {
+    if (pair.previous === null) continue;
+    const before = pair.previous.claims;
+    const after = pair.current.claims;
     if (
       unitCost(after) > unitCost(before) ||
       unitGross(after) > unitGross(before) ||
       !samePack(before, after) ||
       (before.depositsIncluded !== false && after.depositsIncluded === false)
     )
-      price.add(after.productId);
+      price.push(pair);
     if (
       after.deliveryDate > before.deliveryDate ||
       after.quantity.value !== before.quantity.value ||
       after.quantity.unit !== before.quantity.unit ||
       (after.shortfall !== null && before.shortfall === null)
     )
-      availability.add(after.productId);
+      availability.push(pair);
   }
-  return { price: [...price], availability: [...availability] };
+  return { price, availability };
 };
 
+/** "productId|reason" for a reason about one product, "|reason" for a reason about the order. */
+const keyOf = (reason: ReasonCode, productId: string | undefined): string =>
+  `${productId ?? ""}|${reason}`;
+
 /**
- * Each reason of an evaluation as "productId|reason", or "|reason" for a reason about the whole
- * order: the same split auditOf writes as check_failed events, one per product.
+ * Each reason of an evaluation as product and reason pairs: one per evidence entry, the same split
+ * auditOf writes as check_failed events. A reason without evidence counts for the whole order.
  */
-const reasonKeys = ({ evaluation, byProduct }: Evaluated): Set<string> => {
-  const keys = new Set<string>();
-  for (const reason of evaluation.reasons) {
-    const products = [...byProduct].filter(([, reasons]) => reasons.includes(reason));
-    if (products.length === 0) keys.add(`|${reason}`);
-    for (const [productId] of products) keys.add(`${productId}|${reason}`);
-  }
+const reasonKeys = ({ evaluation, evidence }: Evaluated): Set<string> => {
+  const keys = new Set(evidence.map((entry) => keyOf(entry.reason, entry.productId)));
+  for (const reason of evaluation.reasons)
+    if (!evidence.some((entry) => entry.reason === reason)) keys.add(keyOf(reason, undefined));
   return keys;
 };
 
@@ -564,36 +566,62 @@ const shownReasonKeys = (order: StoredOrder): Set<string> => {
     const event = order.audit[index];
     if (event === undefined) break;
     if (event.event === "check_failed" && event.reason !== undefined)
-      keys.add(`${event.productId ?? ""}|${event.reason}`);
+      keys.add(keyOf(event.reason, event.productId));
     else if (event.event !== "check_passed" && event.event !== "offer_verified") break;
   }
   return keys;
 };
 
+const priceTerms = (claims: OfferClaims): string =>
+  `net ${claims.unitPrice.net} EUR, incl. VAT ${cents(unitGross(claims))} EUR, deposits ${depositsOf(claims)}, deposit per sales unit ${claims.deposits / claims.quantity.value} EUR, net plus deposit ${unitCost(claims)} EUR, pack ${packOf(claims)}`;
+
+/** The price terms of one line before and after, for a PRICE_CHANGED check_failed event. */
+const priceDetail = (before: OfferClaims, after: OfferClaims): string =>
+  `Previous ${priceTerms(before)}; current ${priceTerms(after)}. Policy: approval required for a higher net or gross cost, a changed pack or unknown deposits.`;
+
+const REQUOTE_RULE: Partial<Record<ReasonCode, string>> = {
+  PRICE_CHANGED: "Requoted unit cost and pack",
+  AVAILABILITY_DIFFERS: "Requoted delivery and amount",
+};
+
 /**
- * Adds `reason` for the products a re-quote or edit made worse (see `worsened`), so the order waits
- * for the approver instead of being placed on terms nobody approved.
+ * Adds `reason`, with evidence per line, for the lines a re-quote or edit made worse (see
+ * `worsened`), so the order waits for the approver instead of being placed on terms nobody approved.
  */
 const withReason = (
-  { evaluation, byProduct }: Evaluated,
+  { evaluation, evidence }: Evaluated,
   reason: ReasonCode,
-  products: string[],
+  pairs: Pair[],
 ): Evaluated => {
-  if (products.length === 0) return { evaluation, byProduct };
+  if (pairs.length === 0) return { evaluation, evidence };
   const reasons: ReasonCode[] = evaluation.reasons.includes(reason)
     ? evaluation.reasons
     : [...evaluation.reasons, reason];
-  const marked = new Map(byProduct);
-  for (const productId of products) {
-    const current = marked.get(productId) ?? [];
-    if (!current.includes(reason)) marked.set(productId, [...current, reason]);
-  }
+  const added: Evaluated["evidence"] = pairs.flatMap(({ previous, current }) => {
+    const productId = current.claims.productId;
+    if (
+      previous === null ||
+      evidence.some((entry) => entry.reason === reason && entry.productId === productId)
+    )
+      return [];
+    return [
+      {
+        reason,
+        rule: REQUOTE_RULE[reason] ?? "Requoted terms",
+        productId,
+        detail:
+          reason === "PRICE_CHANGED"
+            ? priceDetail(previous.claims, current.claims)
+            : `${change(previous.claims, current.claims)}. Policy: approval required for a later delivery, another amount or a new shortfall.`,
+      },
+    ];
+  });
   return {
     evaluation: {
       decision: evaluation.decision === "rejected" ? "rejected" : "needs_approval",
       reasons,
     },
-    byProduct: marked,
+    evidence: [...evidence, ...added],
   };
 };
 
@@ -664,7 +692,7 @@ const revision = (input: {
   now: Date;
 }): { order: StoredOrder; events: AuditEvent[] } => {
   const { principal, order, action, changedBy, pairs, lines, mandate, evaluated, now } = input;
-  const { evaluation, byProduct } = evaluated;
+  const { evaluation, evidence } = evaluated;
   const at = now.toISOString();
   const requotes: Requote[] = pairs.flatMap(({ previous, current }) =>
     previous === null
@@ -692,7 +720,7 @@ const revision = (input: {
             detail: `${dropped} alternative${dropped === 1 ? "" : "s"} dropped: expired or made under another mandate`,
           },
         ];
-  const checks = auditOf(evaluation, byProduct, { lines, mandate }, at).filter(
+  const checks = auditOf(evaluation, evidence, { lines, mandate }, at).filter(
     (event) => event.event !== "order_requested",
   );
   const claims = lines.map((line) => line.claims);

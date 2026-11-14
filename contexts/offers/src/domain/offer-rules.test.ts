@@ -5,6 +5,7 @@ import {
   batchIds,
   checkQuantity,
   contradictedAttribute,
+  deliveryOnRequestedDate,
   expiredOmitReason,
   isDeliverableBy,
   lineTotal,
@@ -105,8 +106,21 @@ describe("quantity", () => {
   });
 });
 
-const cutoffDeliverable = (cutoffAt: string) =>
-  isDeliverableBy(availability({ cutoffAt }), "2026-11-15", now);
+test("advancing preserves Helsinki wall time across DST and discards a stale next slot", () => {
+  const quote = availability({
+    availableDate: "2027-03-27",
+    nextDeliveryDate: "2027-03-28",
+    cutoffAt: "2027-03-26T15:30:00Z",
+  });
+  expect(deliveryOnRequestedDate(quote, "2027-03-29")).toMatchObject({
+    availableDate: "2027-03-29",
+    nextDeliveryDate: null,
+    cutoffAt: "2027-03-28T17:30:00.000+03:00",
+    stock: "unconfirmed",
+  });
+  expect(deliveryOnRequestedDate(quote, "2027-03-27")).toBe(quote);
+  expect(deliveryOnRequestedDate(quote, "2027-03-26")).toBe(quote);
+});
 
 describe("isDeliverableBy", () => {
   test("a delivery date on or before the requested date is deliverable, a later one is not", () => {
@@ -123,14 +137,40 @@ describe("isDeliverableBy", () => {
     expect(isDeliverableBy(availability({ salesBlocked: true }), "2026-11-15", now)).toBe(false);
   });
 
-  test("a cut-off at or before now is not deliverable, a later one is", () => {
-    expect(cutoffDeliverable("2026-11-14T10:00:00Z")).toBe(false);
-    expect(cutoffDeliverable("2026-11-14T09:59:59Z")).toBe(false);
-    expect(cutoffDeliverable("2026-11-14T10:00:01Z")).toBe(true);
+  test("cut-offs use the end of the current second, as offers do", () => {
+    for (const [cutoffAt, expected] of [
+      ["2026-11-14T09:59:59.999Z", false],
+      ["2026-11-14T10:00:00.000Z", false],
+      ["2026-11-14T10:00:00.500Z", false],
+      ["2026-11-14T10:00:00.999Z", false],
+      ["2026-11-14T10:00:01.000Z", true],
+      [null, true],
+    ] as const) {
+      expect(isDeliverableBy(availability({ cutoffAt }), "2026-11-15", now)).toBe(expected);
+    }
   });
 
-  test("stock below any quantity stays deliverable: partial stock still gets an offer", () => {
-    expect(isDeliverableBy(availability({ amount: 0 }), "2026-11-15", now)).toBe(true);
+  test("confirmed zero stock is rejected while positive partial stock remains eligible", () => {
+    expect(isDeliverableBy(availability({ amount: 0 }), "2026-11-15", now)).toBe(false);
+    expect(isDeliverableBy(availability({ amount: -1 }), "2026-11-15", now)).toBe(false);
+    expect(isDeliverableBy(availability({ amount: 2 }), "2026-11-15", now)).toBe(true);
+    // The quote has no lot size: even 0.5 against an illustrative lot size of 1 remains eligible.
+    expect(isDeliverableBy(availability({ amount: 0.5 }), "2026-11-15", now)).toBe(true);
+    expect(
+      isDeliverableBy(availability({ amount: 0, stock: "unconfirmed" }), "2026-11-15", now),
+    ).toBe(true);
+  });
+
+  test("advanced dates use unconfirmed stock and the shifted cut-off", () => {
+    const quote = availability({
+      availableDate: "2026-11-15",
+      amount: 0,
+      cutoffAt: "2026-11-13T10:00:00.500Z",
+    });
+    expect(isDeliverableBy(quote, "2026-11-16", now)).toBe(false);
+    expect(isDeliverableBy(quote, "2026-11-16", new Date("2026-11-14T09:59:59.999Z"))).toBe(true);
+    expect(isDeliverableBy(quote, "2026-11-16", new Date("2026-11-14T10:00:01Z"))).toBe(false);
+    expect(isDeliverableBy({ ...quote, cutoffAt: null }, "2026-11-16", now)).toBe(true);
   });
 });
 

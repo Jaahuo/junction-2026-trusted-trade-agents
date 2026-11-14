@@ -8,7 +8,7 @@ import { history, orders, refusalAnchors, refusals } from "./schema.ts";
 type Row = typeof orders.$inferSelect;
 type Executor = Pick<Db, "select" | "insert" | "update">;
 
-const toStored = (row: Row): StoredOrder => ({
+export const toStored = (row: Row): StoredOrder => ({
   orderId: row.orderId,
   customer: row.customer,
   agentId: row.agentId,

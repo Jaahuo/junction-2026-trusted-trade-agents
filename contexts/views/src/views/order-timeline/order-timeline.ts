@@ -8,12 +8,32 @@ import {
   ORDER_WORDING,
 } from "@app/ui/format";
 import { css, html, nothing, type TemplateResult } from "lit";
+import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import { type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
+import agent16 from "../../shared/icons/agent-16.svg?raw";
 import { lang, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
+import { statusDisc, type Tone, trustStyles } from "../../shared/trust.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 
 import { TIMELINE } from "./strings.ts";
+
+/** The audit integrity strip (#74): the server's signature check of the whole log. */
+function integrityStrip(order: Order) {
+  const integrity = order.auditIntegrity;
+  if (integrity === undefined) return nothing;
+  const text = pick(TIMELINE);
+  const changed = order.audit.filter((e) => e.integrityOk === false).length;
+  const [tone, message]: [Tone, string] =
+    integrity === "intact"
+      ? ["success", text.logIntact(order.audit.length)]
+      : integrity === "unverified"
+        ? ["warning", text.logUnverified]
+        : ["danger", text.logBroken(changed)];
+  return html`<p class="strip ${tone} strong" role="status" aria-live="polite">
+    ${statusDisc(tone, true)}<span>${message}</span>
+  </p>`;
+}
 
 /** Render the order record without adding actions to the audit view. */
 export function renderOrderTimeline(order: Order): TemplateResult {
@@ -63,25 +83,35 @@ export function renderOrderTimeline(order: Order): TemplateResult {
           </div>`
         : nothing
     }
-    <section aria-label=${text.auditEvents}>
-      <h3>${text.activity}</h3>
+    <section class="log" aria-label=${text.orderLog}>
+      <h3>${text.orderLog}</h3>
+      ${integrityStrip(order)}
       ${
         order.audit.length === 0
           ? html`<p class="secondary">${text.noActivity}</p>`
           : html`<ol class="events">
               ${order.audit.map(
                 (event) =>
-                  html`<li>
-                    <div class="event-heading">
-                      <h4>${text.events[event.event]}</h4>
-                      <span class="secondary body-small">
-                        <time datetime=${event.at}>${formatTimestamp(event.at, l)}</time>
-                      </span>
-                    </div>
-                    <p class="secondary body-small">${words.actors[event.actor]}</p>
-                    ${event.reason ? html`<p>${text.reason[event.reason]}</p>` : nothing}
+                  html`<li class=${event.integrityOk === false ? "broken" : ""}>
+                    <p class="label-small secondary event-meta">
+                      ${
+                        event.actor === "agent"
+                          ? html`<span class="agent" aria-hidden="true"
+                              >${unsafeSVG(agent16)}</span
+                            >`
+                          : nothing
+                      }<time datetime=${event.at}>${formatTimestamp(event.at, l)}</time>
+                      · ${words.actors[event.actor]}
+                    </p>
+                    <h4 class="body-small">${text.events[event.event]}</h4>
+                    ${event.reason ? html`<p class="body-small">${text.reason[event.reason]}</p>` : nothing}
                     ${event.rule ? html`<span class="body-small" title=${event.rule}>${text.supportRule}</span>` : nothing}
-                    ${event.detail ? html`<p class="body-small">${event.detail}</p>` : nothing}
+                    ${event.detail && (!event.reason || event.detail !== text.reason[event.reason]) ? html`<p class="body-small">${event.detail}</p>` : nothing}
+                    ${
+                      event.integrityOk === false
+                        ? html`<p class="strong tampered">${text.entryChanged}</p>`
+                        : nothing
+                    }
                   </li>`,
               )}
             </ol>`
@@ -133,6 +163,7 @@ export function renderOrderTimeline(order: Order): TemplateResult {
 class OrderTimeline extends ViewElement<ViewEntryOf<"order-timeline">> {
   static override styles = [
     base,
+    trustStyles,
     css`
       .timeline {
         padding: var(--spacing-xl);
@@ -193,18 +224,55 @@ class OrderTimeline extends ViewElement<ViewEntryOf<"order-timeline">> {
         padding: 0;
         list-style: none;
       }
-      .events li {
-        padding: 0 0 var(--spacing-lg) var(--spacing-lg);
-        border-left: 2px solid var(--color-border-brand);
+      .log .strip {
+        margin-bottom: var(--spacing-lg);
       }
-      .events li:last-child {
-        padding-bottom: 0;
-      }
-      .event-heading {
+      /* Entries, oldest first: an 8 px dot, "time · actor", then the event. */
+      .events {
         display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
-        gap: var(--spacing-xs) var(--spacing-md);
+        flex-direction: column;
+        gap: var(--spacing-xs);
+      }
+      .events li {
+        position: relative;
+        padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-xs) var(--spacing-xl);
+        border-radius: var(--border-radius-md);
+      }
+      .events li::before {
+        position: absolute;
+        top: 7px;
+        left: var(--spacing-sm);
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full);
+        background: var(--color-border-strong);
+        content: "";
+      }
+      .events li.broken {
+        background: var(--color-bg-danger);
+      }
+      .events li.broken::before {
+        background: var(--color-text-danger);
+      }
+      .event-meta {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-2xs);
+      }
+      .event-meta .agent {
+        display: inline-flex;
+        color: var(--color-text-brand);
+      }
+      .event-meta .agent svg {
+        width: 12px;
+        height: 12px;
+      }
+      .events h4 {
+        font-weight: 400;
+      }
+      .tampered {
+        margin-top: var(--spacing-xs);
+        color: var(--color-text-danger);
       }
       .requotes {
         margin-top: var(--spacing-xl);

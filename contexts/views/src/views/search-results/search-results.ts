@@ -3,32 +3,12 @@ import { brand } from "@app/ui/brand";
 import { formatQuantity } from "@app/ui/format";
 import { css, html, type TemplateResult } from "lit";
 import { type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
+import { preferred, words } from "../../shared/constraints.ts";
 import { intlLocale, lang, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { brandHeader, cardStyles, rows } from "../approval-card/parts.ts";
 import { RESULTS } from "./strings.ts";
-
-/** "packagingMaterial", "invented_drinks" → "Packaging material", "Invented drinks". */
-const words = (key: string) => {
-  const spaced = key
-    .replace(/([a-z\d])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .trim()
-    .toLowerCase();
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-};
-/** "fi" → "Finland"; a code with no region name falls back to words. */
-const country = (code: string) => {
-  try {
-    const regions = new Intl.DisplayNames([intlLocale()], { type: "region", fallback: "none" });
-    return regions.of(code.toUpperCase()) ?? words(code);
-  } catch {
-    return words(code);
-  }
-};
-const attributeName = (attribute: string) =>
-  attribute === "countryOfOrigin" ? pick(RESULTS).countryOfOrigin : words(attribute);
 
 // Every hard constraint is "free_from" (SPEC-004). Any attribute, so new allergens (#71) need no change.
 type Results = Omit<ViewData<"search-results">, "constraints"> & {
@@ -38,8 +18,6 @@ type Results = Omit<ViewData<"search-results">, "constraints"> & {
 };
 const required = (attribute: string) =>
   attribute === "lactose" ? pick(RESULTS).lactoseFree : pick(RESULTS).free(words(attribute));
-const preferred = (attribute: string, prefer: string) =>
-  `${attributeName(attribute)}: ${attribute === "countryOfOrigin" ? country(prefer) : words(prefer)}`;
 const decode = (value: string) => {
   try {
     return decodeURIComponent(value);
@@ -90,7 +68,7 @@ const candidateCard = (candidate: SearchCandidate) => {
       [
         text.order,
         order === null
-          ? `${text.quantityUnknown} ${candidate.quantityReason ?? text.noQuantityReason}`
+          ? `${text.quantityUnknown} ${(lang() === "en" ? candidate.quantityReason : undefined) ?? text.noQuantityReason}`
           : formatQuantity(order, l),
       ],
       [

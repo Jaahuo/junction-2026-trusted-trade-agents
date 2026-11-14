@@ -75,6 +75,34 @@ test("audit events expose shared actors, UTC time and readable reason", async ()
     if (event.rule) expect(output).not.toContain(event.rule);
   }
 });
+
+test("audit event shows a reason only once when its detail repeats it", async () => {
+  const order = OrderSchema.parse(await fixture("pending"));
+  const event = order.audit.find((entry) => entry.reason === "NEW_PRODUCT");
+  if (!event) throw new Error("Pending fixture must include a new product audit event");
+  const reason = "The product has not been ordered before.";
+  const withDetail = OrderSchema.parse({
+    ...order,
+    audit: [{ ...event, detail: reason }],
+  });
+  const output = visible(renderOrderTimeline(withDetail));
+  expect(output.split(reason).length - 1).toBe(1);
+});
+
+test("audit event shows distinct reason and detail once each", async () => {
+  const order = OrderSchema.parse(await fixture("pending"));
+  const event = order.audit.find((entry) => entry.reason === "NEW_PRODUCT");
+  if (!event) throw new Error("Pending fixture must include a new product audit event");
+  const reason = "The product has not been ordered before.";
+  const detail = "Review this product with the customer.";
+  const withDetail = OrderSchema.parse({
+    ...order,
+    audit: [{ ...event, detail }],
+  });
+  const output = visible(renderOrderTimeline(withDetail));
+  expect(output.split(reason).length - 1).toBe(1);
+  expect(output.split(detail).length - 1).toBe(1);
+});
 test("declined decisions show the chosen next step and note", async () => {
   const order = OrderSchema.parse(await fixture("declined"));
   const stop = visible(renderOrderTimeline(order));
@@ -145,4 +173,19 @@ test("empty orders still show the gross EUR total", async () => {
   const order = OrderSchema.parse(await fixture("pending"));
   const output = visible(renderOrderTimeline({ ...order, lines: [] }));
   expect(output).toContain(formatMoney(order.total.gross, "EUR", "gross"));
+});
+
+test("the order log shows the audit integrity per log and per entry (#74)", async () => {
+  const intact = visible(renderOrderTimeline(OrderSchema.parse(await fixture("log-intact"))));
+  expect(intact).toContain("Log intact. All 2 entries are signed and in order.");
+  const unverified = visible(
+    renderOrderTimeline(OrderSchema.parse(await fixture("log-unverified"))),
+  );
+  expect(unverified).toContain("Can’t check the log right now.");
+  const broken = visible(renderOrderTimeline(OrderSchema.parse(await fixture("log-broken"))));
+  expect(broken).toContain("1 entry was changed after it was written. Don’t rely on this log.");
+  expect(broken).toContain("This entry doesn’t match its signature.");
+  const plain = visible(renderOrderTimeline(OrderSchema.parse(await fixture("placed"))));
+  expect(plain).not.toContain("Log intact");
+  expect(plain).not.toContain("doesn’t match its signature");
 });

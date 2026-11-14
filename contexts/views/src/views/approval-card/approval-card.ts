@@ -240,8 +240,9 @@ export class ApprovalCard extends LitElement {
         color: var(--color-text-danger);
       }
       /* v8 "Sending": the busy primary button stays solid; only the others fade. */
-      .btn[aria-busy="true"]:disabled {
-        opacity: 1;
+      .btn.primary[aria-busy="true"]:disabled {
+        background: var(--color-button);
+        color: var(--color-button-text);
         cursor: progress;
       }
       .chips {
@@ -251,7 +252,7 @@ export class ApprovalCard extends LitElement {
       }
       .details {
         border-top: 1px solid var(--color-border);
-        background: var(--color-bg-brand-subtle);
+        background: var(--color-light-purple-aimo);
       }
       .toggle {
         display: flex;
@@ -672,7 +673,7 @@ export class ApprovalCard extends LitElement {
         @click=${() => (this.detailsOpen = !this.detailsOpen)}
       >
         <span class="more">More details</span>${icon(chevronDown)}
-        <span class="hint secondary"
+        <span class="hint"
           >${pending ? "Why this option, offer and signature" : "Order, offer and signature"}</span
         >
       </button>

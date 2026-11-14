@@ -251,7 +251,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
               <p class="item-reason body-small strong">
                 ${icon(warningSmall)}${reasonTitle(order)}
               </p>
-              <p class="item-name strong">
+              <p class="item-name">
                 <span class="name"
                   >${
                     order.lines.length === 1 && claims !== undefined

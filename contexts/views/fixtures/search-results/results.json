@@ -1,0 +1,60 @@
+{
+  "candidates": [
+    {
+      "productId": "invented_sunberry_juice",
+      "gtin": null,
+      "name": "Sunberry orchard juice",
+      "category": "invented_drinks",
+      "match": {
+        "lactose": "confirmed"
+      },
+      "orderQuantity": {
+        "value": 4,
+        "unit": "CT"
+      },
+      "equals": {
+        "value": 48,
+        "unit": "LTR"
+      },
+      "deliveryReliability": 0.97,
+      "co2PerKg": 0.4,
+      "substitutes": ["invented_moonberry_juice"]
+    },
+    {
+      "productId": "invented_moonberry_juice",
+      "gtin": null,
+      "name": "Moonberry grove juice",
+      "category": "invented_drinks",
+      "match": {
+        "lactose": "unknown"
+      },
+      "orderQuantity": null,
+      "equals": null,
+      "deliveryReliability": null,
+      "co2PerKg": null,
+      "substitutes": []
+    }
+  ],
+  "constraints": {
+    "hard": [
+      {
+        "attribute": "lactose",
+        "is": "free_from"
+      }
+    ],
+    "soft": [
+      {
+        "attribute": "countryOfOrigin",
+        "prefer": "fi"
+      },
+      {
+        "attribute": "packagingMaterial",
+        "prefer": "returnableGlass"
+      }
+    ]
+  },
+  "mandate": {
+    "id": "invented_mandate_orchard",
+    "version": 1
+  }
+}

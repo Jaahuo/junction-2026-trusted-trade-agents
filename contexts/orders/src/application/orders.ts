@@ -88,7 +88,7 @@ const checkTokens = async (
   if (new Set(lines.value.map((line) => line.claims.paymentTerms)).size > 1)
     return err(refusal("BAD_REQUEST", "The offers have different payment terms."));
 
-  const mandate = await deps.mandates.current();
+  const mandate = await deps.mandates.current(principal.agentId);
   if (!mandate.ok) return err(refusal("UPSTREAM_FAILED", "The mandate could not be read."));
   const current = mandate.value;
   const stale = claims.some(

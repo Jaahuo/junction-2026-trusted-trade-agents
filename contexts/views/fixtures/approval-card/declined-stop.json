@@ -1,0 +1,443 @@
+{
+  "orderId": "ord_test_4471",
+  "customer": "cust_invoice_01",
+  "agentId": "agent_demo",
+  "accountId": "acct_demo",
+  "offerIds": [
+    "off_test_10",
+    "off_test_11",
+    "off_test_12",
+    "off_test_13",
+    "off_test_14",
+    "off_test_15"
+  ],
+  "lines": [
+    {
+      "offerId": "off_test_10",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_10",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_10",
+        "quantity": {
+          "value": 100,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 1428,
+          "gross": 1627.92
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test semi-skimmed milk drink 1 l UHT lactose free",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 10,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_11",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_11",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_11",
+        "quantity": {
+          "value": 6,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 162,
+          "gross": 184.68
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test special wheat flour 20 kg",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 20,
+            "unit": "KGM"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_12",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_12",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_12",
+        "quantity": {
+          "value": 40,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 144,
+          "gross": 164.16
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test butter 500 g salted lactose free",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 0.5,
+            "unit": "KGM"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_13",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_13",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_13",
+        "quantity": {
+          "value": 6,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 135,
+          "gross": 153.9
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test cooking cream 15 % 1 l UHT lactose free",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 10,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_14",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_14",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_14",
+        "quantity": {
+          "value": 10,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 64,
+          "gross": 72.96
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test oat flakes 1 kg",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "KGM"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_15",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_15",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_15",
+        "quantity": {
+          "value": 4,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 71,
+          "gross": 80.94
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test free-range eggs 30 pcs",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": null,
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    }
+  ],
+  "alternatives": [],
+  "mandateId": "mnd_test_1",
+  "mandateVersion": 1,
+  "status": "declined",
+  "reasons": ["SPEND_OVER_LIMIT"],
+  "proposalVersion": 1,
+  "approvalUrl": "http://127.0.0.1:3000/approvals/ord_test_4471",
+  "paymentTerms": "invoice",
+  "total": {
+    "net": 2004,
+    "gross": 2284.56
+  },
+  "originalRequest": "40 litres of lactose-free oat drink by Friday",
+  "decision": {
+    "action": "reject",
+    "next": "stop",
+    "note": "Not needed: We have enough stock this week.",
+    "by": "approver",
+    "at": "2026-11-14T10:20:00+00:00"
+  },
+  "requotes": [],
+  "nextDeliveryDate": "2026-11-16",
+  "audit": [
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "agent",
+      "event": "order_requested"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "offer_verified"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "sent_to_approval"
+    }
+  ],
+  "createdAt": "2026-11-14T10:05:00+00:00"
+}

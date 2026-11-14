@@ -65,6 +65,21 @@ export const mergeConnections = (existing: readonly unknown[], ours: Json): unkn
   ours,
 ];
 
+/** Open WebUI keeps the model endpoint in its database after the first start, so .env must be pushed. */
+export const openaiConfig = (url: string, key: string): Json => ({
+  ENABLE_OPENAI_API: true,
+  OPENAI_API_BASE_URLS: [url],
+  OPENAI_API_KEYS: [key],
+  OPENAI_API_CONFIGS: {},
+});
+
+/** True when the stored endpoint is exactly the one from .env. */
+export const hasOpenaiConfig = (current: unknown, url: string, key: string): boolean =>
+  isObject(current) &&
+  current["ENABLE_OPENAI_API"] === true &&
+  JSON.stringify(current["OPENAI_API_BASE_URLS"]) === JSON.stringify([url]) &&
+  JSON.stringify(current["OPENAI_API_KEYS"]) === JSON.stringify([key]);
+
 export const modelPayload = (baseModel: string, system: string): Json => ({
   id: MODEL_ID,
   name: "Buyer agent",
@@ -154,6 +169,17 @@ async function setup(env: Record<string, string>, base: string): Promise<void> {
       TOOL_SERVER_CONNECTIONS: mergeConnections(existing, toolServer(mcpUrl)),
     });
     console.log(`tool server: ${mcpUrl}`);
+  }
+
+  const openaiUrl = env["OPENAI_API_BASE_URL"];
+  if (openaiUrl) {
+    const openaiKey = env["OPENAI_API_KEY"] ?? "";
+    const stored = await must("read model endpoint", "/openai/config");
+    if (hasOpenaiConfig(stored, openaiUrl, openaiKey)) console.log("model endpoint: unchanged");
+    else {
+      await must("set model endpoint", "/openai/config/update", openaiConfig(openaiUrl, openaiKey));
+      console.log(`model endpoint: ${openaiUrl}`);
+    }
   }
 
   let baseModel = env["OPENWEBUI_BASE_MODEL"];

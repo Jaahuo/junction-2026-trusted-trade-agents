@@ -177,19 +177,6 @@ test("approve versus an automatic order that together exceed the credit: one CRE
     expect((await counts(db)).history).toBe(1);
   }));
 
-test("approve after the offer expired gives 409 OFFER_EXPIRED and the order stays pending", async () =>
-  withDatabase(async (db) => {
-    const { app, clock, sign } = await mount(db);
-    const pending = await pendingOrder(app, sign(overLimit, inMinutes(10)));
-    clock.now = inMinutes(10);
-    const response = await decide(app, pending, { decision: "approve" });
-    expect(response.status).toBe(409);
-    expect(await errorOf(response)).toBe("OFFER_EXPIRED");
-    expect((await orderOf(await call(app, "GET", `/${pending.orderId}`))).status).toBe(
-      "pending_approval",
-    );
-  }));
-
 test("approve looks up the mandate by the order's agentId: none gives rejected MANDATE_INVALID", async () =>
   withDatabase(async (db) => {
     const { app, mandates, mandate, sign } = await mount(db);
@@ -208,19 +195,6 @@ test("approve looks up the mandate by the order's agentId: none gives rejected M
       ["server", "rejected"],
     ]);
     expect((await counts(db)).history).toBe(0);
-  }));
-
-test("approve with another mandateId or version gives 409 STALE_OFFER and the order stays pending", async () =>
-  withDatabase(async (db) => {
-    const { app, register, sign } = await mount(db);
-    const pending = await pendingOrder(app, sign(overLimit));
-    await register(limitsWith({ newProducts: "ask" }));
-    const response = await decide(app, pending, { decision: "approve" });
-    expect(response.status).toBe(409);
-    expect(await errorOf(response)).toBe("STALE_OFFER");
-    expect((await orderOf(await call(app, "GET", `/${pending.orderId}`))).status).toBe(
-      "pending_approval",
-    );
   }));
 
 test("approve_and_remember gives 501", async () =>

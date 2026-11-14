@@ -54,7 +54,7 @@ resource "vultr_instance" "app" {
   firewall_group_id = vultr_firewall_group.app.id
   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
     app_dir           = local.app_dir
-    bun_version       = var.bun_version
+    app_port          = local.app_port
     ci_ssh_public_key = trimspace(var.ci_ssh_public_key)
   })
 }

@@ -174,10 +174,10 @@ export interface Quantity {
   unit: string;
 }
 export type MatchState = "confirmed" | "contradicted" | "unknown";
-// Data mapping per free_from attribute: GS1 allergen type code, nutritionalClaim code, contradicting claim.
+// Data mapping per free_from attribute: GS1 allergen type code, included allergen codes, nutritionalClaim code, contradicting claim.
 export const FREE_FROM_DATA = {
   egg: { allergen: "AE", claim: "FREE_FROM_EGGS" },
-  gluten: { allergen: "AW", claim: "FREE_FROM_GLUTEN" },
+  gluten: { allergen: "AW", includes: ["UW", "NR", "GB", "GS", "GK"], claim: "FREE_FROM_GLUTEN" },
   lactose: { allergen: "ML", claim: "FREE_FROM_LACTOSE", low: "LOW_LACTOSE" },
   peanut: { allergen: "AP" },
   fat: { claim: "FREE_FROM_FAT", low: "LOW_FAT" },
@@ -247,7 +247,7 @@ export const ALLERGEN_ATTRIBUTES: FreeFromAttribute[]; // the FREE_FROM_DATA key
 
 - The server merges the mandate's standing constraints into the request: hard = request ∪ mandate, soft = request ∪ mandate. `SearchResult.constraints` returns the merged set.
 - Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the `is` value of their `HardConstraint` branch. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
-- `free_from`, from `FREE_FROM_DATA`: the allergen code with unit `CONTAINS` or `MAY_CONTAIN` in classification `allergen`, or the `low` claim in `nutritionalClaim` → `contradicted`; else the allergen code with unit `FREE_FROM` in `nonAllergen`, or the `claim` in `nutritionalClaim` → `confirmed`; else `unknown`, including `UNDECLARED` and allergen data on other codes only. Contradiction wins over a free-from claim. Attribute names are camelCase English; GS1 codes such as `AW` and other cases are refused.
+- `free_from`, from `FREE_FROM_DATA`: the allergen code or a code in its `includes` (wheat, rye, barley, spelt and khorasan wheat for gluten) with unit `CONTAINS` or `MAY_CONTAIN` in classification `allergen`, or the `low` claim in `nutritionalClaim` → `contradicted`; else the allergen code with unit `FREE_FROM` in `nonAllergen`, or the `claim` in `nutritionalClaim` → `confirmed`; else `unknown`, including `UNDECLARED` and allergen data on other codes only. Contradiction wins over a free-from claim. Attribute names are camelCase English; GS1 codes such as `AW` and other cases are refused.
 - `vegan` `yes`: `CONTAINS` of an allergen of animal origin (`AC`, `AE`, `AF`, `AM`, `BF`, `CM`, `ML`, `PO`, `UM`, `UN`, `ABD`, `ADQ`) → `contradicted`; else `nutritionalClaim` `VEGAN` → `confirmed`; else `unknown`. `MAY_CONTAIN` traces do not contradict vegan.
 - Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.

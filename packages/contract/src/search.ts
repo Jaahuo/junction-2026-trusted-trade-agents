@@ -1,9 +1,16 @@
 import { z } from "zod";
 import { DateSchema, MatchStateSchema, PaymentTermsSchema, QuantitySchema } from "./common.ts";
 
+export type FreeFromData = {
+  allergen?: string;
+  includes?: readonly string[];
+  claim?: string;
+  low?: string;
+};
+
 /**
- * Data mapping of each `free_from` attribute (SPEC-004): its GS1 allergen type code, its
- * `nutritionalClaim` code, and a claim that contradicts it.
+ * Data mapping of each `free_from` attribute (SPEC-004): its GS1 allergen type code, the codes
+ * of allergens it includes, its `nutritionalClaim` code, and a claim that contradicts it.
  */
 export const FREE_FROM_DATA = {
   almond: { allergen: "SA" },
@@ -18,18 +25,18 @@ export const FREE_FROM_DATA = {
   coconut: { allergen: "SO" },
   coriander: { allergen: "NK" },
   corn: { allergen: "NM" },
-  crustaceans: { allergen: "AC" },
+  crustaceans: { allergen: "AC", includes: ["UN"] },
   egg: { allergen: "AE", claim: "FREE_FROM_EGGS" },
-  fish: { allergen: "AF" },
-  gluten: { allergen: "AW", claim: "FREE_FROM_GLUTEN" },
+  fish: { allergen: "AF", includes: ["ABD", "ADQ"] },
+  gluten: { allergen: "AW", includes: ["UW", "NR", "GB", "GS", "GK"], claim: "FREE_FROM_GLUTEN" },
   hazelnut: { allergen: "SH" },
   khorasanWheat: { allergen: "GK" },
   lactose: { allergen: "ML", claim: "FREE_FROM_LACTOSE", low: "LOW_LACTOSE" },
   linalool: { allergen: "BP" },
   lupin: { allergen: "NL" },
   macadamia: { allergen: "SM" },
-  milk: { allergen: "AM" },
-  molluscs: { allergen: "UM" },
+  milk: { allergen: "AM", includes: ["ML"] },
+  molluscs: { allergen: "UM", includes: ["UN"] },
   mustard: { allergen: "BM" },
   oat: { allergen: "GO" },
   pea: { allergen: "NE" },
@@ -42,14 +49,14 @@ export const FREE_FROM_DATA = {
   pork: { allergen: "PO" },
   rye: { allergen: "NR" },
   sesame: { allergen: "AS" },
-  shellfish: { allergen: "UN" },
+  shellfish: { allergen: "UN", includes: ["AC", "UM"] },
   soy: { allergen: "AY", claim: "FREE_FROM_SOY" },
   spelt: { allergen: "GS" },
   sulphites: { allergen: "AU" },
-  treeNut: { allergen: "AN" },
+  treeNut: { allergen: "AN", includes: ["SA", "SH", "SW", "SC", "SP", "SR", "ST", "SM"] },
   tuna: { allergen: "ABD" },
   walnut: { allergen: "SW" },
-  wheat: { allergen: "UW", claim: "FREE_FROM_WHEAT" },
+  wheat: { allergen: "UW", includes: ["GS", "GK"], claim: "FREE_FROM_WHEAT" },
   additives: { claim: "FREE_FROM_ADDITIVES" },
   artificialSweeteners: { claim: "FREE_FROM_ARTIFICIAL_SWEETENERS" },
   colouringAgents: { claim: "FREE_FROM_COLOURING_AGENTS" },
@@ -58,7 +65,7 @@ export const FREE_FROM_DATA = {
   preservatives: { claim: "FREE_FROM_PRESERVATIVES" },
   sodiumSalt: { claim: "FREE_FROM_SODIUM_SALT", low: "LOW_SODIUM_SALT" },
   sweeteners: { claim: "FREE_FROM_SWEETENERS" },
-} as const satisfies Record<string, { allergen?: string; claim?: string; low?: string }>;
+} as const satisfies Record<string, FreeFromData>;
 type FreeFromAttribute = keyof typeof FREE_FROM_DATA;
 const isFreeFrom = (key: string): key is FreeFromAttribute => key in FREE_FROM_DATA;
 const FREE_FROM_ATTRIBUTES = Object.keys(FREE_FROM_DATA).filter(isFreeFrom);
@@ -72,10 +79,13 @@ export const ALLERGEN_ATTRIBUTES = FREE_FROM_ATTRIBUTES.filter(
 );
 
 const unsupported = (issue: { input?: unknown }) => {
+  const { input } = issue;
   const attribute =
-    typeof issue.input === "object" && issue.input !== null && "attribute" in issue.input
-      ? String(issue.input.attribute)
-      : String(issue.input);
+    typeof input !== "object" || input === null
+      ? String(input)
+      : "attribute" in input
+        ? String(input.attribute)
+        : "missing";
   return `unsupported hard constraint attribute "${attribute}"; supported: ${HARD_CONSTRAINT_ATTRIBUTES.join(", ")}`;
 };
 

@@ -1,5 +1,6 @@
 import {
   FREE_FROM_DATA,
+  type FreeFromData,
   type HardConstraint,
   type MatchState,
   type SearchResult,
@@ -7,15 +8,34 @@ import {
 
 export type Constraints = SearchResult["constraints"];
 
-/** GS1 allergen codes of animal origin: crustaceans, eggs, fish, milk, beef, chicken, lactose, pork, molluscs, shellfish, tuna, pollock. */
-const ANIMAL_ALLERGENS = ["AC", "AE", "AF", "AM", "BF", "CM", "ML", "PO", "UM", "UN", "ABD", "ADQ"];
+const ANIMAL_ALLERGENS = (
+  [
+    "beef",
+    "chicken",
+    "crustaceans",
+    "egg",
+    "fish",
+    "lactose",
+    "milk",
+    "molluscs",
+    "pollock",
+    "pork",
+    "shellfish",
+    "tuna",
+  ] as const
+).map((attribute) => FREE_FROM_DATA[attribute].allergen);
 
-type Data = { allergen?: string; claim?: string; low?: string };
-
-/** Contradiction wins: an allergy is never confirmed against a CONTAINS or MAY_CONTAIN fact. */
-const freeFrom = ({ allergen, claim, low }: Data, claims: ReadonlySet<string>): MatchState => {
+/**
+ * Contradiction wins: an allergy is never confirmed against a CONTAINS or MAY_CONTAIN fact of the
+ * allergen or of one it includes (wheat for gluten). Only the allergen's own code or claim confirms.
+ */
+const freeFrom = (
+  { allergen, includes = [], claim, low }: FreeFromData,
+  claims: ReadonlySet<string>,
+): MatchState => {
   const has = (code: string | undefined) => code !== undefined && claims.has(code);
-  if (has(low) || has(`CONTAINS:${allergen}`) || has(`MAY_CONTAIN:${allergen}`))
+  const present = (code: string) => has(`CONTAINS:${code}`) || has(`MAY_CONTAIN:${code}`);
+  if (has(low) || (allergen !== undefined && [allergen, ...includes].some(present)))
     return "contradicted";
   return has(claim) || has(`FREE_FROM:${allergen}`) ? "confirmed" : "unknown";
 };

@@ -37,6 +37,17 @@ describe("hard constraint match", () => {
     });
   });
 
+  test("an included allergen contradicts: wheat, rye or barley for gluten, but only gluten confirms", () => {
+    const glutenFree = [{ attribute: "gluten", is: "free_from" }] as const;
+    expect(matchHard(new Set(["FREE_FROM:AW", "CONTAINS:UW"]), glutenFree)).toEqual({
+      gluten: "contradicted",
+    });
+    expect(matchHard(new Set(["FREE_FROM_GLUTEN", "MAY_CONTAIN:NR"]), glutenFree)).toEqual({
+      gluten: "contradicted",
+    });
+    expect(matchHard(new Set(["FREE_FROM:UW"]), glutenFree)).toEqual({ gluten: "unknown" });
+  });
+
   test("a claim-only attribute is confirmed by its claim and contradicted by its low claim", () => {
     const fatFree = [{ attribute: "fat", is: "free_from" }] as const;
     expect(matchHard(new Set(["FREE_FROM_FAT"]), fatFree)).toEqual({ fat: "confirmed" });

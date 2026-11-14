@@ -159,13 +159,14 @@ test("push uses the exact digest and strict host checking, and stops on a digest
   const root = await mkdtemp(join(tmpdir(), "deploy-push-"));
   const previous = { ...process.env };
   const image = `ghcr.io/jaahuo/junction-2026-trusted-trade-agents@sha256:${"a".repeat(64)}`;
+  const imageId = `sha256:${"c".repeat(64)}`;
   const server = Bun.serve({ port: 0, fetch: () => new Response("ok") });
   try {
     const log = join(root, "commands");
     const input = join(root, "input");
     await writeFile(
       join(root, "ssh"),
-      '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\ncase "$*" in\n  *"docker image inspect"*) printf "%s\\n" "$FAKE_DIGEST";;\n  *"install -m"*) cat >> "$FAKE_INPUT";;\nesac\n',
+      '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\ncase "$*" in\n  *"docker container inspect"*) printf "%s %s\\n" "$FAKE_CONTAINER_IMAGE" "$FAKE_CONTAINER_RUNNING";;\n  *"docker image inspect"*) printf "%s\\n%s\\n" "$FAKE_IMAGE_ID" "$FAKE_DIGEST";;\n  *"install -m"*) cat >> "$FAKE_INPUT";;\nesac\n',
     );
     await writeFile(join(root, "rsync"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\n');
     await chmod(join(root, "ssh"), 0o755);
@@ -175,6 +176,9 @@ test("push uses the exact digest and strict host checking, and stops on a digest
     process.env["FAKE_LOG"] = log;
     process.env["FAKE_INPUT"] = input;
     process.env["FAKE_DIGEST"] = image;
+    process.env["FAKE_IMAGE_ID"] = imageId;
+    process.env["FAKE_CONTAINER_IMAGE"] = imageId;
+    process.env["FAKE_CONTAINER_RUNNING"] = "true";
     const settings = {
       DEPLOY_IMAGE: image,
       DEPLOY_REGISTRY_USER: "user",
@@ -188,6 +192,18 @@ test("push uses the exact digest and strict host checking, and stops on a digest
     expect(commands).not.toContain("StrictHostKeyChecking=accept-new");
     expect(await readFile(input, "utf8")).toContain(`TRUSTED_TRADE_IMAGE="${image}"`);
 
+    process.env["FAKE_CONTAINER_IMAGE"] = `sha256:${"d".repeat(64)}`;
+    expect(await failure(push(localOutputs, settings))).toMatch(/Running container image hash/);
+    process.env["FAKE_CONTAINER_IMAGE"] = imageId;
+    process.env["FAKE_CONTAINER_RUNNING"] = "false";
+    expect(await failure(push(localOutputs, settings))).toMatch(/running state/);
+    process.env["FAKE_CONTAINER_RUNNING"] = "true";
+
+    await writeFile(log, "");
+    process.env["FAKE_IMAGE_ID"] = "invalid";
+    expect(await failure(push(localOutputs, settings))).toMatch(/invalid SHA-256 image ID/);
+    expect(await readFile(log, "utf8")).not.toContain("systemctl stop trusted-trade");
+    process.env["FAKE_IMAGE_ID"] = imageId;
     await writeFile(log, "");
     process.env["FAKE_DIGEST"] =
       `ghcr.io/jaahuo/junction-2026-trusted-trade-agents@sha256:${"b".repeat(64)}`;
@@ -195,7 +211,16 @@ test("push uses the exact digest and strict host checking, and stops on a digest
     expect(await readFile(log, "utf8")).not.toContain("systemctl stop trusted-trade");
   } finally {
     await server.stop();
-    for (const name of ["PATH", "DEPLOY_ENV", "FAKE_LOG", "FAKE_INPUT", "FAKE_DIGEST"]) {
+    for (const name of [
+      "PATH",
+      "DEPLOY_ENV",
+      "FAKE_LOG",
+      "FAKE_INPUT",
+      "FAKE_DIGEST",
+      "FAKE_IMAGE_ID",
+      "FAKE_CONTAINER_IMAGE",
+      "FAKE_CONTAINER_RUNNING",
+    ]) {
       if (previous[name] === undefined) delete process.env[name];
       else process.env[name] = previous[name];
     }

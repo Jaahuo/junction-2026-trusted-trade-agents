@@ -216,10 +216,17 @@ trap 'rm -rf "$config"' EXIT
 export DOCKER_CONFIG="$config"
 docker login ghcr.io --username ${shellQuote(user)} --password-stdin >&2
 docker pull ${shellQuote(image)} >&2
+docker image inspect --format '{{.Id}}' ${shellQuote(image)}
 docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${shellQuote(image)}
 `;
-  const digests = await $`ssh ${SSH} ${host} ${pull} < ${new Response(token)}`.text();
-  if (!digests.split("\n").includes(image))
+  const [expectedImageId, ...digests] = (
+    await $`ssh ${SSH} ${host} ${pull} < ${new Response(token)}`.text()
+  )
+    .trim()
+    .split("\n");
+  if (expectedImageId === undefined || !/^sha256:[0-9a-f]{64}$/.test(expectedImageId))
+    throw new Error("Pulled image has an invalid SHA-256 image ID");
+  if (!digests.includes(image))
     throw new Error("Pulled image does not contain the requested repository digest");
   const remoteShell = `ssh ${SSH.join(" ")}`;
   if (existsSync("data")) await transferData("data/", host, outputs.app_dir, remoteShell);
@@ -232,6 +239,14 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   // The Vultr Ubuntu image enables ufw with only SSH open.
   await $`ssh ${SSH} ${host} ${"ufw allow 80/tcp && ufw allow 443/tcp && systemctl daemon-reload && systemctl enable --now trusted-trade && systemctl reload caddy"}`;
   await waitForHealth(outputs.public_base_url);
+  const runningImage = (
+    await $`ssh ${SSH} ${host} ${"docker container inspect --format '{{.Image}} {{.State.Running}}' trusted-trade"}`.text()
+  ).trim();
+  if (runningImage !== `${expectedImageId} true`)
+    throw new Error(
+      "Running container image hash or running state does not match the expected image",
+    );
+  console.log(`verified container image: ${expectedImageId} (${image})`);
 };
 
 const reset = async (outputs: Outputs): Promise<void> => {

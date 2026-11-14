@@ -1,0 +1,13 @@
+{
+  "name": "@ctx/accounts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api/index.ts"
+  },
+  "dependencies": {
+    "@app/contract": "workspace:*",
+    "@app/server-kit": "workspace:*",
+    "elysia": "catalog:"
+  }
+}

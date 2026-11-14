@@ -1,0 +1,16 @@
+{
+  "name": "@ctx/mandates",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api/index.ts"
+  },
+  "dependencies": {
+    "@app/contract": "workspace:*",
+    "@app/kernel": "workspace:*",
+    "@app/server-kit": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "elysia": "catalog:",
+    "zod": "catalog:"
+  }
+}

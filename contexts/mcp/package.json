@@ -1,0 +1,22 @@
+{
+  "name": "@ctx/mcp",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api/index.ts"
+  },
+  "dependencies": {
+    "@app/contract": "workspace:*",
+    "@app/kernel": "workspace:*",
+    "@app/server-kit": "workspace:*",
+    "@ctx/catalog": "workspace:*",
+    "@ctx/mandates": "workspace:*",
+    "@ctx/offers": "workspace:*",
+    "@ctx/orders": "workspace:*",
+    "@elysia/eden": "catalog:",
+    "@modelcontextprotocol/ext-apps": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:",
+    "elysia": "catalog:",
+    "zod": "catalog:"
+  }
+}

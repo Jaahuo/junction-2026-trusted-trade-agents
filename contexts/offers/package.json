@@ -1,0 +1,19 @@
+{
+  "name": "@ctx/offers",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api/index.ts"
+  },
+  "dependencies": {
+    "@app/contract": "workspace:*",
+    "@app/kernel": "workspace:*",
+    "@app/server-kit": "workspace:*",
+    "@ctx/catalog": "workspace:*",
+    "@ctx/mandates": "workspace:*",
+    "@ctx/orders": "workspace:*",
+    "@elysia/eden": "catalog:",
+    "elysia": "catalog:",
+    "zod": "catalog:"
+  }
+}

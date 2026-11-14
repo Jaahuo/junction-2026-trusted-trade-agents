@@ -1,9 +1,39 @@
 import { resolve } from "node:path";
-import { closeDb, type ContextModule, env, mountContext, openDb } from "@app/server-kit";
+import { closeDb, type ContextModule, type Db, env, mountContext, openDb } from "@app/server-kit";
 import { Elysia } from "elysia";
 
+/**
+ * Builds the HTTP app: `/api` with every context API, then the context root routes, then the web fallback.
+ * Root routes come before the fallback so that the SPA never shadows them.
+ */
+export const createApp = async (
+  db: Db,
+  contexts: readonly ContextModule[],
+  webDist: string | undefined,
+) => {
+  const api = new Elysia({ prefix: "/api" }).get("/health", () => ({ ok: true }));
+  for (const context of contexts) {
+    api.use(await mountContext(db, context));
+  }
+  const app = new Elysia({ precompile: true }).use(api);
+  for (const context of contexts) {
+    if (context.root !== undefined) app.use(context.root(db));
+  }
+  if (webDist !== undefined) {
+    const root = resolve(webDist);
+    app.get("/*", async ({ path, set }) => {
+      const file = Bun.file(resolve(root, `.${path}`));
+      const isAsset = file.name?.startsWith(`${root}/`) === true && (await file.exists());
+      if (isAsset && path.startsWith("/assets/")) {
+        set.headers["cache-control"] = "public, max-age=31536000, immutable";
+      }
+      return isAsset ? file : Bun.file(`${root}/index.html`);
+    });
+  }
+  return app;
+};
+
 export const serve = async (contexts: readonly ContextModule[]): Promise<void> => {
-  const webDist = env("WEB_DIST");
   const databaseUrl = env("DATABASE_URL");
   const port = env("PORT");
   if (
@@ -19,27 +49,12 @@ export const serve = async (contexts: readonly ContextModule[]): Promise<void> =
   }
   const db = openDb(databaseUrl);
 
-  const api = new Elysia({ prefix: "/api" }).get("/health", () => ({ ok: true }));
+  let app: Awaited<ReturnType<typeof createApp>>;
   try {
-    for (const context of contexts) {
-      api.use(await mountContext(db, context));
-    }
+    app = await createApp(db, contexts, env("WEB_DIST"));
   } catch (error) {
     await closeDb(db);
     throw error;
-  }
-
-  const app = new Elysia({ precompile: true }).use(api);
-  if (webDist !== undefined) {
-    const root = resolve(webDist);
-    app.get("/*", async ({ path, set }) => {
-      const file = Bun.file(resolve(root, `.${path}`));
-      const isAsset = file.name?.startsWith(`${root}/`) === true && (await file.exists());
-      if (isAsset && path.startsWith("/assets/")) {
-        set.headers["cache-control"] = "public, max-age=31536000, immutable";
-      }
-      return isAsset ? file : Bun.file(`${root}/index.html`);
-    });
   }
   app.onStop(async () => {
     await closeDb(db);

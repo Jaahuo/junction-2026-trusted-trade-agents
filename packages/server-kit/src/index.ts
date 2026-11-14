@@ -3,12 +3,14 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { type BunSQLDatabase, drizzle } from "drizzle-orm/bun-sql";
 import { migrate } from "drizzle-orm/bun-sql/migrator";
-import type { AnyElysia } from "elysia";
+import { type AnyElysia, Elysia, ParseError, ValidationError } from "elysia";
 
 export type Db = BunSQLDatabase & { $client: SQL };
 export interface ContextModule {
   readonly name: string;
   readonly api: (db: Db) => AnyElysia;
+  /** Root routes, mounted after `/api` and before the web fallback. */
+  readonly root?: (db: Db) => AnyElysia;
   readonly seed?: (db: Db) => void | Promise<void>;
 }
 
@@ -16,6 +18,49 @@ export const env = (name: string): string | undefined => {
   const value = process.env[name];
   return value === undefined || value === "" ? undefined : value;
 };
+
+const withoutTrailingSlash = (url: string): string => url.replace(/\/+$/, "");
+
+/** The base URL a server uses to call its own routes: `INTERNAL_BASE_URL`, else `http://127.0.0.1:$PORT`. */
+export const selfBaseUrl = (): string => {
+  const internal = env("INTERNAL_BASE_URL");
+  if (internal !== undefined) return withoutTrailingSlash(internal);
+  const port = env("PORT");
+  if (port === undefined) throw new Error("Set PORT or INTERNAL_BASE_URL.");
+  return `http://127.0.0.1:${port}`;
+};
+
+/** The base URL that clients outside the server see: `PUBLIC_BASE_URL`, else `selfBaseUrl()`. */
+export const publicBaseUrl = (): string => {
+  const value = env("PUBLIC_BASE_URL");
+  return value === undefined ? selfBaseUrl() : withoutTrailingSlash(value);
+};
+
+const issueMessage = (issue: unknown): string | undefined => {
+  if (typeof issue !== "object" || issue === null || !("message" in issue)) return undefined;
+  if (typeof issue.message !== "string") return undefined;
+  const path =
+    "path" in issue && Array.isArray(issue.path) && issue.path.length > 0
+      ? `${issue.path.join(".")}: `
+      : "";
+  return `${path}${issue.message}`;
+};
+
+/** Maps request validation and parse failures of a context's routes to `400 BAD_REQUEST` in the contract's error envelope. */
+export const badRequestEnvelope = () =>
+  new Elysia().onError("plugin", ({ error, set }) => {
+    const invalidRequest = error instanceof ValidationError && error.status === 422;
+    if (!invalidRequest && !(error instanceof ParseError)) return undefined;
+    set.status = 400;
+    const issues: unknown[] = invalidRequest ? error.all : [];
+    const message = issueMessage(issues[0]) ?? "The request body is not valid JSON.";
+    return { error: { code: "BAD_REQUEST" as const, message } };
+  });
+
+/** The body of a stub route until its context issue replaces it. */
+export const notImplemented = (route: string) => ({
+  error: { code: "NOT_IMPLEMENTED" as const, message: `${route} is not implemented yet.` },
+});
 
 export const contextsDir = resolve(
   process.env["APP_ROOT"] ?? resolve(import.meta.dir, "../../.."),

@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { existsSync } from "node:fs";
 
-// Ships the current worktree to the Vultr host that infra/ creates. See docs/deploy.md.
+// Deploys an immutable image to the Vultr host that infra/ creates. See docs/deploy.md.
 
 export interface Outputs {
   readonly public_ip: string;
@@ -68,40 +68,28 @@ export const deployEnv = async (
   return new Map<string, string>([
     ...secrets,
     ["NODE_ENV", "production"],
-    ["PORT", String(outputs.app_port)],
-    ["APP_ROOT", outputs.app_dir],
+    ["PORT", "3000"],
+    ["APP_ROOT", "/app"],
     ["WEB_DIST", "apps/web/dist"],
     ["PUBLIC_BASE_URL", outputs.public_base_url],
     ["DATABASE_URL", outputs.database_url],
   ]);
 };
 
-/** A systemd EnvironmentFile; single quotes keep JSON keys literal. */
-export const renderEnvFile = (values: ReadonlyMap<string, string>): string => {
-  return `${[...values]
+/** Docker's env-file syntax takes the value literally, without shell quotes. */
+export const renderEnvFile = (values: ReadonlyMap<string, string>): string =>
+  `${[...values]
     .map(([name, value]) => {
-      if (/['\n]/.test(value)) throw new Error(`${name} contains a quote or a newline`);
-      return `${name}='${value}'`;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || /[\r\n]/.test(value))
+        throw new Error(`Invalid environment entry: ${name}`);
+      return `${name}=${value}`;
     })
     .join("\n")}\n`;
-};
 
 export const renderCaddyfile = (outputs: Outputs): string =>
   `${outputs.hostname} {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:${outputs.app_port}\n}\n`;
 
 const SSH = ["-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"];
-// A leading slash anchors a pattern to the checkout root; a bare "infra" would also drop contexts/*/src/infra.
-export const RSYNC_EXCLUDES = [
-  "node_modules",
-  ".env*",
-  "/.git",
-  "/.local",
-  "/infra/",
-  "/report/",
-  "/apps/api/.production/",
-  // The challenge data is not in Git (#38): it ships without --delete, so a CI push never removes it.
-  "/data/",
-];
 
 /** Parses `tofu output -json`; CI passes the same JSON in DEPLOY_OUTPUTS because it has no state. */
 export const parseOutputs = (json: string): Outputs => {
@@ -162,19 +150,84 @@ export const resetEnv = (
   APP_ROOT: checkout,
 });
 
-const push = async (outputs: Outputs): Promise<void> => {
+const IMAGE_REPOSITORY = "ghcr.io/jaahuo/junction-2026-trusted-trade-agents";
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+
+export const renderService = (outputs: Outputs): string => {
+  if (!outputs.app_dir.startsWith("/") || /[:\r\n]/.test(outputs.app_dir))
+    throw new Error("app_dir must be an absolute path without colons or newlines");
+  if (!Number.isInteger(outputs.app_port) || outputs.app_port < 1 || outputs.app_port > 65535)
+    throw new Error("Invalid app_port");
+  const mount = `${outputs.app_dir}/data:/app/data:ro`
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("%", "%%")
+    .replaceAll("$", "$$");
+  return `[Unit]
+Description=Trusted trade agents API
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+ConditionPathExists=/etc/trusted-trade.env
+ConditionPathExists=/etc/trusted-trade-image.env
+
+[Service]
+EnvironmentFile=/etc/trusted-trade-image.env
+ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:${outputs.app_port}:3000 -v "${mount}" \${TRUSTED_TRADE_IMAGE}
+ExecStop=/usr/bin/docker stop --time 30 trusted-trade
+TimeoutStopSec=40
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+`;
+};
+
+export const push = async (
+  outputs: Outputs,
+  settings: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<void> => {
+  const image = settings["DEPLOY_IMAGE"] ?? "";
+  if (!new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}:[0-9a-f]{40}$`).test(image))
+    throw new Error(
+      "DEPLOY_IMAGE must be the trusted GHCR repository tagged with a full lowercase SHA",
+    );
+  const user = settings["DEPLOY_REGISTRY_USER"] ?? "";
+  const token = settings["DEPLOY_REGISTRY_TOKEN"] ?? "";
+  if (!user || !token || /[\r\n]/.test(user) || /[\r\n]/.test(token))
+    throw new Error("DEPLOY_REGISTRY_USER and DEPLOY_REGISTRY_TOKEN are required");
+  const unit = renderService(outputs);
   const envFile = renderEnvFile(await loadDeployEnv(outputs));
   const host = `root@${outputs.public_ip}`;
-  await $`bun scripts/production.ts --build-only`;
+  const dir = shellQuote(outputs.app_dir);
   await $`ssh ${SSH} ${host} cloud-init status --wait`.quiet();
+  await $`ssh ${SSH} ${host} ${`set -eu; if ! command -v docker >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io; fi; systemctl enable --now docker; mkdir -p ${dir}/data`}`;
+  const pull = `set -eu
+config=$(mktemp -d)
+trap 'rm -rf "$config"' EXIT
+export DOCKER_CONFIG="$config"
+docker login ghcr.io --username ${shellQuote(user)} --password-stdin >&2
+docker pull ${shellQuote(image)} >&2
+docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${shellQuote(image)}
+`;
+  const digests = await $`ssh ${SSH} ${host} ${pull} < ${new Response(token)}`.text();
+  const digest = digests
+    .split("\n")
+    .find((line) =>
+      new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}$`).test(line),
+    );
+  if (!digest) throw new Error("Pulled image has no trusted repository digest");
   const remoteShell = `ssh ${SSH.join(" ")}`;
-  await $`rsync -az --delete -e ${remoteShell} ${RSYNC_EXCLUDES.map((pattern) => `--exclude=${pattern}`)} ./ ${host}:${outputs.app_dir}/`;
   if (existsSync("data"))
-    await $`rsync -az -e ${remoteShell} data/ ${host}:${outputs.app_dir}/data/`;
-  await $`ssh ${SSH} ${host} install -m 600 -o app /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
+    await $`rsync -az -e ${remoteShell} data/ ${`${host}:${shellQuote(`${outputs.app_dir}/data/`)}`}`;
+  await $`ssh ${SSH} ${host} systemctl stop trusted-trade`;
+  await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
+  await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${digest}"\n`)}`;
+  await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade.service < ${new Response(unit)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs))}`;
-  // The Vultr Ubuntu image enables ufw with only SSH open; the Vultr firewall group alone does not reach Caddy.
-  await $`ssh ${SSH} ${host} ${`ufw allow 80/tcp && ufw allow 443/tcp && cd ${outputs.app_dir} && bun install --frozen-lockfile --ignore-scripts && chown -R app:app . && systemctl restart trusted-trade && systemctl reload caddy`}`;
+  // The Vultr Ubuntu image enables ufw with only SSH open.
+  await $`ssh ${SSH} ${host} ${"ufw allow 80/tcp && ufw allow 443/tcp && systemctl daemon-reload && systemctl enable --now trusted-trade && systemctl reload caddy"}`;
   await waitForHealth(outputs.public_base_url);
 };
 

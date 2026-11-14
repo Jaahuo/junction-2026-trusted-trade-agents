@@ -4,9 +4,11 @@ import { assertDevPortsAvailable, loadRuntime } from "./runtime.ts";
 
 type DevCommand = { command: string; args: string[]; cwd?: string };
 
-// Each child owns a process group so that shells, watchers, and their descendants
-// are stopped even if the direct child exits before them.
-export async function runDevProcesses(commands: DevCommand[]): Promise<number> {
+// Each child owns a process group, including descendants that outlive their leader.
+export async function runDevProcesses(
+  commands: DevCommand[],
+  onSpawn?: (pid: number) => void,
+): Promise<number> {
   const groups: number[] = [];
   const { promise: stopped, resolve: stop } = Promise.withResolvers<number>();
   const onInterrupt = () => stop(130);
@@ -42,6 +44,7 @@ export async function runDevProcesses(commands: DevCommand[]): Promise<number> {
           else console.error(`${command} exited with code ${code}`);
           stop(code || 1);
         });
+        if (child.pid !== undefined) onSpawn?.(child.pid);
       }
     } catch (error) {
       console.error("Failed to start development processes:", error);

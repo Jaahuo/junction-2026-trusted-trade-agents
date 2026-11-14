@@ -15,25 +15,54 @@ export function processesInWorktree(output: string, worktreePath: string): numbe
   const root = resolve(worktreePath);
   const selected = new Set<number>();
   let pid: number | undefined;
-  for (const raw of output.split("\0")) {
+  let file = false;
+  let type: string | undefined;
+  let named = false;
+  const finishRecord = () => {
+    if (pid !== undefined && (!file || type !== "DIR" || !named))
+      throw new Error("Invalid cwd record in lsof output");
+  };
+  const fields = output.split("\0");
+  if (fields.pop()?.replace(/\n/g, "") !== "") throw new Error("Unterminated field in lsof output");
+  for (const raw of fields) {
     const field = raw.replace(/^\n+/, "");
     if (field.startsWith("p")) {
+      finishRecord();
       const value = field.slice(1);
       if (!/^[1-9]\d*$/.test(value)) throw new Error("Invalid PID in lsof output");
       pid = Number(value);
       if (!Number.isSafeInteger(pid)) throw new Error("Invalid PID in lsof output");
-    } else if (field.startsWith("n")) {
+      file = false;
+      type = undefined;
+      named = false;
+    } else if (field.startsWith("f")) {
       if (pid === undefined) throw new Error("Missing PID in lsof output");
+      if (file) finishRecord();
+      if (field !== "fcwd") throw new Error("Invalid file in lsof output");
+      file = true;
+      type = undefined;
+      named = false;
+    } else if (field.startsWith("t")) {
+      if (!file || type !== undefined || named) throw new Error("Invalid type in lsof output");
+      type = field.slice(1);
+      if (type !== "DIR") throw new Error("Invalid type in lsof output");
+    } else if (field.startsWith("n")) {
+      if (pid === undefined || !file || type !== "DIR" || named)
+        throw new Error("Invalid cwd record in lsof output");
       const path = field.slice(1);
       if (!isAbsolute(path)) throw new Error("Invalid cwd in lsof output");
+      named = true;
       const fromRoot = relative(root, resolve(path));
       if (
         fromRoot === "" ||
         (fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot))
       )
         selected.add(pid);
+    } else {
+      throw new Error("Invalid field in lsof output");
     }
   }
+  finishRecord();
   return [...selected];
 }
 
@@ -69,7 +98,7 @@ async function protectedProcesses(): Promise<Set<number>> {
 }
 
 async function discoverProcesses(root: string): Promise<number[]> {
-  const output = await commandOutput(["lsof", "-a", "-d", "cwd", "-F0pn"]);
+  const output = await commandOutput(["lsof", "-a", "-d", "cwd", "-F0pnt"]);
   if (!processesInWorktree(output, realpathSync(process.cwd())).includes(process.pid))
     throw new Error("lsof did not report the cleanup process cwd");
   return processesInWorktree(output, root);

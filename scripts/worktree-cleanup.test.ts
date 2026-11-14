@@ -4,17 +4,46 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { processesInWorktree, stopWorktreeProcesses } from "./worktree-cleanup.ts";
 
+const spawn = (cwd: string, script: string) =>
+  Bun.spawn([process.execPath, "-e", script], { cwd, stdout: "pipe", stderr: "pipe" });
+
 describe("worktree process cleanup", () => {
   test("selects only numeric PIDs with cwd inside the directory boundary", () => {
     const output = [
-      "p11\0n/tmp/task with spaces\0\n",
-      "p12\0n/tmp/task with spaces/nested/../nested\0\n",
-      "p13\0n/tmp/task with spaces-other\0\n",
-      "p14\0n/tmp/other/task with spaces\0\n",
+      "p11\0\nfcwd\0tDIR\0n/tmp/task with spaces\0\n",
+      "p12\0\nfcwd\0tDIR\0n/tmp/task with spaces/nested/../nested\0\n",
+      "p13\0\nfcwd\0tDIR\0n/tmp/task with spaces-other\0\n",
+      "p14\0\nfcwd\0tDIR\0n/tmp/other/task with spaces\0\n",
     ].join("");
     expect(processesInWorktree(output, "/tmp/task with spaces/")).toEqual([11, 12]);
-    expect(() => processesInWorktree("p12oops\0n/tmp/task\0", "/tmp/task")).toThrow();
-    expect(() => processesInWorktree("n/tmp/task\0", "/tmp/task")).toThrow();
+    expect(() =>
+      processesInWorktree("p12oops\0\nfcwd\0tDIR\0n/tmp/task\0\n", "/tmp/task"),
+    ).toThrow();
+    expect(() => processesInWorktree("fcwd\0tDIR\0n/tmp/task\0\n", "/tmp/task")).toThrow();
+    expect(() =>
+      processesInWorktree(
+        "p123\0\nfcwd\0tunknown\0n/proc/123/cwd (readlink: Permission denied)\0\n",
+        "/tmp/task",
+      ),
+    ).toThrow();
+    expect(() => processesInWorktree("p123\0\nfcwd\0n/tmp/task\0\n", "/tmp/task")).toThrow();
+    expect(
+      processesInWorktree(
+        "p123\0\nfcwd\0tDIR\0n/proc/123/cwd (readlink: Permission denied)\0\n",
+        "/proc/123",
+      ),
+    ).toEqual([123]);
+    expect(() =>
+      processesInWorktree(
+        "p1\0\nfcwd\0tDIR\0n/tmp/task\0\np2\0\nfcwd\0n/tmp/task\0\n",
+        "/tmp/task",
+      ),
+    ).toThrow();
+    expect(() =>
+      processesInWorktree("p1\0\nfcwd\0tDIR\0n/tmp/task\0\nfcwd\0n/tmp/task\0\n", "/tmp/task"),
+    ).toThrow();
+    expect(() => processesInWorktree("p1\0\nfcwd\0tDIR\0\n", "/tmp/task")).toThrow();
+    expect(() => processesInWorktree("p1\0\nfcwd\0tDIR\0n/tmp/task", "/tmp/task")).toThrow();
   });
 
   test("terminates target processes, escalates stubborn processes and leaves siblings alone", async () => {
@@ -22,32 +51,20 @@ describe("worktree process cleanup", () => {
     const target = join(temp, "worktree space");
     const nested = join(target, "nested");
     const sibling = `${target}-other`;
-    await mkdir(nested, { recursive: true });
-    await mkdir(sibling);
-    const children = [
-      Bun.spawn([process.execPath, "-e", 'console.log("ready"); setInterval(() => {}, 1000)'], {
-        cwd: target,
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-      Bun.spawn(
-        [
-          process.execPath,
-          "-e",
-          'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000)',
-        ],
-        { cwd: nested, stdout: "pipe", stderr: "pipe" },
-      ),
-      Bun.spawn([process.execPath, "-e", 'console.log("ready"); setInterval(() => {}, 1000)'], {
-        cwd: sibling,
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-    ];
-    const [normal, stubborn, outside] = children;
-    if (!normal || !stubborn || !outside) throw new Error("Failed to start test processes");
+    const children: Pick<Bun.Subprocess, "exitCode" | "signalCode" | "kill" | "exited">[] = [];
     try {
-      for (const child of children) {
+      await mkdir(nested, { recursive: true });
+      await mkdir(sibling);
+      const normal = spawn(target, 'console.log("ready"); setInterval(() => {}, 1000)');
+      children.push(normal);
+      const stubborn = spawn(
+        nested,
+        'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000)',
+      );
+      children.push(stubborn);
+      const outside = spawn(sibling, 'console.log("ready"); setInterval(() => {}, 1000)');
+      children.push(outside);
+      for (const child of [normal, stubborn, outside]) {
         const reader = child.stdout.getReader();
         const result = await reader.read();
         reader.releaseLock();

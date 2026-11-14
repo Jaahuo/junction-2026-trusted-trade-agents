@@ -33,8 +33,7 @@ if (role === "parent") {
 }
 `;
 
-// These are real subprocesses and sockets; polling observes OS state rather than
-// advancing a fake clock in a different process.
+// Poll real subprocesses and sockets rather than advancing a fake clock.
 async function eventually<T>(read: () => Promise<T>): Promise<T> {
   let last: unknown;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -68,6 +67,10 @@ async function gone(pid: number): Promise<boolean> {
   return !state || state.startsWith("Z");
 }
 
+function validPid(pid: unknown): pid is number {
+  return typeof pid === "number" && Number.isSafeInteger(pid) && pid > 1;
+}
+
 describe("dev process supervision", () => {
   for (const signal of ["SIGINT", "SIGTERM", "failure"] as const) {
     test(`stops process trees on ${signal}`, async () => {
@@ -80,6 +83,7 @@ describe("dev process supervision", () => {
           "-e",
           `
         import { runDevProcesses } from ${JSON.stringify(launcher)};
+        import { appendFileSync } from "node:fs";
         process.exitCode = await runDevProcesses(${JSON.stringify(
           ["api", "web"].map((name) => ({
             command: process.execPath,
@@ -90,7 +94,7 @@ describe("dev process supervision", () => {
               signal === "failure" && name === "web" ? "fail" : "parent",
             ],
           })),
-        )});
+        )}, (pid) => appendFileSync(${JSON.stringify(join(dir, "groups"))}, pid + "\\n"));
       `,
         ],
         { stdout: "ignore", stderr: "ignore" },
@@ -99,19 +103,40 @@ describe("dev process supervision", () => {
       try {
         const listeners: { pid: number; port: number }[] = [];
         for (const name of signal === "failure" ? ["api"] : ["api", "web"]) {
-          parents.push(
-            Number(await eventually(() => readFile(join(dir, `${name}.parent`), "utf8"))),
-          );
-          const data = await eventually(() => readFile(join(dir, `${name}.listener`), "utf8"));
-          const listener: { pid: number; port: number } = JSON.parse(data);
+          const parent = await eventually(async () => {
+            const pid = Number(await readFile(join(dir, `${name}.parent`), "utf8"));
+            if (!validPid(pid)) throw new Error("Invalid parent PID");
+            return pid;
+          });
+          parents.push(parent);
+          const listener = await eventually(async () => {
+            const data: unknown = JSON.parse(await readFile(join(dir, `${name}.listener`), "utf8"));
+            if (
+              !data ||
+              typeof data !== "object" ||
+              !("pid" in data) ||
+              !validPid(data.pid) ||
+              !("port" in data) ||
+              typeof data.port !== "number" ||
+              !Number.isInteger(data.port) ||
+              data.port < 1 ||
+              data.port > 65535
+            )
+              throw new Error("Invalid listener marker");
+            return { pid: data.pid, port: data.port };
+          });
           listeners.push(listener);
           expect(await listening(listener.port)).toBe(true);
         }
         if (signal === "failure") await writeFile(join(dir, "fail"), "");
         else supervisor.kill(signal);
-        expect(await supervisor.exited).toBe(
-          signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 7,
-        );
+        const exitCode = await Promise.race([
+          supervisor.exited,
+          delay(3000).then(() => {
+            throw new Error("Supervisor did not exit");
+          }),
+        ]);
+        expect(exitCode).toBe(signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 7);
         for (const pid of [...parents, ...listeners.map((listener) => listener.pid)]) {
           await eventually(async () => {
             if (!(await gone(pid))) throw new Error(`PID ${pid} remains`);
@@ -119,13 +144,22 @@ describe("dev process supervision", () => {
         }
         for (const listener of listeners) expect(await listening(listener.port)).toBe(false);
       } finally {
-        supervisor.kill("SIGKILL");
-        for (const pid of parents) {
+        supervisor.kill("SIGTERM");
+        const exited = await Promise.race([
+          supervisor.exited.then(() => true),
+          delay(2000).then(() => false),
+        ]);
+        if (!exited) {
+          supervisor.kill("SIGKILL");
+          await supervisor.exited;
+        }
+        const groups = await readFile(join(dir, "groups"), "utf8").catch(() => "");
+        for (const entry of groups.split("\n")) {
+          const pid = Number(entry);
+          if (!validPid(pid)) continue;
           try {
             process.kill(-pid, "SIGKILL");
-          } catch {
-            /* already stopped */
-          }
+          } catch {}
         }
         await rm(dir, { recursive: true, force: true });
       }

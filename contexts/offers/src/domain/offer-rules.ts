@@ -42,7 +42,7 @@ export function expiredOmitReason(
   return null;
 }
 
-const LOT_TOLERANCE = 1e-9;
+const LOT_TOLERANCE = 1e-12;
 
 export function checkQuantity(
   quantity: Quantity,
@@ -54,7 +54,9 @@ export function checkQuantity(
     return "INVALID_QUANTITY";
   const lots = value / facts.allowedLotSize;
   const whole = Math.round(lots);
-  return whole >= 1 && Math.abs(lots - whole) <= LOT_TOLERANCE ? null : "INVALID_QUANTITY";
+  return whole >= 1 && Math.abs(lots - whole) <= LOT_TOLERANCE * Math.max(1, whole)
+    ? null
+    : "INVALID_QUANTITY";
 }
 
 function unionBy<T>(first: readonly T[], second: readonly T[]): T[] {

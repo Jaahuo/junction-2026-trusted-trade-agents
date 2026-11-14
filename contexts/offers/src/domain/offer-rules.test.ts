@@ -83,6 +83,12 @@ describe("quantity", () => {
     ).toBe("INVALID_QUANTITY");
   });
 
+  test("INVALID_QUANTITY regression: 111913.18 KG with lot size 0.01 is valid", () => {
+    const facts = { salesUnit: "KGM", allowedLotSize: 0.01 };
+    expect(checkQuantity({ value: 111913.18, unit: "KGM" }, facts)).toBeNull();
+    expect(checkQuantity({ value: 111913.185, unit: "KGM" }, facts)).toBe("INVALID_QUANTITY");
+  });
+
   test("INVALID_QUANTITY regression: 0.3 with lot size 0.1 is valid", () => {
     expect(
       checkQuantity({ value: 0.3, unit: "KGM" }, { salesUnit: "KGM", allowedLotSize: 0.1 }),

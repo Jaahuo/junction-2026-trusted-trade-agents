@@ -48,7 +48,7 @@ const mount = async () => {
     ).token;
   const verify = async (token: string) =>
     verifyOfferToken(token, localOfferKeys(await signer.jwks()), fake.clock.now());
-  return { app: createApi(deps), offer, verify };
+  return { app: createApi(deps), noLive: createApi({ ...deps, live: null }), offer, verify };
 };
 
 const requote = (app: ReturnType<typeof createApi>, body: object) =>
@@ -146,4 +146,11 @@ test("a token that fails verification or is signed by another key, a change for 
     expect(response.status).toBe(400);
     expect(ErrorEnvelopeSchema.parse(await response.json()).error.code).toBe("BAD_REQUEST");
   }
+});
+
+test("with no live price source, requote answers 502 rather than omitting every line", async () => {
+  const { noLive, offer } = await mount();
+  const response = await requote(noLive, { tokens: [await offer()] });
+  expect(response.status).toBe(502);
+  expect(ErrorEnvelopeSchema.parse(await response.json()).error.code).toBe("UPSTREAM_FAILED");
 });

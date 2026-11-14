@@ -6,7 +6,13 @@ import type {
   Principal,
   RequoteRequest,
 } from "@app/contract";
-import { getOffers, type GetOffersError, mapLimit, PRECHECK_CONCURRENCY } from "./get-offers.ts";
+import {
+  getOffers,
+  type GetOffersError,
+  mapLimit,
+  NO_LIVE_SOURCE_DETAIL,
+  PRECHECK_CONCURRENCY,
+} from "./get-offers.ts";
 import type { OffersDeps } from "./ports.ts";
 
 const badRequest = (message: string): Result<never, GetOffersError> =>
@@ -75,7 +81,10 @@ export async function requote(
   if ([...changes.keys()].some((productId) => !products.has(productId)))
     return badRequest("A change names a product that none of the tokens offers.");
 
-  // One get_offers pass per token, a few at a time, so a long order stays inside the caller's timeout.
+  // With no live price source nothing can be re-quoted; that is this server's fault, not a product's.
+  if (deps.live === null) return err({ code: "UPSTREAM_FAILED", message: NO_LIVE_SOURCE_DETAIL });
+  // One get_offers pass per token, a few at a time, to help a long order stay within the caller's
+  // timeout.
   const results = await mapLimit(sources.value, PRECHECK_CONCURRENCY, async (claims) => {
     const change = changes.get(claims.productId);
     const result = await getOffers(deps, principal, {

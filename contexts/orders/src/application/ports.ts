@@ -1,4 +1,4 @@
-import type { AuditEvent, Mandate, OfferClaims, Order } from "@app/contract";
+import type { AuditEvent, Mandate, OfferClaims, Order, SubstitutePair } from "@app/contract";
 import type { Result } from "@app/kernel";
 import type { HistoryRow } from "../domain/evaluate.ts";
 
@@ -31,6 +31,8 @@ export interface OrderTx {
   find(customer: string, orderId: string): Promise<StoredOrder | null>;
   findByKey(customer: string, idempotencyKey: string): Promise<StoredOrder | null>;
   hasUsedOffers(customer: string, offerIds: readonly string[]): Promise<boolean>;
+  /** The customer's orders with a line that is this substitute pair. */
+  withPair(customer: string, pair: SubstitutePair): Promise<StoredOrder[]>;
   insert(order: StoredOrder): Promise<void>;
   /**
    * Writes a decided order over the pending one it was read as. False when the stored order is no

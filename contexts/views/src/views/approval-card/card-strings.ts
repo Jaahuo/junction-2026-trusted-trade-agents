@@ -173,6 +173,17 @@ const en = {
   receiptMismatch: "Confirmation doesn’t match your order",
   receiptMismatchText: (brand: string) =>
     `${brand}’s confirmation differs from the offer you approved. Contact ${brand} before the delivery.`,
+  standingOffer: (substitute: string, original: string | null, times: number) =>
+    `You’ve approved ${substitute} as a replacement for ${original ?? "the out-of-stock product"} ${times} times. Let the agent do this without asking?`,
+  yesAutomatically: "Yes, automatically",
+  keepAsking: "Keep asking",
+  standingSaved: (substitute: string, original: string | null) =>
+    `The agent now orders ${substitute} instead of ${original ?? "the out-of-stock product"} without asking. You can undo this in your limits.`,
+  neverSuggest: (substitute: string, original: string | null) =>
+    `Should the agent keep suggesting ${substitute} instead of ${original ?? "the out-of-stock product"}?`,
+  dontSuggestAgain: "Don’t suggest again",
+  neverSaved: (substitute: string, original: string | null) =>
+    `The agent won’t suggest ${substitute} instead of ${original ?? "the out-of-stock product"} again. You can undo this in your limits.`,
 };
 
 const FI_REASON: Record<ReasonCode, string> = {
@@ -366,6 +377,17 @@ const fi: typeof en = {
   receiptMismatch: "Vahvistus ei vastaa tilaustasi",
   receiptMismatchText: (brand) =>
     `Vahvistus poikkeaa hyväksymästäsi tarjouksesta. Ota yhteyttä toimittajaan (${brand}) ennen toimitusta.`,
+  standingOffer: (substitute, original, times) =>
+    `Olet hyväksynyt tuotteen ${substitute} ${original === null ? "loppuneen tuotteen" : `tuotteen ${original}`} tilalle ${times} kertaa. Saako agentti tehdä tämän kysymättä?`,
+  yesAutomatically: "Kyllä, automaattisesti",
+  keepAsking: "Kysy jatkossakin",
+  standingSaved: (substitute, original) =>
+    `Agentti tilaa nyt tuotteen ${substitute} ${original === null ? "loppuneen tuotteen" : `tuotteen ${original}`} tilalle kysymättä. Voit perua tämän valtuutuksen asetuksista.`,
+  neverSuggest: (substitute, original) =>
+    `Ehdottaako agentti jatkossakin tuotetta ${substitute} ${original === null ? "loppuneen tuotteen" : `tuotteen ${original}`} tilalle?`,
+  dontSuggestAgain: "Älä ehdota enää",
+  neverSaved: (substitute, original) =>
+    `Agentti ei enää ehdota tuotetta ${substitute} ${original === null ? "loppuneen tuotteen" : `tuotteen ${original}`} tilalle. Voit perua tämän valtuutuksen asetuksista.`,
 };
 
 export const CARD = { en, fi };

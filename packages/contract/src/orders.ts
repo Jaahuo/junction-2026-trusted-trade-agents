@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DateSchema, MoneyTotalSchema, PaymentTermsSchema, TimeSchema } from "./common.ts";
+import { SubstitutePairSchema } from "./mandate.ts";
 import { OfferClaimsSchema } from "./offers.ts";
 import { ReasonCodeSchema } from "./reasons.ts";
 
@@ -120,6 +121,12 @@ export const OrderSchema = z.strictObject({
     })
     .optional(),
   auditIntegrity: z.enum(["intact", "unverified", "broken"]).optional(),
+  /** Set only on the approve response, when the human may make this substitute automatic. */
+  standingOffer: SubstitutePairSchema.extend({
+    timesApproved: z.number().int(),
+    /** The replaced product's name, from an order that had it as a line. */
+    replacesName: z.string().optional(),
+  }).optional(),
 });
 export type Order = z.infer<typeof OrderSchema>;
 

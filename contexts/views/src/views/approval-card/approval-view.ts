@@ -1,4 +1,4 @@
-import type { DecideApprovalRequest, Order, PendingList } from "@app/contract";
+import { type DecideApprovalRequest, type Order, type PendingList, samePair } from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { css, html, nothing } from "lit";
 import {
@@ -14,7 +14,7 @@ import warningLarge from "../../shared/icons/warning-32.svg?raw";
 import { pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
-import { defineApprovalCard, reasonSummaries } from "./approval-card.ts";
+import { defineApprovalCard, reasonSummaries, type RuleChoice } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
 import { brandHeader, cardStyles, icon, money, orderName, vat, when } from "./parts.ts";
 import { VIEW } from "./strings.ts";
@@ -33,6 +33,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     orderLimit: { state: true },
     decisionError: { state: true },
     pending: { state: true },
+    remembered: { state: true },
   };
 
   static override styles = [
@@ -200,6 +201,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   private limitAsked = false;
   /** What the tool is doing, from its arguments, while the result is on its way. */
   declare private pending: { placing: boolean; request: string | null };
+  /** The orders whose substitution rule is saved in the mandate. */
+  declare private remembered: ReadonlySet<string>;
 
   constructor() {
     super();
@@ -209,6 +212,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     this.orderLimit = null;
     this.decisionError = null;
     this.pending = { placing: false, request: null };
+    this.remembered = new Set();
   }
 
   override connectedCallback() {
@@ -278,6 +282,45 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     )
       await this.decide(updated, { decision: "approve", proposalVersion: updated.proposalVersion });
     if (updated.status !== "pending_approval") await this.tell(updated);
+  }
+
+  /**
+   * Saves the human's rule for a substitute pair as a new version of the current mandate, with
+   * its limits, constraints and expiry unchanged otherwise. A rule for the same pair is replaced.
+   */
+  private async remember(order: Order, choice: RuleChoice) {
+    const source = this.source;
+    if (source === null) return;
+    this.busyId = order.orderId;
+    const current = await callAction(source, "get_mandate", {}, null);
+    const saved =
+      current.kind === "done" && current.data.status === "active"
+        ? await callAction(
+            source,
+            "register_mandate",
+            {
+              limits: {
+                ...current.data.mandate.limits,
+                substitutionRules: [
+                  ...(current.data.mandate.limits.substitutionRules ?? []).filter(
+                    (rule) => !samePair(rule, choice),
+                  ),
+                  { ...choice, decidedAt: new Date().toISOString() },
+                ],
+              },
+              standingConstraints: current.data.mandate.standingConstraints,
+              exp: current.data.mandate.exp,
+            },
+            null,
+          )
+        : current;
+    this.busyId = null;
+    if (saved.kind !== "done") {
+      this.decisionError = { orderId: order.orderId, message: pick(VIEW).notSaved };
+      return;
+    }
+    this.decisionError = null;
+    this.remembered = new Set([...this.remembered, order.orderId]);
   }
 
   /**
@@ -480,6 +523,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       <tt-approval-card
         .order=${open}
         ?busy=${this.busyId === open.orderId}
+        ?remembered=${this.remembered.has(open.orderId)}
         ?can-ask=${this.source?.message !== undefined}
         .orderLimit=${this.orderLimit}
         .error=${this.decisionError?.orderId === open.orderId ? this.decisionError.message : null}
@@ -488,6 +532,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
           this.decide(open, e.detail, true)}
         @tt-ask-agent=${(e: CustomEvent<string>) => this.ask(open, e.detail, true)}
         @tt-talk=${(e: CustomEvent<string>) => this.ask(open, e.detail, false)}
+        @tt-remember=${(e: CustomEvent<RuleChoice>) => this.remember(open, e.detail)}
       ></tt-approval-card>`;
   }
 }

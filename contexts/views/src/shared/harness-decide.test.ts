@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { OrderSchema } from "@app/contract";
+import { fixtures, OrderSchema } from "@app/contract";
 import substitution from "../../fixtures/approval-card/pending-substitution.json";
-import { harnessDecide } from "./harness-decide.ts";
+import { HARNESS_MANDATE, harnessDecide } from "./harness-decide.ts";
 import { fixtureSource } from "./bridge.ts";
 
 const order = OrderSchema.parse(substitution);
@@ -71,5 +71,17 @@ test("the harness source answers decide_approval and keeps the decided order", a
     decision: "approve",
   });
   expect(approved).toMatchObject({ status: "placed", proposalVersion: order.proposalVersion + 1 });
-  expect(source.call("register_mandate", {})).rejects.toThrow("no server");
+  expect(source.call("revoke_mandate", {})).rejects.toThrow("no server");
+});
+
+test("the harness keeps a registered mandate for the next read", async () => {
+  const source = fixtureSource({ result: fixtures.order });
+  const limits = { ...HARNESS_MANDATE.mandate.limits, substitutions: "auto" as const };
+  await source.call("register_mandate", {
+    limits,
+    standingConstraints: HARNESS_MANDATE.mandate.standingConstraints,
+  });
+  expect(await source.call("get_mandate", {})).toMatchObject({
+    mandate: { limits, version: HARNESS_MANDATE.mandate.version + 1 },
+  });
 });

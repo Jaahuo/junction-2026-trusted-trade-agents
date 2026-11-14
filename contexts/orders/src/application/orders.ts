@@ -433,4 +433,4 @@ export const findOrder = (
 ): Promise<StoredOrder | null> => store.find(principal.customer, orderId);
 
 // Shared with approvals: edit and pick_alternative run these checks again (SPEC-011).
-export { auditOf, checkTokens, evaluateChecked, type Evaluated };
+export { auditOf, type Checked, checkTokens, evaluateChecked, type Evaluated };

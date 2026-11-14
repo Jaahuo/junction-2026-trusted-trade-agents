@@ -5,7 +5,7 @@ import pendingFixture from "../../../fixtures/approval-card/pending.json";
 import placedFixture from "../../../fixtures/approval-card/placed.json";
 import { fixtureSource, type Source } from "../../shared/bridge.ts";
 import { ApprovalCard } from "./approval-card.ts";
-import { isNewer, readCurrent, withCurrent } from "./current-state.ts";
+import { isNewer, onReturn, readCurrent, withCurrent } from "./current-state.ts";
 import { clickHandler, markup } from "./template-walk.ts";
 
 type Template = { strings: readonly string[]; values: unknown[] };
@@ -111,4 +111,39 @@ test("the harness answers the current state of an order, including a decision ma
   const after = await readCurrent(source, pending);
   expect(after.current[0]?.status).not.toBe("pending_approval");
   expect(after.unread.size).toBe(0);
+});
+
+test("the card re-reads when the tab shows again, once at a time, and not on window focus", async () => {
+  const state: { visibilityState: DocumentVisibilityState } = { visibilityState: "visible" };
+  const page = Object.assign(new EventTarget(), state);
+  let reads = 0;
+  const finishes: (() => void)[] = [];
+  const finish = () => finishes.shift()?.();
+  const stop = onReturn(page, () => {
+    reads++;
+    return new Promise<void>((done) => finishes.push(done));
+  });
+
+  page.dispatchEvent(new Event("focus"));
+  expect(reads).toBe(0);
+
+  page.dispatchEvent(new Event("visibilitychange"));
+  page.dispatchEvent(new Event("visibilitychange"));
+  expect(reads).toBe(1);
+
+  finish();
+  await Promise.resolve();
+  page.visibilityState = "hidden";
+  page.dispatchEvent(new Event("visibilitychange"));
+  expect(reads).toBe(1);
+
+  page.visibilityState = "visible";
+  page.dispatchEvent(new Event("visibilitychange"));
+  expect(reads).toBe(2);
+
+  finish();
+  await Promise.resolve();
+  stop();
+  page.dispatchEvent(new Event("visibilitychange"));
+  expect(reads).toBe(2);
 });

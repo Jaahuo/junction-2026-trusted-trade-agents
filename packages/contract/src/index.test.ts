@@ -173,6 +173,9 @@ test("DEMO_ACCOUNT equals the SPEC-015 values", () => {
   same(DEMO_ACCOUNT, literal(source));
 });
 
+const refusal = (hard: unknown) =>
+  SearchRequestSchema.safeParse({ ...fixtures.searchRequest, hard }).error?.issues[0]?.message;
+
 describe("hard constraints (SPEC-003, SPEC-004)", () => {
   test("an unsupported attribute or value is refused", () => {
     const request = fixtures.searchRequest;
@@ -192,6 +195,11 @@ describe("hard constraints (SPEC-003, SPEC-004)", () => {
     ]) {
       expect(SearchRequestSchema.safeParse({ ...request, hard }).success).toBe(false);
     }
+  });
+
+  test("the refusal names the attribute, or says it is missing", () => {
+    expect(refusal([{ attribute: "unicorn", is: "free_from" }])).toContain('"unicorn"');
+    expect(refusal([{ is: "free_from" }])).toContain('"missing"');
   });
 
   test("empty terms are refused", () => {

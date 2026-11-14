@@ -177,15 +177,15 @@ Send these after each change to the prompt, and compare the replies with the exp
 Measured on 2026-11-14 with Open WebUI v0.13.3, a local Qwen 3.6 35B model (4-bit, MLX) and the server at `main` after offers and approvals merged.
 These are results of five to ten conversations, not a benchmark.
 
-| Check                                                | Result                         |
-| ---------------------------------------------------- | ------------------------------ |
-| No pack-size question for a count of items           | Passed                         |
-| One product named, no list, no menu                  | Passed                         |
-| Weight and volume: asks one question before ordering | Passed                         |
-| No lactose-free requirement unless stated            | Passed                         |
-| Says that gluten-free cannot be confirmed            | Passed                         |
-| Order placed or sent for sign-off                    | Passed in 2 of 4 conversations |
-| Refuses to split an order                            | Not verified                   |
+| Check                                                  | Result                         |
+| ------------------------------------------------------ | ------------------------------ |
+| No pack-size question for a count of items             | Passed                         |
+| One product named, no list, no menu                    | Passed                         |
+| Weight and volume: asks one question before ordering   | Passed                         |
+| No lactose-free requirement unless stated              | Passed                         |
+| Says that gluten-free cannot be confirmed (before #71) | Passed                         |
+| Order placed or sent for sign-off                      | Passed in 2 of 4 conversations |
+| Refuses to split an order                              | Not verified                   |
 
 ## Known limits
 

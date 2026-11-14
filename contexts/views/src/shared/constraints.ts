@@ -60,16 +60,14 @@ export const preferred = (attribute: string, prefer: string) =>
       : (pick(NAMES).values[prefer] ?? words(prefer))
   }`;
 
-const REQUIRED = {
-  en: {
-    lactose: "Lactose free",
-    vegan: "Vegan",
-    free: (attribute: string) => `${attributeName(attribute)} free`,
-  },
+const REQUIRED: Record<
+  "en" | "fi",
+  { labels: Record<string, string>; free: (attribute: string) => string }
+> = {
+  en: { labels: { vegan: "Vegan" }, free: (attribute) => `${attributeName(attribute)} free` },
   fi: {
-    lactose: "Laktoositon",
-    vegan: "Vegaaninen",
-    free: (attribute: string) => {
+    labels: { lactose: "Laktoositon", vegan: "Vegaaninen" },
+    free: (attribute) => {
       const name = FI_ALLERGENS[attribute];
       return name === undefined ? `${attributeName(attribute)}: ei sisällä` : `Ei ${name}`;
     },
@@ -79,5 +77,5 @@ const REQUIRED = {
 /** "Gluten free", "Vegan": a required (hard) constraint as the approver reads it (SPEC-004). */
 export const required = (attribute: string) => {
   const text = pick(REQUIRED);
-  return attribute === "lactose" || attribute === "vegan" ? text[attribute] : text.free(attribute);
+  return text.labels[attribute] ?? text.free(attribute);
 };

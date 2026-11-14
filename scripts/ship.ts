@@ -50,9 +50,15 @@ async function includeMain(): Promise<string> {
   await command("git", "fetch", "origin", "main");
   const behind = !(await git("merge-base", "--is-ancestor", "origin/main", "HEAD")).ok;
   if (behind && risk !== "ordinary") {
-    if (!(await git("merge", "--no-edit", "origin/main")).ok) {
-      await git("merge", "--abort");
-      fail("Branch conflicts with origin/main. Merge origin/main, resolve, commit and rerun ship.");
+    const merge = await git("merge", "--no-edit", "origin/main");
+    if (!merge.ok) {
+      const conflicted = (await git("rev-parse", "-q", "--verify", "MERGE_HEAD")).ok;
+      if (conflicted) await git("merge", "--abort");
+      fail(
+        conflicted
+          ? "Branch conflicts with origin/main. Merge origin/main, resolve, commit and rerun ship."
+          : `Could not merge origin/main into the branch:\n${merge.out}`,
+      );
     }
     console.log("Merged origin/main into the branch.");
   }
@@ -126,7 +132,13 @@ const reviewFile = option(args, "--review-file");
 if (reviewFile) {
   const value: unknown = JSON.parse(await Bun.file(reviewFile).text());
   const report = parseAgentReview(value);
-  if (report.head !== head) fail("Review report does not match the exact current head.");
+  // ship may just have merged origin/main; a report for an earlier head with the same change counts.
+  const reviewMain = await command("git", "rev-parse", "origin/main");
+  if (
+    report.head !== head &&
+    !(await equivalentHeads({ head, main: reviewMain, reviewed: [report.head] })).length
+  )
+    fail("Review report does not match the current head or an earlier head with the same change.");
   const pull = await ghJson(decodePull, "api", path);
   const user = await ghJson(decodeUser, "api", "user");
   if (pull.head.sha !== head || pull.user.login.toLowerCase() !== user.login.toLowerCase())
@@ -180,9 +192,12 @@ for (let attempt = 1; ; attempt++) {
   pull = await readPull();
   if (pull.head.sha === head) {
     await command("git", "fetch", "origin", "main");
-    if ((await git("merge-base", "--is-ancestor", "origin/main", head)).ok || risk === "ordinary")
-      break;
+    if (risk === "ordinary") break;
+    const tip = await command("git", "rev-parse", "origin/main");
+    // GitHub refreshes the PR base shortly after a push; wait for it rather than fail later.
+    if ((await git("merge-base", "--is-ancestor", tip, head)).ok && pull.base.sha === tip) break;
   }
+  await sleep(10);
 }
 const currentMain = await command("git", "rev-parse", "origin/main");
 const reviews = (

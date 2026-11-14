@@ -3,6 +3,7 @@ import {
   type BacklogIssue,
   type Board,
   blockers,
+  canonicalPath,
   dependencies,
   ownedPaths,
   overlaps,
@@ -52,6 +53,19 @@ describe("issue text", () => {
       "## Owns\n\nOwned paths:\n- `scripts/`\n- `docs/workflow.md` (one section)\n\nKeep out of: `contexts/**`\n\n## Acceptance\n";
     expect(ownedPaths(owns)).toEqual(["scripts", "docs/workflow.md"]);
     expect(overlaps(ownedPaths(owns) ?? [], ["scripts/backlog.ts"])).toBe(true);
+  });
+
+  test("canonicalPath turns every spelling of a folder into one prefix", () => {
+    for (const spelling of ["scripts", "scripts/", "./scripts/**", "scripts/**/", "scripts/*"])
+      expect(canonicalPath(spelling)).toBe("scripts");
+    expect(canonicalPath("contexts/*/src")).toBe("contexts");
+    expect(canonicalPath("the views lane")).toBeNull();
+  });
+
+  test("ownedPaths skips every bullet of a Keep out of list", () => {
+    const owns =
+      "## Owns\n\nOwned paths: `scripts/**`\n\nKeep out of:\n- `contexts/**`\n- `apps/**`\n\n## Acceptance\n";
+    expect(ownedPaths(owns)).toEqual(["scripts"]);
   });
 
   test("ownedPaths is null when the Owns section is missing or names no path", () => {
@@ -136,6 +150,25 @@ describe("blockers", () => {
     expect(
       plan(board([contested], { claimed: new Set([1]) })).ready.map((entry) => entry.number),
     ).toEqual([]);
+  });
+});
+
+describe("staggered claims of overlapping issues", () => {
+  // After its own ref exists, claim gives way to any overlapping issue that became active
+  // since its ready check; these cases pin the board facts that rule reads.
+  const first = issue(5, { body: body("`scripts/**`") });
+  const second = issue(7, { body: body("`./scripts/backlog.ts`") });
+
+  test("the later claimer sees the earlier claim as an overlapping active issue", () => {
+    const later = board([first, second], { claimed: new Set([5, 7]) });
+    expect(blockers(second, later)).toContain("owned paths overlap active #5");
+    expect(blockers(first, later)).toContain("owned paths overlap active #7");
+  });
+
+  test("before either claim, both look ready", () => {
+    const before = board([first, second]);
+    expect(blockers(first, before)).toEqual([]);
+    expect(blockers(second, before)).toEqual([]);
   });
 });
 

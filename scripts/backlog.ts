@@ -66,27 +66,42 @@ export function dependencies(body: string): number[] {
   return [...new Set([...text.matchAll(/#(\d+)/g)].map((match) => Number(match[1])))];
 }
 
-const PATH = /^[\w.@-]+(\/[\w.@*-]+)*\/?$/;
+/**
+ * A path as a plain directory or file prefix: no leading `./`, and everything from the first glob
+ * segment on dropped, so `./scripts/**` and `contexts/<glob>/src` widen to `scripts` and `contexts`.
+ * Null when nothing path-like is left.
+ */
+export function canonicalPath(raw: string): string | null {
+  const segments: string[] = [];
+  for (const segment of raw.trim().split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === ".." || segment.includes("*")) break;
+    if (!/^[\w.@-]+$/.test(segment)) return null;
+    segments.push(segment);
+  }
+  return segments.length > 0 ? segments.join("/") : null;
+}
 
 /**
- * The backticked paths of the "Owns" section, from its "Owned paths:" line and bullet lines,
- * without trailing globs or slashes; the "Keep out of" line is not ownership. Null when the
- * section is missing or names no path, so the caller can refuse to guess.
+ * The backticked paths the "Owns" section owns: its "Owned paths:" line and the bullets under it,
+ * not the "Keep out of" line or its bullets. Null when the section is missing or owns no path,
+ * so the caller can refuse to guess.
  */
 export function ownedPaths(body: string): string[] | null {
   const owns = section(body, "owns");
   if (owns === null) return null;
-  const lines = owns.split(/\r?\n/).filter((line) => !/^\W*keep out of\b/i.test(line));
-  const paths = lines
-    .flatMap((line) => [...line.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? ""))
-    .filter((path) => PATH.test(path))
-    .map((path) =>
-      path
-        .replace(/(\/\*\*?)+$/, "")
-        .replace(/\*+$/, "")
-        .replace(/\/+$/, ""),
-    )
-    .filter((path) => path.length > 0);
+  const paths: string[] = [];
+  let owning = true;
+  for (const line of owns.split(/\r?\n/)) {
+    if (/^\W*keep out of\b/i.test(line)) owning = false;
+    else if (/^\W*owned paths\b/i.test(line)) owning = true;
+    else if (!/^\s*[-*]\s/.test(line) && line.trim() !== "") owning = true;
+    if (!owning) continue;
+    for (const match of line.matchAll(/`([^`]+)`/g)) {
+      const path = canonicalPath(match[1] ?? "");
+      if (path !== null) paths.push(path);
+    }
+  }
   return paths.length > 0 ? [...new Set(paths)] : null;
 }
 
@@ -341,25 +356,28 @@ async function claim(number: number, args: string[]) {
     }
     fail(`Claim of #${number} failed:\n${created.text.trim()}`);
   }
-  // Claims of different issues do not serialize: when another agent claimed an issue with
-  // overlapping owned paths at the same time, the higher issue number gives way.
+  // Assign before anything else can fail, so a half-done claim is always yours to release.
+  const assigned = await run("gh", "issue", "edit", String(number), "--add-assignee", user.login);
+  if (assigned.code !== 0)
+    await unwind(number, main, `Assigning #${number} failed:\n${assigned.text.trim()}`);
+  // Claims of different issues do not serialize. Every overlapping issue that became active
+  // after the ready check is a rival claimed at the same time: give way to any of them. Two
+  // rivals may both give way, but two can never both proceed.
   const after = await loadBoard();
-  const paths = ownedPaths(issue.body) ?? [];
-  const rival = overlapping(issue, paths, after).find(
-    (other) => other.number < number && after.claimed.has(other.number),
-  );
+  const rival = overlapping(issue, ownedPaths(issue.body) ?? [], after)[0];
   if (rival) {
     const dropped = await dropClaim(number, main);
+    // Keep the assignment when the drop failed, so release still accepts you.
+    if (dropped) await run("gh", "issue", "edit", String(number), "--remove-assignee", user.login);
     console.error(
       `#${rival.number} was claimed at the same time and owns overlapping paths; ${
-        dropped ? `gave #${number} back` : `remove task/${number} by hand`
+        dropped
+          ? `gave #${number} back`
+          : `run: bun scripts/backlog.ts release ${number} --reason "rival claim"`
       }. Pick the next issue.`,
     );
     process.exit(TAKEN_EXIT);
   }
-  const assigned = await run("gh", "issue", "edit", String(number), "--add-assignee", user.login);
-  if (assigned.code !== 0)
-    await unwind(number, main, `Assigning #${number} failed:\n${assigned.text.trim()}`);
   const note = `Claimed by ${agent} for @${user.login} through the backlog loop (remote branch \`task/${number}\`).`;
   const commented = await run("gh", "issue", "comment", String(number), "--body", note);
   if (commented.code !== 0)
@@ -382,6 +400,8 @@ async function release(number: number, args: string[]) {
     fail(`#${number} is not assigned to you; release only your own claim.`);
   const pr = prFor(board, number);
   if (pr) fail(`#${number} has open PR #${pr.number}; close or hand over the PR first.`);
+  // Label first: the issue must never be claimable while its blocker is unrecorded.
+  if (blocked) await command("gh", "issue", "edit", String(number), "--add-label", "blocked");
   if (board.claimed.has(number)) {
     const head = (await command("git", "ls-remote", "origin", `refs/heads/task/${number}`)).split(
       /\s/,
@@ -395,7 +415,6 @@ async function release(number: number, args: string[]) {
       fail(`task/${number} moved while releasing; someone pushed work. Nothing was deleted.`);
   }
   await command("gh", "issue", "edit", String(number), "--remove-assignee", user.login);
-  if (blocked) await command("gh", "issue", "edit", String(number), "--add-label", "blocked");
   await projectStatus(repo, number, "Todo", true);
   await command(
     "gh",
@@ -424,8 +443,8 @@ every "Depends on" and "Merge after" issue closed, and owned paths clear of ever
 active issue. --all also lists the others with their blockers.
 claim creates the remote branch task/<issue> through the GitHub refs API. GitHub
 refuses an existing ref, so one agent wins; the others exit ${TAKEN_EXIT} and pick the next
-issue. A claim that races an issue with overlapping owned paths gives way when its
-number is higher. The winner is assigned. Then run: bun scripts/task.ts start <issue>.
+issue. A claim that races an issue with overlapping owned paths gives way; in a
+rare tie both give way, never both proceed. The winner is assigned. Then run: bun scripts/task.ts start <issue>.
 release gives back your claim with no pushed work: it deletes the remote branch
 only while it holds no new commits, unassigns you, moves the issue to Todo and
 comments the reason. --blocked also labels it blocked, so no agent picks it until a

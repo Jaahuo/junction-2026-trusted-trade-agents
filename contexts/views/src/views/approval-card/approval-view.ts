@@ -28,6 +28,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     openId: { state: true },
     busyId: { state: true },
     updatingId: { state: true },
+    orderLimit: { state: true },
   };
 
   static override styles = [
@@ -159,12 +160,26 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   declare private busyId: string | null;
   /** The order the agent is updating after a message (prototype P4). */
   declare private updatingId: string | null;
+  /** The mandate's order limit (gross EUR) for the Order total block; null when unknown. */
+  declare private orderLimit: number | null;
+  private limitAsked = false;
 
   constructor() {
     super();
     this.openId = null;
     this.busyId = null;
     this.updatingId = null;
+    this.orderLimit = null;
+  }
+
+  /** Reads the order limit once, when the first order is shown; without it the block shows no limit. */
+  override updated() {
+    if (this.limitAsked || this.source === null || this.state.kind !== "done") return;
+    this.limitAsked = true;
+    void callAction(this.source, "get_mandate", {}, null).then((result) => {
+      if (result.kind === "done" && result.data.status === "active")
+        this.orderLimit = result.data.mandate.limits.maxOrderTotal.value;
+    });
   }
 
   private reload() {
@@ -173,7 +188,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     void loadView(this.entry, this.source).then((state) => (this.state = state));
   }
 
-  private async decide(order: Order, request: DecideApprovalRequest) {
+  /**
+   * Sends a decision. With `thenApprove` (Confirm after changing amounts) the edit's new quote
+   * is approved at once, unless it brings a reason the order did not have: then it is shown.
+   */
+  private async decide(order: Order, request: DecideApprovalRequest, thenApprove = false) {
     if (this.source === null) return;
     this.busyId = order.orderId;
     const result = await callAction(
@@ -190,6 +209,18 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const state = this.state;
     if (state.kind === "done")
       this.state = { kind: "done", data: replace(state.data, result.data) };
+    const updated = result.data;
+    if (
+      thenApprove &&
+      updated.status === "pending_approval" &&
+      updated.reasons.every((r) => order.reasons.includes(r))
+    )
+      await this.decide(updated, { decision: "approve", proposalVersion: updated.proposalVersion });
+    // The agent answers in the chat: it confirms a placed order and will not place a rejected one.
+    if (request.decision === "reject" && updated.status !== "pending_approval")
+      void this.source.message?.(`I rejected order ${order.orderId}. Do not place it.`);
+    if (request.decision !== "reject" && updated.status === "placed")
+      void this.source.message?.(`I confirmed order ${order.orderId}.`);
   }
 
   /** Sends the card's message to the agent in the chat; with `update` the card waits for it. */
@@ -351,7 +382,10 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         .order=${open}
         ?busy=${this.busyId === open.orderId}
         ?can-ask=${this.source?.message !== undefined}
+        .orderLimit=${this.orderLimit}
         @tt-decide=${(e: CustomEvent<DecideApprovalRequest>) => this.decide(open, e.detail)}
+        @tt-confirm-changes=${(e: CustomEvent<DecideApprovalRequest>) =>
+          this.decide(open, e.detail, true)}
         @tt-ask-agent=${(e: CustomEvent<string>) => this.ask(open, e.detail, true)}
         @tt-talk=${(e: CustomEvent<string>) => this.ask(open, e.detail, false)}
       ></tt-approval-card>`;

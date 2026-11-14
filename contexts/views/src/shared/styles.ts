@@ -195,12 +195,12 @@ export const base = css`
   .message.danger {
     color: var(--color-text-danger);
   }
-  /* Loading: a soft white sweep over light lilac, no spinners. Always aria-hidden.
+  /* Loading: a soft butter sweep over light lilac, no spinners. Always aria-hidden.
      The sweep is fixed to the viewport and repeats, so every shimmer moves in step and the
      loop never jumps. A shimmer on a petrol header sets --shimmer-base to translucent white. */
   .shimmer {
     --shimmer-base: var(--color-light-purple-aimo);
-    --shimmer-sweep: color-mix(in srgb, var(--color-white) 85%, transparent);
+    --shimmer-sweep: color-mix(in srgb, var(--color-yellow-aimo-soft) 90%, transparent);
     background-color: var(--shimmer-base);
     background-image: linear-gradient(
       90deg,

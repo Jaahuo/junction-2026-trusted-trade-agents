@@ -35,11 +35,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     base,
     cardStyles,
     css`
-      /* An Aimo shimmer moves across the placeholders: a light purple sweep over a petrol tint,
-         and a lime sweep in the petrol header. */
+      /* A slow, soft shimmer moves across the placeholders: the same white sweep everywhere,
+         over a light petrol tint in the body and a translucent white in the header. */
       .skeleton {
-        --shimmer-base: color-mix(in srgb, var(--color-bg-brand) 10%, var(--color-white));
-        --shimmer-sweep: var(--color-light-purple-aimo);
+        --shimmer-base: var(--color-bg-brand-subtle);
+        --shimmer-sweep: color-mix(in srgb, var(--color-white) 85%, transparent);
         display: block;
         height: 14px;
         border-radius: 0;
@@ -47,7 +47,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
           linear-gradient(90deg, transparent 0%, var(--shimmer-sweep) 50%, transparent 100%) 0 0 /
             200% 100% no-repeat,
           var(--shimmer-base);
-        animation: shimmer 1.4s ease-in-out infinite;
+        animation: shimmer 2.4s ease-in-out infinite;
       }
       @keyframes shimmer {
         from {
@@ -72,8 +72,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         gap: var(--spacing-xs);
       }
       .header .skeleton {
-        --shimmer-base: color-mix(in srgb, var(--color-text-on-brand) 20%, transparent);
-        --shimmer-sweep: color-mix(in srgb, var(--color-button) 55%, transparent);
+        --shimmer-base: color-mix(in srgb, var(--color-text-on-brand) 18%, transparent);
+        --shimmer-sweep: color-mix(in srgb, var(--color-text-on-brand) 30%, transparent);
         height: 18px;
       }
       .w-60 {

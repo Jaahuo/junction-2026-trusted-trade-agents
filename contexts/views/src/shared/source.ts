@@ -1,6 +1,13 @@
 import { VIEWS } from "@app/contract";
 import { App } from "@modelcontextprotocol/ext-apps";
-import { fixtureSource, hostSource, plainSource, type Source, type ViewName } from "./bridge.ts";
+import {
+  fixtureSource,
+  hostSource,
+  plainSource,
+  resultData,
+  type Source,
+  type ViewName,
+} from "./bridge.ts";
 import { resolveLang, setLang } from "./locale.ts";
 
 export type { Source } from "./bridge.ts";
@@ -42,7 +49,7 @@ function bridgeSource(view: ViewName): Source {
   // The tool-result handler is set before connecting, so no result is missed.
   const source = hostSource({
     onToolResult: (listener) => {
-      app.ontoolresult = (params) => listener(params.structuredContent);
+      app.ontoolresult = (params) => listener(resultData(params));
     },
     onToolInput: (listener) => {
       app.ontoolinput = (params) => {
@@ -57,7 +64,7 @@ function bridgeSource(view: ViewName): Source {
       const text = result.content.find((item) => item.type === "text")?.text;
       return {
         isError: result.isError === true,
-        structuredContent: result.structuredContent,
+        structuredContent: resultData(result),
         ...(text === undefined ? {} : { text }),
       };
     },

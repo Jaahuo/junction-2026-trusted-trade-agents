@@ -792,7 +792,7 @@ export interface DemoProducts {
 }
 ```
 
-- `DEMO_ACCOUNT`: `{ accountId: "acct_demo", label: "Demo kitchen (invoice)", customer: "cust_invoice_01", agentId: "agent_demo", paymentTerms: "invoice", creditLimit: 5000 }`.
+- `DEMO_ACCOUNT`: `{ accountId: "acct_demo", label: "Demo kitchen (invoice)", customer: "cust_invoice_01", agentId: "agent_demo", paymentTerms: "invoice", creditLimit: null }`.
 - Later (SPEC-002): `acct_pay` (customer `cust_pay_01`, agent `agent_pay`, pay-on-order, creditLimit null).
 - Mandate: maxOrderTotal 1000 EUR gross; categories null; substitutions ask; newProducts ask; reliability 0.9 with ifNoData auto; CO2 3.0 with ifNoData auto; allergenData ifNoData ask; payment terms invoice auto, pay_on_order ask; standing soft constraint countryOfOrigin fi. Demo users may change every value.
 - Demo products: the tracked file `data/demo-products.json`, parsed with `DemoProductsSchema`. It holds product ids, quantities, observation time and scenario status only, as the one allowed exception to the dataset rule in [team rules](team-rules.md) R-23. Seeds and scripts read it; when it is absent, seeds add no history and log one warning.

@@ -67,7 +67,7 @@ The server publishes the offer signing key set at `/.well-known/jwks.json`.
 
 ## Known limits of the first build
 
-- **No authentication in the first build.** There is one demo account, the invoice customer with a credit limit and one agent, and every REST and MCP request acts as it. Accounts, a second pay-on-order account and the MCP authorize step (OAuth, as MCP specifies) are planned; see [SPEC-002 "Later"](docs/specs.md#later-accounts-and-authorization).
+- **No authentication in the first build.** There is one demo account, the invoice customer without a credit check and one agent, and every REST and MCP request acts as it. Accounts, a second pay-on-order account and the MCP authorize step (OAuth, as MCP specifies) are planned; see [SPEC-002 "Later"](docs/specs.md#later-accounts-and-authorization).
 - **Anyone with the demo URL can open the approval page** (`/approvals/<orderId>`) and call every REST route, including the approval decision.
 - **The model sees no decision tool.** The decision, mandate registration and revoke tools are view-only: the MCP server marks them with app-only visibility (`MCP_VIEW_TOOLS=off` removes them), so a host hides them from the model and the agent cannot approve its own order. A human decides on the approval card or the approval page. A direct REST or MCP client can still call the decision until accounts arrive.
 - **The wholesaler uses the buyer's limits only to enforce them.** It returns them only to the buyer's own account.

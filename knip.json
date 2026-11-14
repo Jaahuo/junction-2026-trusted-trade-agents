@@ -60,7 +60,7 @@
       ]
     },
     "packages/contract": {
-      "ignoreDependencies": ["jose"]
+      "ignoreDependencies": ["@app/server-kit", "jose"]
     },
     "contexts/*": {
       "ignoreDependencies": ["react"]

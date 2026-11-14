@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Invented offer token fixture, not a credential"
+condition = "AND"
+paths = ['''^packages/contract/src/fixtures\.ts$''']
+regexTarget = "secret"
+regexes = ['''^eyJhbGciOiJFUzI1NiJ9\.test-offer\.signature$''']

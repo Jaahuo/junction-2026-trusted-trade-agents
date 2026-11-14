@@ -4,10 +4,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./server": "./src/server/index.ts"
+    "./server": {
+      "browser": "./src/server/browser-build-forbidden.ts",
+      "default": "./src/server/index.ts"
+    }
   },
   "dependencies": {
     "@app/kernel": "workspace:*",
+    "@app/server-kit": "workspace:*",
     "jose": "catalog:",
     "zod": "catalog:"
   }

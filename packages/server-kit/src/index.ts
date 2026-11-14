@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { type BunSQLDatabase, drizzle } from "drizzle-orm/bun-sql";
 import { migrate } from "drizzle-orm/bun-sql/migrator";
-import { type AnyElysia, Elysia, ParseError, ValidationError } from "elysia";
+import { type AnyElysia, Elysia, ParseError, status, ValidationError } from "elysia";
 
 export type Db = BunSQLDatabase & { $client: SQL };
 export interface ContextModule {
@@ -48,13 +48,12 @@ const issueMessage = (issue: unknown): string | undefined => {
 
 /** Maps request validation and parse failures of a context's routes to `400 BAD_REQUEST` in the contract's error envelope. */
 export const badRequestEnvelope = () =>
-  new Elysia().onError("plugin", ({ error, set }) => {
+  new Elysia().onError("plugin", ({ error }) => {
     const invalidRequest = error instanceof ValidationError && error.status === 422;
     if (!invalidRequest && !(error instanceof ParseError)) return undefined;
-    set.status = 400;
     const issues: unknown[] = invalidRequest ? error.all : [];
     const message = issueMessage(issues[0]) ?? "The request body is not valid JSON.";
-    return { error: { code: "BAD_REQUEST" as const, message } };
+    return status(400, { error: { code: "BAD_REQUEST" as const, message } });
   });
 
 /** The body of a stub route until its context issue replaces it. */

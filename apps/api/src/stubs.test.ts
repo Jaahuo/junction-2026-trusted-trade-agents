@@ -109,6 +109,17 @@ test("a typed Eden client from offers calls the orders precheck stub and gets th
   expect(envelope.error.code).toBe("NOT_IMPLEMENTED");
 });
 
+test("a typed Eden client handles the actual 400 validation envelope", async () => {
+  const orders = treaty<OrdersApi>("http://localhost/api", {
+    parseDate: false,
+    fetcher: inProcessFetch,
+  });
+  const { error } = await orders.orders.precheck.post({ offers: [] });
+  if (error?.status !== 400) throw new Error(`expected 400, got ${String(error?.status)}`);
+  const envelope: ErrorEnvelope = error.value;
+  expect(envelope.error.code).toBe("BAD_REQUEST");
+});
+
 test("an Eden client with parseDate false returns deliverBy, deliveryDate and createdAt of a fixture as the same strings", async () => {
   const echo = new Elysia().post("/echo", ({ body }) => body);
   const client = treaty<typeof echo>("http://localhost", {

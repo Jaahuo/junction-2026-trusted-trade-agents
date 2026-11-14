@@ -1,149 +1,128 @@
-# junction-2026-trusted-trade-agents
+# Trusted Trade Agents
 
-> **Unprotected main:** GitHub does not enforce pull requests, CI checks, or an up-to-date base; there is no atomic base guarantee. Coordinate merges manually and enable server-side protection when eligible.
+An open ordering service that a wholesaler hosts for the buyer's AI agent.
+The agent searches the catalogue, gets signed offers and places orders.
+The buyer's mandate sets the limits, the wholesaler's server checks them on every order, and a person decides every exception.
 
-Trusted Trade Agents is an open ordering contract between a buyer's AI agent and a wholesaler.
-The agent searches the catalogue, receives signed offers and places orders.
-The buyer's mandate sets the limits, and the wholesaler's server enforces them on every order.
-A human decides every exception.
+Built for the Valio Aimo challenge at Junction 2026 ([challenge brief](docs/challenge.md)).
 
-## Find the contract
+## Try it
 
-Every wholesaler publishes one discovery file on its own domain.
-Start there; it links everything else.
+| What                    | Where                                                                    |
+| ----------------------- | ------------------------------------------------------------------------ |
+| Wholesaler service      | [199-247-4-99.sslip.io](https://199-247-4-99.sslip.io)                   |
+| Buyer chat (Open WebUI) | [chat.199-247-4-99.sslip.io](https://chat.199-247-4-99.sslip.io)         |
+| Approvals               | [/approvals](https://199-247-4-99.sslip.io/approvals)                    |
+| Wholesaler activity     | [/activity](https://199-247-4-99.sslip.io/activity)                      |
+| MCP endpoint            | `https://199-247-4-99.sslip.io/mcp` (streamable HTTP, no authentication) |
 
-The hosted demo base URL is [https://199-247-4-99.sslip.io](https://199-247-4-99.sslip.io).
-The discovery document is a project-specific format, not a UCP profile ([implementation](contexts/discovery/src/api/well-known.ts)).
+In the chat, sign in as `chef@localhost.invalid` (ask the team for the password) and select Acme Kitchens or Acme Bakery.
+Then ask for an order, for example "1,000 litres of lactose-free milk by Monday".
+Any other MCP client can connect to the MCP endpoint.
 
-| What                    | URL (relative to the public base URL)     |
-| ----------------------- | ----------------------------------------- |
-| Discovery document      | `/.well-known/trusted-trade.json`         |
-| OpenAPI 3.1 (REST)      | `/api/discovery/openapi.json`             |
-| MCP endpoint            | `/mcp` (streamable HTTP)                  |
-| Offer signing keys      | `/.well-known/jwks.json`                  |
-| Agent skill (plain web) | `/skills/trusted-trade-ordering/SKILL.md` |
+## How it works
 
-```sh
-BASE_URL=https://your-demo-host.example
-curl -s "$BASE_URL/.well-known/trusted-trade.json" | jq '{endpoint, mcp, jwksUri, openapi, skill, authorization}'
-curl -s "$BASE_URL/api/discovery/openapi.json" | jq '.paths | keys'
+```mermaid
+flowchart LR
+  A["Buyer's agent<br/>(any MCP chat)"] --> B["MCP + REST<br/>one schema"]
+  B --> C["Rule engine<br/>buyer's mandate"]
+  C --> D["Signed offer"]
+  D -->|rule asks for a human| E["Approval card"]
+  D -->|within limits| F["Signed receipt"]
+  E --> F
 ```
 
-The discovery document lists the endpoint, the MCP URL, the signing key set, the OpenAPI URL, the skill URL, the fixed guardrails, the payment terms, the reason codes, the model tools, the view-only tools and the views.
-`authorization` is `null` because the first build has no authentication.
-The OpenAPI document covers every `/api` route; its paths are relative to the public base URL, and the schemas are generated from the same contract schemas that the MCP tools use.
-[SPEC-014](docs/specs.md#spec-014-discovery-and-openapi) defines both documents.
+- **The server checks the rules.** The buyer's limits are an AP2-style mandate. Thirteen reason codes send an order to a person, for example spend limit, substitute or unconfirmed allergen, and eight reject it. The decision tools are visible only to the approval card, so the agent cannot approve its own order.
+- **Signed offers and receipts.** Each offer is an ES256 JWS with an ID and an expiry, and it works once. Each order gets a signed receipt over a SHA-256 hash-chained audit log.
+- **The person fixes the order.** On the approval card, the approver changes an amount, picks another product or reduces an over-limit order to fit. The server gets new offers and checks every rule again.
+- **The agent earns trust.** After three approvals of the same substitute, the card offers to let the agent use it without asking. "Don't suggest again" blocks it. These rules go into the buyer's mandate, and only the buyer can change them.
+- **Views in the chat.** Search results, offer comparison, agent limits, order timeline and approval card are MCP App views. Valio Aimo controls how they look in every host. They are in English and Finnish.
 
-## Standards
+[Implementation and partner technologies](docs/implementation.md) describes the design in more detail.
+[Specs](docs/specs.md) is the contract, and the [PRD](docs/prd.md) is the product scope.
 
-| Implemented                                                                                                                                                                    | Mapped in docs                                                                          | Next step                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Offer [ES256 JWS signing and JWKS](contexts/offers/src/infra/offer-signer.ts); [public key endpoint](contexts/offers/src/api/routes.ts)                                        | —                                                                                       | Independent public-URL verification script ([#69](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/69)).                         |
-| [OpenAPI 3.1 and JSON Schema](contexts/discovery/src/api/openapi.ts); [MCP tool JSON Schema](contexts/mcp/src/api/mcp-server.ts)                                               | —                                                                                       | —                                                                                                                                                   |
-| [MCP and MCP Apps resources and tools](contexts/mcp/src/api/mcp-server.ts)                                                                                                     | —                                                                                       | Measure the full approval flow in the chosen host ([#19](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19)).                  |
-| [Nullable GTIN on search candidates](contexts/catalog/src/infra/projection.ts); [unit codes including UN/CEFACT codes where supplied](contexts/catalog/src/domain/quantity.ts) | —                                                                                       | Data does not always provide a GTIN or a usable unit conversion.                                                                                    |
-| [AP2-style signed mandate](contexts/mandates/src/infra/buyer-key.ts), with server-simulated buyer custody                                                                      | —                                                                                       | Buyer-side key custody and mandate signature verification on use ([#123](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/123)). |
-| [Internal order statuses only](contexts/orders/src/infra/schema.ts)                                                                                                            | [Peppol/UBL status mapping](docs/specs.md#peppolubl-status-mapping), documentation only | Implement an interoperable exchange if needed; no Peppol or UBL exchange is implemented.                                                            |
+## Open contract
 
-## Verify an offer
+Every wholesaler publishes one discovery file on its own domain. It links everything else.
 
-Each offer line from `get_offers` carries `token`, a compact JWS signed with ES256 and the header `typ: offer+jwt`.
-Anyone can check it against the wholesaler's public key set:
+| What               | Path                                      |
+| ------------------ | ----------------------------------------- |
+| Discovery document | `/.well-known/trusted-trade.json`         |
+| OpenAPI 3.1 (REST) | `/api/discovery/openapi.json`             |
+| MCP endpoint       | `/mcp`                                    |
+| Offer signing keys | `/.well-known/jwks.json`                  |
+| Agent skill        | `/skills/trusted-trade-ordering/SKILL.md` |
 
 ```sh
-curl -s "$BASE_URL/.well-known/jwks.json" | jq '.keys[0] | {kty, crv, alg, kid}'
+BASE_URL=https://199-247-4-99.sslip.io
+curl -s "$BASE_URL/.well-known/trusted-trade.json" | jq '{endpoint, mcp, jwksUri, openapi, skill}'
+```
 
-npm install jose
-TOKEN='<token from an offer line>' BASE_URL="$BASE_URL" node --input-type=module -e '
-import { createRemoteJWKSet, jwtVerify } from "jose";
-const jwks = createRemoteJWKSet(new URL(`${process.env.BASE_URL}/.well-known/jwks.json`));
-const { payload, protectedHeader } = await jwtVerify(process.env.TOKEN, jwks, { algorithms: ["ES256"], typ: "offer+jwt" });
-console.log(protectedHeader.kid, payload.offerId, payload.total);
-'
+The REST and MCP schemas come from the same contract ([SPEC-014](docs/specs.md#spec-014-discovery-and-openapi)).
+
+To verify an offer, take the `token` of an offer line from `get_offers`.
+The script reads only the public discovery file and key set:
+
+```sh
+bun scripts/verify-offer.ts "$BASE_URL" '<token>'
 ```
 
 A changed claim, another key or an expired offer fails the check.
-The server publishes the offer signing key set at `/.well-known/jwks.json`.
 
-## Known limits of the first build
+## Partner technologies
 
-- **No authentication in the first build.** There is one demo account, the invoice customer without a credit check and one agent, and every REST and MCP request acts as it. Accounts, a second pay-on-order account and the MCP authorize step (OAuth, as MCP specifies) are planned; see [SPEC-002 "Later"](docs/specs.md#later-accounts-and-authorization).
-- **Anyone with the demo URL can open the approval page** (`/approvals/<orderId>`) and call every REST route, including the approval decision.
-- **The wholesaler activity view** is at `/activity`. This role split is by route only, not authentication; the approval page remains the approver view.
-- **The model sees no decision tool.** The decision, mandate registration and revoke tools are view-only: the MCP server marks them with app-only visibility (`MCP_VIEW_TOOLS=off` removes them), so a host hides them from the model and the agent cannot approve its own order. A human decides on the approval card or the approval page. A direct REST or MCP client can still call the decision until accounts arrive.
-- **The wholesaler uses the buyer's limits only to enforce them.** It returns them only to the buyer's own account.
-- **Key custody is simulated.** The server signs the AP2-style mandate with a demo buyer key on the buyer's behalf. The order service [reads the mandate without verifying its signature](contexts/orders/src/infra/mandate-client.ts); signature verification on use is open in [#123](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/123).
-- **The mock ignores the customer number.** Customer-specific limits, credit and payment terms are simulated in our layer.
-- **A sales block after quoting holds until the offer expires.** An offer stays valid until it expires even if the product is blocked after quoting; validation at placement arrives with [#30](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/30).
-- **Offer totals leave deposits out.** The wholesaler's price API gives no deposit amount, and the product data names deposit materials without a price, so every offer says `depositsIncluded: false` and the spend limit is checked on a total without deposits; mentor question in [#76](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/76).
-- **Count sales units are whole units.** Search rounds cases, pieces and packs up to whole sales units and preserves lot multiples. The dataset's fractional `allowedLotSize` values do not establish that customers may split a case; mentor confirmation is pending ([#76](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/76)).
+| Partner         | Use                                                                |
+| --------------- | ------------------------------------------------------------------ |
+| NVIDIA Nemotron | `nemotron-3.5-super-vl` on Verda is the buyer's agent in the chat. |
+| OpenAI Codex    | Codex agents planned, built and reviewed most of the code.         |
+| Vultr           | Hosts the service, the chat and the CI runners.                    |
+| Tiger Data      | Managed PostgreSQL for the live demo.                              |
+| ElevenLabs      | Speech output for the voice chat.                                  |
 
-## Demo host
+Details and evidence: [implementation and partner technologies](docs/implementation.md#partner-technologies).
 
-Open [the hosted chat](https://chat.199-247-4-99.sslip.io) and sign in as `chef@localhost.invalid`.
-Ask the operator for the password. Select Acme Kitchens or Acme Bakery.
-The Chef account is a restricted buyer, not an administrator.
-See [Open WebUI setup](docs/openwebui.md) for account provisioning.
+## Limits of the demo
 
-The owner chose Open WebUI with voice for the demo, with human approval on the in-chat card and the phone approval page as fallback ([#44](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44)).
-In a historical Open WebUI 0.13.3 spike, voice called `search_products` and the search view rendered. The approval link was not tested in that run.
-These results do not establish support in other hosts or for the complete current approval flow. See [host support](docs/host-support.md) for measured results and limits.
+- **No authentication.** One demo account, one agent. Anyone with the URL can call every route, including approval decisions. The view-only tool visibility hides decision tools from the model; it is not an access boundary.
+- **Simulated key custody.** The server signs the AP2-style mandate with a demo buyer key. Orders [read the mandate without verifying its signature](contexts/orders/src/infra/mandate-client.ts). This is an AP2-style mandate, not a claim of AP2 conformance.
+- **Mock wholesaler.** Prices and availability come from the challenge's mock API. Customer-specific limits, credit and payment terms are simulated in our layer.
+- **Offer totals leave deposits out.** The price API gives no deposit amount, so every offer says `depositsIncluded: false`.
+- **Peppol/UBL is a mapping only.** The order statuses have a [documented mapping](docs/specs.md#peppolubl-status-mapping); no Peppol exchange exists.
+- **Challenge data.** The dataset is illustrative and not fully accurate. Do not use it outside the challenge.
 
-## Assumptions
+## Run locally
 
-- The demo uses one unauthenticated account. It is not a production access boundary.
-- The wholesaler enforces the buyer's mandate and can see its limits. Buyer key custody is simulated.
-- The challenge dataset is illustrative. Product identifiers and conversions can be missing, and fractional case splitting needs mentor confirmation.
-- The reference Notes screen is currently included by the [web shell](apps/web/src/main.tsx). Removing it and its seed from the production build is tracked in [#134](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/134); the reference context remains.
+Install mise, Docker with Compose, Git and the GitHub CLI.
 
-## Next steps
+```sh
+mise install
+bun install --frozen-lockfile
+bun run setup
+bun run dev
+```
 
-- Authenticate approvers separately, for example with a passkey or OpenID CIBA. Add accounts, pay-on-order and MCP OAuth ([#34](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/34)).
-- Verify mandate signatures on use and move buyer key custody to the buyer ([#123](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/123)).
-- Add offer validation and re-quote, remaining decisions and placement checks ([#29](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/29), [#30](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/30)).
-- Complete the offer comparison and mandate settings views ([#22](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/22), [#31](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/31)), and approval edits and alternatives ([#124](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/124)).
-- Prove portability with a second adapter ([#33](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/33)). Add a rolling budget across orders if time remains ([#75](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/75)).
-- Add the first Valio Aimo skin as a wholesaler theme when [#73](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/73) is complete.
-- Harden offers: add comparison prices and deposits, identify unconfirmed stock, and refresh availability ([#120](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/120)).
-- Consider the proposed trust chain: verify signatures in views ([#68](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/68)), and add signed receipts and a hash-chained audit record ([#70](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/70)).
-- Consider agent rationale on order lines ([#72](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/72)).
-- Demonstrate only attacks the first build stops; measure the host flow and rogue-agent scenarios ([#19](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19)).
+`bun run setup` creates this worktree's local PostgreSQL.
+Keep secrets in the ignored `.env`; `.env.example` lists the names.
+The challenge catalogue is private: import it with the [catalogue import procedure](docs/catalogue-import.md). Builds and tests use fictional fixtures.
 
-## Setup
+| Command              | Use                                    |
+| -------------------- | -------------------------------------- |
+| `bun run dev`        | Run the API and the web app.           |
+| `bun run production` | Build and serve the production demo.   |
+| `bun run db:reset`   | Reset the database and load demo data. |
+| `bun run gate`       | Run the integrated checks.             |
 
-Install mise, Docker with Compose, Git and GitHub CLI. Run `mise install`, then `bun install --frozen-lockfile` and `bun run setup` to initialize this worktree's local PostgreSQL runtime. Keep secrets in ignored `.env`; see `.env.example` and [runtime guidance](docs/runtime.md).
+## Documentation
 
-## Product requirements
+| Document                                                  | Content                                      |
+| --------------------------------------------------------- | -------------------------------------------- |
+| [Implementation](docs/implementation.md)                  | What we built and the partner technologies   |
+| [Specs](docs/specs.md)                                    | Contract: routes, tools, rules, reason codes |
+| [PRD](docs/prd.md)                                        | Product scope and acceptance criteria        |
+| [Demo runbook](docs/demo-runbook.md)                      | Run and check the demo scenarios             |
+| [Deploy](docs/deploy.md)                                  | Vultr and Tiger Data with OpenTofu           |
+| [Open WebUI](docs/openwebui.md)                           | The buyer chat workspace                     |
+| [Host support](docs/host-support.md)                      | MCP Apps hosts and measured results          |
+| [Workflow](docs/workflow.md) and [agent rules](AGENTS.md) | How the team and its agents work             |
 
-The [living PRD](docs/prd.md) owns product scope, behavior, acceptance criteria and open questions. Its [change rules](docs/prd.md#document-boundaries-and-change-rules) keep requirements and implementation consistent. Add consolidated specs and ADRs only when needed; do not create a document per change.
-
-## Data
-
-- The challenge dataset is inspired by the real world but is not fully accurate. Do not use it outside the challenge.
-- Delivery reliability is the historical ratio of delivered quantity to ordered quantity, from 0 to 1. It is not present for every product.
-- The CO2 value is an average per kilogram for the product group. It is not a measurement of the product.
-
-## Challenge data
-
-Read the [challenge brief](docs/challenge.md) for requirements, scope and judging criteria. It replaces the original PDF.
-
-Use the supplied [OpenAPI specification](docs/open_api.json) for mock API endpoints, request/response schemas and `X-API-Key` authentication. Use the [resource portal](https://junction26.valioaimo.fi/) for access instructions and updates. Keep credentials in ignored `.env`, not in documentation.
-
-The API specification is `docs/open_api.json`. Keep the supplied product JSON, schema and enrichment CSVs in a private directory outside Git.
-Import them once into PostgreSQL with the [catalogue import procedure](docs/catalogue-import.md).
-Runtime search, facts and demo tools read PostgreSQL. They do not read or synchronize source files.
-Builds and CI use fictional fixtures and do not need the challenge dataset.
-
-Narrow the product selection before querying dynamic prices and availability. Do not repeatedly query the full catalogue.
-The template's MIT license and attribution remain unchanged. This project does not assign that license to the challenge resources.
-
-## Commands
-
-- `bun run dev`: start the app.
-- `bun run production`: build and serve the production demo.
-- `bun run gate`: run integrated checks.
-- `bun run task`: manage assigned issues; see [workflow](docs/workflow.md).
-- `bun run ship`: open or merge a PR following the workflow.
-- `bun run runtime:status`: inspect the worktree runtime.
-
-See [agent rules](AGENTS.md), [writing skills](docs/agent-skills.md), [design](DESIGN.md), [sponsor guidance](docs/sponsors.md) and [license](LICENSE).
+[MIT license](LICENSE). The license does not cover the challenge resources.

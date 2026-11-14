@@ -2,12 +2,120 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { processesInWorktree, stopWorktreeProcesses } from "./worktree-cleanup.ts";
+import {
+  linuxProcessesInWorktree,
+  processesInWorktree,
+  stopWorktreeProcesses,
+} from "./worktree-cleanup.ts";
 
 const spawn = (cwd: string, script: string) =>
   Bun.spawn([process.execPath, "-e", script], { cwd, stdout: "pipe", stderr: "pipe" });
 
 describe("worktree process cleanup", () => {
+  test("discovers Linux cwd without scanning unrelated Docker mounts and fails closed", () => {
+    const missing = Object.assign(new Error("missing"), { code: "ENOENT" });
+    const denied = Object.assign(new Error("denied"), { code: "EACCES" });
+    const uid = process.geteuid?.();
+    if (uid === undefined) throw new Error("Cannot determine effective user ID");
+    const foreignUid = uid === 0 ? 1 : 0;
+    const statuses = new Map<string, string | Error>();
+    let foreignCwdReads = 0;
+    let selfPid = String(process.pid);
+    let processNamespace: string | Error = "mnt:[1]";
+    let foreignNamespaceReads = 0;
+    const cwd = new Map<string, string | Error>([
+      ["11", "/tmp/task"],
+      ["12", "/tmp/task/nested"],
+      ["13", "/tmp/task-other"],
+      ["14", missing],
+      ["15", missing],
+      ["16", missing],
+      ["17", denied],
+    ]);
+    const stats = new Map([
+      ["14", "14 (zombie) Z 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 1"],
+      ["15", "15 (kernel thread) S 1 1 1 0 0 2097152 0 0 0 0 0 0 0 0 0 0 1"],
+    ]);
+    let mountinfo = [
+      "1 0 0:1 / /proc rw - proc proc rw",
+      "2 1 0:2 / /var/lib/docker/rootfs/overlayfs/example rw - overlay overlay rw",
+      "3 1 0:3 / /run/docker/netns/example rw - nsfs nsfs rw",
+    ].join("\n");
+    const proc = {
+      readdir: (path: string) => {
+        expect(path).toBe("/proc");
+        return [...cwd.keys(), "self"];
+      },
+      readlink: (path: string) => {
+        if (path === "/proc/self") return selfPid;
+        if (path === "/proc/self/ns/mnt") return "mnt:[1]";
+        if (path.endsWith("/ns/mnt")) {
+          if (path === "/proc/17/ns/mnt") foreignNamespaceReads++;
+          if (processNamespace instanceof Error) throw processNamespace;
+          return processNamespace;
+        }
+        if (path === "/proc/17/cwd") foreignCwdReads++;
+        const pid = path.split("/")[2];
+        if (pid === undefined) throw missing;
+        const value = cwd.get(pid);
+        if (value instanceof Error) throw value;
+        if (value === undefined) throw missing;
+        return value;
+      },
+      readFile: (path: string) => {
+        if (path === "/proc/self/mountinfo") return mountinfo;
+        const pid = path.split("/")[2];
+        if (pid === undefined) throw missing;
+        if (path.endsWith("/status")) {
+          const value = statuses.get(pid);
+          if (value instanceof Error) throw value;
+          return value ?? `Uid:\t${uid}\t${pid === "17" ? foreignUid : uid}\t${uid}\t${uid}\n`;
+        }
+        const value = stats.get(pid);
+        if (value === undefined) throw missing;
+        return value;
+      },
+    };
+    expect(linuxProcessesInWorktree("/tmp/task", proc)).toEqual([11, 12]);
+    expect(foreignCwdReads).toBe(0);
+    expect(foreignNamespaceReads).toBe(0);
+    selfPid = "999999999";
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("PID namespace");
+    selfPid = String(process.pid);
+    processNamespace = "mnt:[2]";
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("different mount namespace");
+    processNamespace = denied;
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("denied");
+    processNamespace = missing;
+    stats.set("11", "present");
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("mount namespace");
+    stats.delete("11");
+    processNamespace = "mnt:[1]";
+    statuses.set("11", denied);
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("denied");
+    statuses.set("11", "Uid:\tinvalid\n");
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("Cannot determine ownership");
+    statuses.set("11", missing);
+    stats.set("11", "present");
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("Cannot determine ownership");
+    stats.delete("11");
+    expect(linuxProcessesInWorktree("/tmp/task", proc)).toEqual([12]);
+    statuses.delete("11");
+    cwd.set("16", denied);
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("denied");
+    cwd.set("16", missing);
+    stats.set("16", "16 (running) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1");
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("Cannot determine cwd");
+    stats.set("16", "16 (exited leader) Z 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 2");
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("Cannot determine cwd");
+    stats.delete("16");
+    cwd.set("16", "/tmp/task (deleted)");
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("Cannot determine cwd");
+    cwd.delete("16");
+    mountinfo = "1 0 0:1 / /proc rw - proc proc rw,hidepid=2\n";
+    expect(() => linuxProcessesInWorktree("/tmp/task", proc)).toThrow("complete /proc visibility");
+  });
+
   test("selects only numeric PIDs with cwd inside the directory boundary", () => {
     const output = [
       "p11\0\nfcwd\0tDIR\0n/tmp/task with spaces\0\n",

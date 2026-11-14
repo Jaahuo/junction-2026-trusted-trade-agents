@@ -6,7 +6,7 @@ This PRD is the single source of product requirements. It describes intended beh
 
 References: [challenge brief](challenge.md), [supplied mock API specification](open_api.json) and [datasets](../README.md#challenge-data). The supplied mock API is not the product's planned REST contract.
 
-We build an open ordering contract that lets any buyer's agent search, receive a signed offer and place an order with a wholesaler. The buyer signs the limits, and the wholesaler's server enforces them on every order. Valio Aimo's mock backend is the first implementation.
+We build an open ordering contract that lets any buyer's agent search, receive a signed offer and place an order with a wholesaler. The demo server signs the buyer's limits with a simulated buyer key and enforces them on every order. Valio Aimo's mock backend is the first implementation.
 
 ## Problem and goal
 
@@ -69,19 +69,19 @@ One service sits in front of a wholesaler's existing systems and adds the order 
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | Interface                   | REST API with an MCP server on top                                                                                                                              | Decided  |
 | MCP extensions              | Apps for user-facing views, Skills so any agent can run the flow                                                                                                | Decided  |
-| Demo host                   | An MCP host with MCP Apps, reached through a public tunnel. First test host: ChatGPT; switch when its spike fails. A custom agent UI comes later.               | Decided  |
+| Demo host                   | Open WebUI with voice is the main demo host. Approval uses the in-chat card; the approval page on a phone is the fallback (#44). A custom agent UI comes later. | Decided  |
 | Search input                | Structured fields only. The host agent turns the sentence into fields.                                                                                          | Decided  |
-| Mandate                     | AP2-style, signed by the buyer, registered with and stored on the wholesaler's server                                                                           | Decided  |
+| Mandate                     | AP2-style, registered and stored on the wholesaler's server. The demo simulates buyer signing with a server-held key; buyer-side custody comes next.            | Decided  |
 | Signing                     | Real signed JWTs                                                                                                                                                | Decided  |
 | Authentication              | None in the first build: one demo account, the invoice customer. A second account, an account picker and the MCP authorization step come later.                 | Decided  |
 | Missing product data        | Goes to approval. Users may opt to auto-approve for reliability, CO2 and allergen data.                                                                         | Decided  |
 | Offer expires while pending | Auto re-quote. Ask again on a price rise, an availability change or a rule break.                                                                               | Decided  |
 | Second wholesaler adapter   | Only if time remains                                                                                                                                            | Decided  |
-| Mandate build order         | Plain stored JSON first, signature wrapper second                                                                                                               | Decided  |
+| Mandate build order         | The demo registers JSON and signs it on the server; buyer-side signing and key custody come next.                                                               | Decided  |
 | Allergen data               | Missing allergen data goes to approval unless the mandate sets allergen data to auto.                                                                           | Decided  |
 | Naming                      | Nothing in the spec or tool names mentions Valio or Aimo. Only the adapter does.                                                                                | Decided  |
 | Demo exception              | Partial stock and substitution chained in one request, on real mock data. If no product fits, the missed cut-off clip replaces it.                              | Decided  |
-| Public URL                  | Quick tunnel first; hosted deploy is decided later                                                                                                              | Decided  |
+| Public URL                  | Hosted demo at https://199-247-4-99.sslip.io on Vultr and Tiger Data (#37, #84).                                                                                | Decided  |
 | Order store                 | Our own store; the mock has no order endpoint                                                                                                                   | Decided  |
 | Offer input                 | `place_order` takes the signed offer tokens                                                                                                                     | Decided  |
 | Reject                      | Two actions: reject and stop, reject and allow alternatives                                                                                                     | Decided  |
@@ -89,7 +89,6 @@ One service sits in front of a wholesaler's existing systems and adds the order 
 | Buyer limits                | The wholesaler uses them only for enforcement                                                                                                                   | Decided  |
 | Approval                    | Human only, on the approval card or the approval page; no decision tool is visible to the model                                                                 | Decided  |
 | Views                       | All five, in priority order: approval card, offer comparison, order timeline, search results, mandate settings                                                  | Decided  |
-| Demo hosts                  | Open WebUI is the main host (#44). Claude or ChatGPT shows the in-chat card on the same server. `curl` shows plain REST. Replaces "Demo host" once agreed.      | Proposed |
 | Hard constraints            | Every GS1 allergen code and free-from claim in the product data. `MAY_CONTAIN` counts as contradicted.                                                          | Proposed |
 | Agent rationale             | The agent may send a `purpose` and a `rationale` per line. The server stores them and shows them on the card and in the audit record. It never parses them.     | Proposed |
 | Trust chain                 | The views and an independent script verify offer signatures against the published keys. A placed order gets a signed receipt. The audit record is hash-chained. | Proposed |
@@ -105,11 +104,11 @@ A failed fixed guardrail rejects the order, a buyer limit set to ask sends it to
 
 Three roles exist. Through the MCP tools, the agent can never approve its own order; the full role boundary arrives with accounts. Every rule check runs on the wholesaler's server.
 
-| Role          | Who                                                                                                                                           | Can do                                                                        | Cannot do                                |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------- |
-| Buyer's agent | Any AI agent. The first build has no authentication: every request acts as the single demo account. An agent key arrives with accounts later. | Search, request offers, place orders, read order status, read its own mandate | Approve, edit the mandate                |
-| Approver      | A human at the buyer, such as a purchasing manager                                                                                            | Sign and register the mandate, approve, reject or edit pending orders         | Change the wholesaler's fixed guardrails |
-| Wholesaler    | The operator of the server                                                                                                                    | Set fixed guardrails, sign offers, read the audit record                      | Change the buyer's mandate               |
+| Role          | Who                                                                                                                                           | Can do                                                                                      | Cannot do                                |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Buyer's agent | Any AI agent. The first build has no authentication: every request acts as the single demo account. An agent key arrives with accounts later. | Search, request offers, place orders, read order status, read its own mandate               | Approve, edit the mandate                |
+| Approver      | A human at the buyer, such as a purchasing manager                                                                                            | Register the mandate, approve, reject or edit pending orders; buyer-side signing comes next | Change the wholesaler's fixed guardrails |
+| Wholesaler    | The operator of the server                                                                                                                    | Set fixed guardrails, sign offers, read the audit record                                    | Change the buyer's mandate               |
 
 **Demo access**
 
@@ -132,7 +131,7 @@ Nine tools cover the flow: six the model can call and three that only a view cal
 | `place_order`            | Agent             | One or more signed offer tokens, optional alternative offer tokens, optional original request text, idempotency key                                    | Order with status: placed, pending approval or rejected, plus reason codes                                       |
 | `get_order_status`       | Agent             | Order ID                                                                                                                                               | Current status and the audit record                                                                              |
 | `get_mandate`            | Agent             | None                                                                                                                                                   | The limits currently in force for this agent                                                                     |
-| `register_mandate`       | Approver          | The mandate as plain JSON in the first build; the signed form comes later                                                                              | Mandate ID. The previous mandate is revoked.                                                                     |
+| `register_mandate`       | Approver          | The mandate as JSON; the demo server signs it with the simulated buyer key                                                                             | Mandate ID. The previous mandate is revoked.                                                                     |
 | `revoke_mandate`         | Approver          | Mandate ID                                                                                                                                             | Confirmation                                                                                                     |
 | `list_pending_approvals` | Agent or approver | None                                                                                                                                                   | Orders waiting for a decision                                                                                    |
 | `decide_approval`        | Approver          | Order ID, proposal version and a decision: approve, reject and stop, reject and allow alternatives, edit, pick an alternative, or approve and remember | Updated order                                                                                                    |
@@ -211,7 +210,7 @@ The offer is the wholesaler's binding promise, issued as a signed JWT. Any agent
 
 ### Mandate
 
-The mandate is the buyer's signed permission for one agent, in the style of AP2. The approver signs it and registers it once, and the server stores the verified copy and uses it to guide and check the agent.
+The mandate is the buyer's permission for one agent, in the style of AP2. The approver registers it, and the demo server signs it with a server-held buyer key. The server uses the stored mandate to check the agent. It does not verify the mandate signature during order checks yet (#123).
 
 ```json
 {
@@ -239,8 +238,8 @@ The mandate is the buyer's signed permission for one agent, in the style of AP2.
 
 - Each limit resolves to `auto` (the agent may proceed) or `ask` (send to approval).
 - `ifNoData` is the user's choice for reliability, CO2 and allergen data.
-- Changing a limit means signing and registering a new mandate. Every order records the mandate ID it was checked against.
-- In the first build, `register_mandate` takes the mandate as plain JSON; the signed form comes later. Real key custody on the buyer's side is out of scope.
+- Changing a limit means registering a new mandate, which the demo server signs. Every order records the mandate ID it was checked against.
+- The first build takes mandate data as JSON and simulates buyer-key custody on the server. Buyer-side signing and key custody come next.
 - The wholesaler uses the stored limits only to enforce them, in no other form. Demo users can change every limit.
 
 ### Order
@@ -267,7 +266,7 @@ The mandate is the buyer's signed permission for one agent, in the style of AP2.
 }
 ```
 
-The order holds two signatures by reference: the wholesaler's offer and the buyer's mandate. The audit record is written by the server as each step runs.
+The order records the offer and mandate by reference. The demo server signs both, but does not verify the mandate signature during order checks yet (#123). The audit record is written by the server as each step runs.
 
 ## Rules and decisions
 
@@ -396,14 +395,14 @@ Approval happens in the chat when a human is present, and on a web page when the
 
 The card shows the original request, the proposed order lines, the rules that fired in plain words, and the alternatives.
 
-| Action                               | Effect                                                                 |
-| ------------------------------------ | ---------------------------------------------------------------------- |
-| Approve                              | The order is placed at the offer's terms, or moves to awaiting payment |
-| Reject and stop                      | The order is declined; the agent stops and tells the user              |
-| Reject, allow alternatives           | The order is declined; the agent may look for alternatives             |
-| Change quantity or delivery date     | A new signed offer is issued and every check runs again                |
-| Pick a different offered alternative | Same as above, on the chosen offer                                     |
-| Approve and remember                 | Pricing only: the approver signs a new mandate with the raised limit   |
+| Action                               | Effect                                                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Approve                              | The order is placed at the offer's terms, or moves to awaiting payment                              |
+| Reject and stop                      | The order is declined; the agent stops and tells the user                                           |
+| Reject, allow alternatives           | The order is declined; the agent may look for alternatives                                          |
+| Change quantity or delivery date     | A new signed offer is issued and every check runs again                                             |
+| Pick a different offered alternative | Same as above, on the chosen offer                                                                  |
+| Approve and remember                 | Pricing only: the approver registers a new mandate with the raised limit, signed by the demo server |
 
 An edit can never bypass a guardrail, because it always produces a new offer and a new check. Build approve and reject first.
 
@@ -449,7 +448,7 @@ The contract is vendor-neutral and each wholesaler hosts its own endpoint, with 
 
 - The contract is defined in JSON Schema and OpenAPI first. REST and MCP are two bindings of the same shapes.
 - Discovery is a file on the wholesaler's own domain, listing the endpoint, public signing keys, fixed guardrails and payment terms.
-- Products are identified by GTIN, producers by location number, and quantities by standard unit codes.
+- Products use the wholesaler's product ID; GTIN is included when available. Producer identifiers are not exposed. Quantities use standard unit codes where applicable.
 - The catalogue, customer prices and guardrail values stay on the wholesaler's server.
 - The mandate is AP2-style. We borrow the shape and do not claim AP2 compliance.
 
@@ -532,7 +531,7 @@ These points still need a team decision, a mentor answer or a check.
 - [x] After the approver rejects, does the agent stop or look for alternatives? Two actions: reject and stop, reject and allow alternatives.
 - [x] Does the quantity sanity cap force approval, as written here, or reject outright? Forced approval.
 - [x] Should large orders of unconfirmed-stock products need approval? Yes, `UNCONFIRMED_STOCK`.
-- [x] Which host runs the demo, Claude or ChatGPT? ChatGPT is the first test host. The build uses only standard MCP, Apps and Skills features; the host spike states when to switch.
+- [x] Which host runs the demo? Open WebUI with voice is the main host. Approval uses the in-chat card, with the approval page on a phone as fallback (#44).
 - [x] Is a README note enough for the fact that the wholesaler sees the buyer's limits? Yes. The wholesaler uses the limits only to enforce them.
 - [ ] The live mock had no short-stock or late product in the first search. Where does scenario 3 get its data: a wider live search (zero stock, or an order larger than the stock), the disclosed fixture mode `WHOLESALER_LIVE=fixture`, or no scenario 3?
 - [ ] Do the team agree to the Proposed rows in "Choices so far"?

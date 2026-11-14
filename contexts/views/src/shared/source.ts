@@ -39,18 +39,26 @@ function bridgeSource(view: ViewName): Source {
 }
 
 /**
- * The harness (`/views/harness`) injects a fixture; a top-level page of a view with
- * `plainLoad` is plain mode; anything else runs inside an MCP Apps host.
+ * The harness injects a fixture; embedded views use the host bridge. A top-level
+ * view loads its plain REST route when it has the required data.
  */
 export function sourceFor(view: ViewName): Source {
   const fixture = document.querySelector("#tt-harness")?.textContent;
   if (fixture) return fixtureSource(JSON.parse(fixture));
-  const plain = VIEWS.find((entry) => entry.view === view)?.plainLoad != null;
-  if (plain && window.parent === window)
-    return plainSource(view, {
+  if (window.parent === window) {
+    const entry = VIEWS.find((candidate) => candidate.view === view);
+    const query = new URLSearchParams(location.search);
+    const source = plainSource(view, {
       fetch: (url, init) => fetch(url, init),
       baseUrl: baseUrl(),
-      query: new URLSearchParams(location.search),
+      query,
     });
+    if (
+      entry?.plainLoad != null &&
+      (entry.plainQuery === null || query.get(entry.plainQuery)?.trim())
+    )
+      return source;
+    return Object.assign(source, { standaloneFallback: true });
+  }
   return bridgeSource(view);
 }

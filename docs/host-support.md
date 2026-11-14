@@ -133,6 +133,8 @@ Inside a host, the views call tools through the MCP Apps bridge and do not fetch
 
 ### Measured results
 
-#9 owns the result lines in this file (its acceptance 7 counts exactly five `<check>: yes|no` lines).
-When #9 runs in Open WebUI, those lines name Open WebUI and its image tag as the host.
-The voice spike #45 posts its results on #44.
+The [voice spike report](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44#issuecomment-6876603612) records a local run on November 14, 2026. It used Open WebUI 0.13.3, image `ghcr.io/open-webui/open-webui:main` built November 8, and server commit `be38e0b`. The no-auth MCP connection worked. A typed request and a simulated microphone recording called `search_products`; the search view rendered after a build. ElevenLabs read the reply. The approval link was not tested because offers were a stub.
+
+The [demo run report](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19#issuecomment-6878500793) records scenario 2 running end to end in Open WebUI with a local model on main commit `8f0c90d`. The approval card rendered in chat with Approve and Reject. The report does not establish that either in-card action was used. It does not record the image tag for that run.
+
+The actual in-card tool action, app-only tool visibility and token round trip remain unmeasured here. #9 remains open and owns the five formal result lines, including the exact host image tag. The [host decision](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44#issuecomment-6878199030) selects Open WebUI with voice and in-chat approval, with the phone approval page as fallback.

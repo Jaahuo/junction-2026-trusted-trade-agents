@@ -155,7 +155,7 @@ export const chatEnv = (outputs: Outputs, chat: Chat): Map<string, string> =>
     ["OPENAI_API_KEY", chat.inferenceKey],
     ["MCP_SERVER_URL", `${outputs.public_base_url}/mcp`],
     ["AGENT_MODEL_ID", CHAT_BASE_MODEL],
-    ["OPENWEBUI_MAX_TOKENS", "4096"],
+    ["OPENWEBUI_MAX_TOKENS", "16384"],
   ]);
 
 export const CHAT_SERVICE = `[Unit]

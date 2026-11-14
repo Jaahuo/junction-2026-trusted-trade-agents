@@ -10,7 +10,6 @@ import { css, html, nothing } from "lit";
 import {
   callAction,
   loadView,
-  plainPageUrl,
   type ViewData,
   type ViewEntryOf,
   viewEntry,
@@ -457,33 +456,23 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     </article>`;
   }
 
-  /**
-   * The row above the list: on the plain page a link back to the app, else kept empty. Inside
-   * the web app there is no row: the app's top bar is above it.
-   */
-  private appRow() {
-    return this.plain
-      ? html`<div class="top-row"><a class="back" href="/">${pick(VIEW).backToApp}</a></div>`
-      : html`<div class="top-row" aria-hidden="true"></div>`;
-  }
-
   private empty() {
     const text = pick(VIEW);
-    return html`${this.plain && !this.inApp ? this.appRow() : nothing}
-      <article class="card" part="empty">
-        ${brandHeader(text.brandApprovals(brand.name), html`<h2 class="title">${text.approvals}</h2>`)}
-        <div class="body center">
-          ${icon(checkCircle)}
-          <p class="headline">${text.noneWaiting}</p>
-          <p class="secondary">${text.newRequests}</p>
-        </div>
-      </article>`;
+    return html` <article class="card" part="empty">
+      ${brandHeader(text.brandApprovals(brand.name), html`<h2 class="title">${text.approvals}</h2>`)}
+      <div class="body center">
+        ${icon(checkCircle)}
+        <p class="headline">${text.noneWaiting}</p>
+        <p class="secondary">${text.newRequests}</p>
+      </div>
+    </article>`;
   }
 
   private list(orders: Order[]) {
     const pending = orders.filter((o) => o.status === "pending_approval").length;
     const text = pick(VIEW);
-    return html`${this.inApp ? nothing : this.appRow()}
+    // The empty row lines the list up with an open order's back link; the app has its top bar.
+    return html`${this.inApp ? nothing : html`<div class="top-row" aria-hidden="true"></div>`}
       <article class="card" part="list">
         ${brandHeader(
           text.brandApprovals(brand.name),
@@ -551,19 +540,14 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const open = this.selectedOrder(data);
     if (open === undefined) return orders.length === 0 ? this.empty() : this.list(orders);
     if (this.updatingId === open.orderId) return this.updating(open);
-    // The back link sits in a row the list keeps too, so the card does not move. One order on the
-    // plain page links to the list page.
+    // The back link sits in a row the list keeps too, so the card does not move.
     const text = pick(VIEW);
     return html`${
         orders.length > 1 || this.inApp
           ? html`<div class="top-row">
               <button class="back" @click=${() => this.open(null)}>${text.allApprovals}</button>
             </div>`
-          : this.plain
-            ? html`<div class="top-row">
-                <a class="back" href=${listPageUrl()}>${text.allApprovals}</a>
-              </div>`
-            : nothing
+          : nothing
       }
       <tt-approval-card
         .order=${open}
@@ -605,13 +589,13 @@ export const decisionText = (order: Order) => {
   return order.decision?.next === "alternatives" ? decided.alternatives(name) : decided.stop(name);
 };
 
-/** The list page of open approvals, on the server that served the view (relative without a DOM). */
+/** The app's page of open approvals, on the server that served the view (relative without a DOM). */
 const listPageUrl = () => {
   const server =
     globalThis.document?.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ??
     globalThis.location?.origin ??
     "";
-  return plainPageUrl("approval-card", server) ?? "/views/approval-card";
+  return `${server}/approvals`;
 };
 
 /**

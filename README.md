@@ -6,6 +6,8 @@ The buyer's mandate sets the limits, the wholesaler's server checks them on ever
 
 Built for the Valio Aimo challenge at Junction 2026 ([challenge brief](docs/challenge.md)).
 
+**Pitch video:** [link added at submission](docs/submission.md#links-and-release-record) · **Deck:** [link added at submission](docs/submission.md#links-and-release-record)
+
 ## Try it
 
 | What                    | Where                                                                    |
@@ -24,19 +26,59 @@ Any other MCP client can connect to the MCP endpoint.
 
 ```mermaid
 flowchart LR
-  A["Buyer's agent<br/>(any MCP chat)"] --> B["MCP + REST<br/>one schema"]
-  B --> C["Rule engine<br/>buyer's mandate"]
-  C --> D["Signed offer"]
-  D -->|rule asks for a human| E["Approval card"]
-  D -->|within limits| F["Signed receipt"]
+  A["1 Buyer's agent<br/>any MCP client"] --> B["2 API<br/>MCP + REST, one schema"]
+  B --> C["3 Rule engine<br/>buyer's signed mandate"]
+  C --> D["4 Signed offer<br/>ES256, ID, expiry"]
+  D -->|a rule asks for a human| E["5 Approval card<br/>approve, change, reject"]
+  D -->|within the limits| F["6 Signed receipt<br/>audit hash chain"]
   E --> F
 ```
 
-- **The server checks the rules.** The buyer's limits are an AP2-style mandate. Thirteen reason codes send an order to a person, for example spend limit, substitute or unconfirmed allergen, and eight reject it. The decision tools are visible only to the approval card, so the agent cannot approve its own order.
-- **Signed offers and receipts.** Each offer is an ES256 JWS with an ID and an expiry, and it works once. Each order gets a signed receipt over a SHA-256 hash-chained audit log.
-- **The person fixes the order.** On the approval card, the approver changes an amount, picks another product or reduces an over-limit order to fit. The server gets new offers and checks every rule again.
-- **The agent earns trust.** After three approvals of the same substitute, the card offers to let the agent use it without asking. "Don't suggest again" blocks it. These rules go into the buyer's mandate, and only the buyer can change them.
-- **Views in the chat.** Search results, offer comparison, agent limits, order timeline and approval card are MCP App views. Valio Aimo controls how they look in every host. They are in English and Finnish.
+Steps 1 to 4 happen on every request. Step 5 shows up only when a rule asks for a person, for example over the limit, a substitute product or a split delivery.
+
+### The server checks the rules
+
+An agent can't skip a check or approve its own order: only the approval card can see the decision tools.
+Thirteen reason codes send an order to a person, for example spend limit or unconfirmed allergen, and eight reject it.
+
+The demo mandate:
+
+| Limit                 | Setting                       |
+| --------------------- | ----------------------------- |
+| Order total           | Max €200 incl. VAT            |
+| Categories            | Any                           |
+| Substitutes           | Ask                           |
+| New products          | Ask                           |
+| Delivery reliability  | At least 90%                  |
+| CO2                   | Max 3 kg per kg               |
+| Allergen data missing | Ask                           |
+| Payment               | Invoice OK, pay on order asks |
+| Origin                | Prefer Finnish                |
+
+### Signed offers, signed receipts
+
+- **Offers are signed.** ES256, with an ID and an expiry. Anyone can check an offer with the public key.
+- **Orders need a valid offer.** The offer fixes the price. Each offer works once.
+- **Receipts are chained.** Each receipt signs the latest entry in the SHA-256 audit hash chain, so later edits show.
+
+### The person can change the order
+
+- **Fix it instead of rejecting it.** Change amounts or products, or trim the order to the limit. The server checks it again.
+- **When stock runs short.** Part from stock plus a ranked substitute, or a split delivery.
+- **The agent shows its work.** The card shows why the agent picked each product and which rules it hit.
+
+### The buyer's answers become rules
+
+Approve the same substitute three times, and the card asks: "Let the agent do this without asking?"
+
+- **Yes** adds a rule to the buyer's mandate. That substitute goes through from then on, and the audit log says why.
+- **Don't suggest again** is a rule too. That substitute is blocked.
+- **Only the buyer changes the rules**, in the agent limits view. The agent can't add or remove them.
+
+### Any agent can connect
+
+The approval card and the other views (search results, offer comparison, agent limits, order timeline) run inside the chat as MCP App views. Valio Aimo controls how they look. They are in English and Finnish.
+We tested Open WebUI and ChatGPT (text) and Claude (voice).
 
 [Implementation and partner technologies](docs/implementation.md) describes the design in more detail.
 [Specs](docs/specs.md) is the contract, and the [PRD](docs/prd.md) is the product scope.

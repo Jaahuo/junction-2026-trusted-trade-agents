@@ -56,7 +56,7 @@ const FI_ALLERGENS: Record<string, string> = {
   molluscs: "nilviäisiä",
 };
 /** The allergen in the view's language; an allergen without a Finnish name keeps the server's word. */
-const allergenName = (allergen: string) =>
+export const allergenName = (allergen: string) =>
   pick({ en: undefined, fi: FI_ALLERGENS[allergen.toLowerCase()] }) ?? allergen;
 
 /** "Contains egg": the chip's phrase. */

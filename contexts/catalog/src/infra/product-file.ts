@@ -143,6 +143,8 @@ export const loadProductFile = async (dataDir: string): Promise<CatalogProduct[]
     if (parsed.success) products.push(toProduct(parsed.data, reliability, co2));
     else skipped += 1;
   }
+  if (products.length === 0)
+    throw new Error(`${DATA_FILES.products} has no valid product records (${skipped} rejected)`);
   if (skipped > 0)
     console.error(`catalog: skipped ${skipped} product records that fail the schema`);
   return products;

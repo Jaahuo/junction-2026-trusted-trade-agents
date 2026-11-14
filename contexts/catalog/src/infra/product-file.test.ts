@@ -204,3 +204,27 @@ test("a weight or case sales unit converts a std quantity to its own unit, round
     consumer: { orderQuantity: { value: 9, unit: "KI" }, equals: { value: 108, unit: "LTR" } },
   });
 });
+
+test("a product file that is empty or has no valid record fails the load", async () => {
+  const empty = await mkdtemp(join(tmpdir(), "catalog-empty-"));
+  try {
+    await Bun.write(join(empty, DATA_FILES.reliability), "productId,deliveryReliability\r\n");
+    await Bun.write(join(empty, DATA_FILES.co2), "productId,AVG kg CO2-eq/kg\r\n");
+    const failures: unknown[] = [];
+    for (const fileRecords of [[], [{ id: "T-BAD" }]]) {
+      await Bun.write(join(empty, DATA_FILES.products), JSON.stringify(fileRecords));
+      failures.push(
+        await loadProductFile(empty).then(
+          () => null,
+          (error: unknown) => (error instanceof Error ? error.message : error),
+        ),
+      );
+    }
+    expect(failures).toEqual([
+      `${DATA_FILES.products} has no valid product records (0 rejected)`,
+      `${DATA_FILES.products} has no valid product records (1 rejected)`,
+    ]);
+  } finally {
+    await rm(empty, { recursive: true, force: true });
+  }
+});

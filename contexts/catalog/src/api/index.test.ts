@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { err, ok, type Result } from "@app/kernel";
 import { Elysia } from "elysia";
 import {
@@ -9,6 +12,7 @@ import {
 } from "../application/catalog.ts";
 import { type CatalogProduct, createCatalog } from "../domain/catalog.ts";
 import { edenMandateSource } from "../infra/mandate-client.ts";
+import { DATA_FILES, loadProductFile } from "../infra/product-file.ts";
 import { createApi } from "./index.ts";
 
 const product = (overrides: Partial<CatalogProduct> & { productId: string }): CatalogProduct => ({
@@ -157,6 +161,35 @@ describe("POST /catalog/search", () => {
     });
   });
 
+  test("a 200 mandates body that fails the stored mandate schema gives 502 UPSTREAM_FAILED", async () => {
+    const valid = {
+      mandateId: "T-MANDATE",
+      version: 1,
+      iss: "T-CUSTOMER",
+      agent: "T-AGENT",
+      signedBy: "T-ACCOUNT",
+      iat: 1,
+      exp: 2,
+    };
+    for (const answer of [{}, { mandate: valid, jws: null, status: "active" }]) {
+      const mandates = new Elysia().get("/api/mandates/current", () => answer);
+      const source = edenMandateSource(() => "http://localhost/api", inProcess(mandates));
+      expect(await source.current()).toEqual(err("UPSTREAM_FAILED"));
+      const { status, body } = await post(
+        createApi(deps({ mandates: source })),
+        "/search",
+        searchBody,
+      );
+      expect({ answer, status, body }).toEqual({
+        answer,
+        status: 502,
+        body: {
+          error: { code: "UPSTREAM_FAILED", message: "The current mandate could not be read." },
+        },
+      });
+    }
+  });
+
   test("search excludes contradicted products and returns orderQuantity, equals, reliability and CO2 or null", async () => {
     const { status, body } = await post(createApi(deps()), "/search", {
       ...searchBody,
@@ -240,6 +273,42 @@ describe("POST /catalog/search", () => {
     ]);
     expect((await post(app, "/facts", { productIds: ["free"], hard: [] })).status).toBe(200);
     expect(loads).toBe(3);
+  });
+
+  test("a product file with no valid record answers 502 and loads once it is repaired", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "catalog-repair-"));
+    try {
+      await Bun.write(join(dir, DATA_FILES.reliability), "productId,deliveryReliability\r\n");
+      await Bun.write(join(dir, DATA_FILES.co2), "productId,AVG kg CO2-eq/kg\r\n");
+      await Bun.write(join(dir, DATA_FILES.products), JSON.stringify([{ id: "T-BAD" }]));
+      const app = createApi(
+        deps({ catalog: lazyCatalog(async () => createCatalog(await loadProductFile(dir))) }),
+      );
+      const broken = await post(app, "/search", searchBody);
+      expect(broken).toEqual({
+        status: 502,
+        body: {
+          error: { code: "UPSTREAM_FAILED", message: "The product index could not be loaded." },
+        },
+      });
+      const repaired = {
+        id: "T-GOOD",
+        salesUnit: "ST",
+        baseUnit: "ST",
+        category: "T-CAT",
+        allowedLotSize: 1,
+        units: [{ unitId: "ST", sizeInBaseUnits: 1 }],
+        synkkaData: { names: [{ value: "Test milk", language: "en" }] },
+      };
+      await Bun.write(join(dir, DATA_FILES.products), JSON.stringify([repaired]));
+      const fixed = await post(app, "/search", searchBody);
+      expect({ status: fixed.status, ids: ids(fixed.body) }).toEqual({
+        status: 200,
+        ids: ["T-GOOD"],
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("empty terms gives 400", async () => {

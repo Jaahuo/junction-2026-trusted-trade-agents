@@ -7,8 +7,12 @@ Each candidate has its own GitHub Issues and private board. Issues are created u
 3. Once a dependency PR has merged, synchronize using `bun scripts/task.ts sync <issue> --depends-on <merged-PR>`. The merged commit, not a pre-squash head, is the dependency.
 4. Inspect task state with `bun scripts/task.ts status <issue>`. The current authenticated user needs project access and scope for board updates. Do not rely on the repository Actions token as a Projects credential.
 5. Integrate changes, run the applicable checks and gate at the integrated end, and smoke the real changed flow. Document actual results, limitations, risk and review evidence in the PR.
-6. The owner runs `bun scripts/ship.ts --risk <risk>` to open or update a PR. The default does not merge. After required evidence and authorization, `bun scripts/ship.ts --risk <risk> --merge` requests the merge. Never force-push or bypass hooks.
-7. After merge, run `bun run task finish <issue> --pr <merged-pr>`. It verifies the PR merged from `task/<issue>` into main and its merge commit is reachable from fetched `origin/main`, closes the issue if open, and moves its board item to Done. Ship adds `Closes #<issue>` to task-branch PR bodies while preserving existing closing links.
+6. The owner runs `bun scripts/ship.ts --risk <risk>` to open or update a PR. The default does not merge. After required evidence and authorization, `bun scripts/ship.ts --risk <risk> --merge` requests the merge. After the merge, it runs step 7 for a `task/<issue>` branch and the worktree cleanup for any other branch. Never force-push or bypass hooks.
+7. When the PR merged outside ship, run `bun run task finish <issue> --pr <merged-pr>`. It verifies the PR merged from `task/<issue>` into main and its merge commit is reachable from fetched `origin/main`, closes the issue if open, moves its board item to Done and cleans up the worktree. Ship adds `Closes #<issue>` to task-branch PR bodies while preserving existing closing links.
+
+## Worktree cleanup after merge
+
+The owner removes the task worktree once its PR merges. Stop the worktree's servers before the merge; cleanup does not stop processes. `ship --merge` and `task finish` do it: they drop the worktree's database, run `wt remove`, and delete the local branch. They keep the worktree and print why when the command runs inside it, when it has uncommitted changes, when its `HEAD` differs from the merged PR head, or when it is the main worktree. Then commit or discard that work, and clean up by hand as [local runtime](runtime.md) says. Ship runs inside the task worktree, so after a merge it prints the cleanup command. Move to the main checkout and run that command there. Remove an exploration worktree by hand when you finish with it.
 
 ## Fresh upstream for worktrees
 
@@ -50,7 +54,18 @@ Claude resolves the active worktree from the hook input's `cwd`, even when the s
 | `impact`   | Authentication or database isolation change affecting multiple areas | Green CI and independent current-head GitHub approval or agent review evidence. |
 | `lock-in`  | Irreversible data deletion or a hard-to-reverse external commitment  | Green CI and independent human approval on the exact head.                      |
 
-Assess actual blast radius and reversibility rather than choosing based on file location. Record what was reviewed and who approved it. For an independent agent review, `bun run ship --risk impact --review-file report.json` posts a PR-author-attributed evidence comment. The JSON requires the full exact SHA in `head`, distinct nonempty `taskOwnerAgent` and `reviewerAgent`, `method`, complete review `findings` and disposition, and `verdict` exactly `approved`. Repeat the review after a new commit.
+Assess actual blast radius and reversibility rather than choosing based on file location. Record what was reviewed and who approved it. For an independent agent review, `bun run ship --risk impact --review-file report.json` posts a PR-author-attributed evidence comment. The JSON requires the full exact SHA in `head`, distinct nonempty `taskOwnerAgent` and `reviewerAgent`, `method`, `findings` as one nonempty string that lists each finding with its disposition, and `verdict` exactly `approved`. Repeat the review after a new commit.
+
+```json
+{
+  "head": "<full commit SHA>",
+  "taskOwnerAgent": "implementer (model)",
+  "reviewerAgent": "reviewer (model)",
+  "method": "What was reviewed and how.",
+  "findings": "R1 (high): <defect> -> fixed: <how> | R2 (medium): <defect> -> deferred: <why>",
+  "verdict": "approved"
+}
+```
 
 The script checks exact head, required gate and current main; updates can invalidate review or checks. It cannot establish that an account represents a human, that agents are independent, or that a review was substantive. These are team conventions, not cryptographically verified or server-enforced guarantees.
 

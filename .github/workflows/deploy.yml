@@ -100,6 +100,12 @@ jobs:
           sbom: false
           cache-from: type=gha,scope=production-image
           cache-to: type=gha,scope=production-image,mode=max
+      - name: Release API build cache before building chat
+        run: |
+          set -euo pipefail
+          df -h "$RUNNER_TEMP"
+          docker buildx prune --all --force
+          df -h "$RUNNER_TEMP"
       - name: Build chat image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:

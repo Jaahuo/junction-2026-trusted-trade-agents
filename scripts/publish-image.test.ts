@@ -48,7 +48,7 @@ async function publish(mode: string) {
     await writeFile(join(root, "output"), "");
     await writeFile(join(root, "chat-reads"), "0");
     const commands = {
-      docker: "#!/bin/sh\nexit 0\n",
+      docker: '#!/bin/sh\nif [ "$1" = login ]; then cat >/dev/null; fi\n',
       sleep: "#!/bin/sh\nexit 0\n",
       curl: `#!/bin/sh
 case "$*" in *"/token?"*) printf '{"token":"fixture"}'; exit 0;; esac

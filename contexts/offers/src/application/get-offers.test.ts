@@ -21,6 +21,7 @@ import {
   fakeProduct,
   type FakeLiveData,
 } from "./fakes.ts";
+import { deliverableBy } from "./availability.ts";
 import { getOffers, NO_LIVE_SOURCE_DETAIL, PRECHECK_CONCURRENCY } from "./get-offers.ts";
 import type { OfferSigner } from "./ports.ts";
 
@@ -92,12 +93,51 @@ describe("getOffers", () => {
 
     expect(setup.live.calls.map((call) => [call.kind, call.query.requestedDate])).toEqual([
       ["availability", "2026-11-20"],
-      ["prices", "2026-11-19"],
+      ["prices", "2026-11-20"],
     ]);
     const [offer] = result.offers;
-    expect(offer?.claims.unitPrice.net).toBe(10);
-    expect(offer?.claims.deliveryDate).toBe("2026-11-19");
+    expect(offer?.claims.unitPrice.net).toBe(20);
+    expect(offer?.claims.deliveryDate).toBe("2026-11-20");
     expect(offer?.claims.requestedDate).toBe("2026-11-20");
+  });
+
+  test("advanced dates use shifted cutoff and agree with availability at its boundary", async () => {
+    for (const [now, offered] of [
+      ["2026-11-15T09:59:59Z", true],
+      ["2026-11-15T10:00:00Z", false],
+      ["2026-11-15T10:00:01Z", false],
+    ] as const) {
+      const setup = fakeOffersDeps({
+        now,
+        products: [fakeProduct(OAT)],
+        live: quoted(OAT, {
+          availableDate: "2026-11-19",
+          nextDeliveryDate: "2026-11-21",
+          cutoffAt: "2026-11-14T12:00:00+02:00",
+          amount: 0,
+        }),
+      });
+      const result = valueOf(await getOffers(setup.deps, principal, request()));
+      const available = valueOf(
+        await deliverableBy(setup.deps, principal, {
+          productIds: [OAT],
+          deliverBy: "2026-11-20",
+        }),
+      );
+      expect(result.offers.length > 0).toBe(offered);
+      expect(available.deliverable.includes(OAT)).toBe(offered);
+      if (offered) {
+        expect(result.offers[0]?.claims).toMatchObject({
+          deliveryDate: "2026-11-20",
+          cutoffAt: "2026-11-15T12:00:00.000+02:00",
+          nextDeliveryDate: "2026-11-21",
+          stock: "unconfirmed",
+          shortfall: null,
+        });
+      } else {
+        expect(reasons(result.omitted)).toEqual({ [OAT]: "NO_DELIVERY_DATE" });
+      }
+    }
   });
 
   test("paymentTerms other than the principal's gives 400", async () => {

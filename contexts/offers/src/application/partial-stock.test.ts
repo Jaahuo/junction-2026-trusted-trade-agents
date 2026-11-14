@@ -53,6 +53,52 @@ const mandate = (patch: Partial<Mandate> = {}): Mandate => ({
 });
 
 describe("partial stock and substitutes", () => {
+  test("an advanced substitute is priced on its selected date without treating earlier stock as confirmed", async () => {
+    const sub = "prod_test_advanced_substitute";
+    const setup = fakeOffersDeps({
+      mandate: mandate(),
+      products: [
+        fakeProduct(ORIGINAL, { perSalesUnit: litre, substitutes: [sub] }),
+        fakeProduct(sub, { perSalesUnit: litre }),
+      ],
+      live: {
+        ...quoted(ORIGINAL, { amount: 600 }),
+        [sub]: {
+          availability: {
+            "*": fakeAvailability(sub, {
+              availableDate: "2026-11-19",
+              nextDeliveryDate: "2026-11-20",
+              cutoffAt: "2026-11-14T10:00:00Z",
+              amount: 0,
+            }),
+          },
+          prices: {
+            "2026-11-20": fakePrice(sub, { unitPrice: { net: 7, vatRate: 14, currency: "EUR" } }),
+          },
+        },
+      },
+    });
+    const result = valueOf(await getOffers(setup.deps, principal, request()));
+    const alternative = result.offers.find((offer) => offer.claims.productId === sub);
+    expect(alternative?.claims).toMatchObject({
+      replaces: ORIGINAL,
+      quantity: { value: 400, unit: "CT" },
+      deliveryDate: "2026-11-20",
+      nextDeliveryDate: null,
+      cutoffAt: "2026-11-15T12:00:00.000+02:00",
+      stock: "unconfirmed",
+      unitPrice: { net: 7 },
+    });
+    expect(
+      setup.live.calls.some(
+        (call) =>
+          call.kind === "prices" &&
+          call.query.requestedDate === "2026-11-20" &&
+          call.query.productIds.includes(sub),
+      ),
+    ).toBe(true);
+  });
+
   test("offers the available amount and signs a standard-unit shortfall", async () => {
     const setup = fakeOffersDeps({
       products: [fakeProduct(ORIGINAL, { perSalesUnit: litre })],

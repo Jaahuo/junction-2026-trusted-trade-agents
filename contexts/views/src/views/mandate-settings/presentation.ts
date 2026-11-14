@@ -6,6 +6,7 @@ import type {
   StoredMandate,
 } from "@app/contract";
 import { formatMoney, formatQuantity, formatTimestamp, ORDER_WORDING } from "@app/ui/format";
+import { preferred } from "../../shared/constraints.ts";
 import { lang, pick } from "../../shared/locale.ts";
 import { MANDATE } from "./strings.ts";
 
@@ -71,14 +72,7 @@ export function co2Text(value: number) {
 }
 
 export function softText(item: SoftConstraint) {
-  const text = pick(MANDATE);
-  const label =
-    item.attribute === "countryOfOrigin"
-      ? text.countryOfOrigin
-      : item.attribute === "category"
-        ? text.category
-        : item.attribute;
-  return `${label}: ${item.prefer}`;
+  return preferred(item.attribute, item.prefer);
 }
 
 function epochText(seconds: number) {

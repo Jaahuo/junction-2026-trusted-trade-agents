@@ -107,7 +107,9 @@ test("draft rows show the value in force only where it differs", () => {
     proposed: "All categories",
     current: null,
   });
-  expect(rows.find((row) => row.label === "Preferred")?.proposed).toBe("Country of origin: fi");
+  expect(rows.find((row) => row.label === "Preferred")?.proposed).toBe(
+    "Country of origin: Finland",
+  );
   expect(rows.at(-1)).toMatchObject({ label: "Expires", proposed: "One year after registration" });
   expect(rows.at(-1)?.current).not.toBeNull();
 });

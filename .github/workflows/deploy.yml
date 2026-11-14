@@ -13,12 +13,13 @@ jobs:
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
       actions: read
     outputs:
+      ready: ${{ steps.select.outputs.ready }}
       sha: ${{ steps.select.outputs.sha }}
       run_id: ${{ steps.select.outputs.run_id }}
       attempt: ${{ steps.select.outputs.attempt }}
@@ -34,14 +35,21 @@ jobs:
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           run=$(gh api --paginate "repos/$REPO/actions/workflows/gate.yml/runs?head_sha=$sha&event=push&status=success&per_page=100" \
             | jq -sc --arg sha "$sha" --arg repo "$REPO" '[.[].workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .conclusion == "success" and .path == ".github/workflows/gate.yml" and .repository.full_name == $repo and .head_repository.full_name == $repo)] | sort_by(.created_at, .id) | last // empty')
-          [ -n "$run" ] || { echo "No successful push gate for current main" >&2; exit 1; }
+          if [ -z "$run" ]; then
+            # Main moved past the gate that triggered this run; that commit's own gate deploys it.
+            echo "Skipped: $sha has no successful push gate run yet." >> "$GITHUB_STEP_SUMMARY"
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           id=$(jq -er '.id | tostring | select(test("^[1-9][0-9]*$"))' <<< "$run")
           attempt=$(jq -er '.run_attempt | tostring | select(test("^[1-9][0-9]*$"))' <<< "$run")
-          printf 'sha=%s\nrun_id=%s\nattempt=%s\n' "$sha" "$id" "$attempt" >> "$GITHUB_OUTPUT"
+          printf 'ready=true\nsha=%s\nrun_id=%s\nattempt=%s\n' "$sha" "$id" "$attempt" >> "$GITHUB_OUTPUT"
+          echo "Deploying $sha from gate run $id attempt $attempt." >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     needs: target
-    runs-on: ubuntu-latest
+    if: needs.target.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -60,6 +68,7 @@ jobs:
         with:
           ref: ${{ needs.target.outputs.sha }}
           persist-credentials: false
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
       - name: Start deployment evidence
         run: |
           mkdir -p deployment-evidence
@@ -87,10 +96,11 @@ jobs:
             (.scannerVersion | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
           ' manifest.json > /dev/null
           cp SHA256SUMS ../deployment-evidence/artifact-SHA256SUMS
-          docker load --input image.tar
+          # Compare the archive's config digest, which does not depend on the Docker image store (#198).
           expected=$(jq -er .imageId manifest.json)
-          actual=$(docker image inspect "gate-image:$SHA" --format '{{.Id}}')
-          [ "$actual" = "$expected" ]
+          actual=$(bun ../scripts/ci-image.ts config-digest image.tar)
+          [ "$actual" = "$expected" ] || { echo "Image config digest $actual does not match evidence $expected" >&2; exit 1; }
+          docker load --input image.tar
       - name: Publish verified image
         id: publish
         env:
@@ -115,7 +125,9 @@ jobs:
           digest=$(awk 'BEGIN { IGNORECASE=1 } tolower($1) == "docker-content-digest:" { gsub("\r", "", $2); print $2 }' /tmp/manifest-headers)
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           [ "sha256:$(sha256sum /tmp/manifest.json | cut -d ' ' -f 1)" = "$digest" ]
-          [ "$(jq -er '.config.digest' /tmp/manifest.json)" = "$(jq -er .imageId evidence/manifest.json)" ]
+          pushed=$(jq -er '.config.digest' /tmp/manifest.json)
+          expected=$(jq -er .imageId evidence/manifest.json)
+          [ "$pushed" = "$expected" ] || { echo "Pushed config digest $pushed does not match evidence $expected" >&2; exit 1; }
           pinned="ghcr.io/$repository@$digest"
           printf 'image=%s\n' "$pinned" >> "$GITHUB_OUTPUT"
           printf 'image=%s\n' "$pinned" >> deployment-evidence/identity.txt
@@ -133,7 +145,7 @@ jobs:
     concurrency:
       group: deploy-production
       cancel-in-progress: false
-    runs-on: craci
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: production
     permissions:

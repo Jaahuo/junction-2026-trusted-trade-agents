@@ -403,7 +403,7 @@ export const verifyMandate: (jws: string, key: JsonWebKey) => Promise<Result<Man
 - Signature (simulated custody): the register handler signs the stored payload with `BUYER_SIGNING_JWK` and stores the JWS with it, in the same transaction. The stored JWS decodes to exactly the stored mandate. An externally signed JWS is out of scope.
 - The wholesaler uses the stored limits only to enforce them and returns them only to the customer's own principal.
 
-Failure paths: a body with `iss`, `agent`, `signedBy`, `mandateId`, `version` or `iat` → 400. No current mandate → 404. An expired mandate is not current.
+Failure paths: a body with `iss`, `agent`, `signedBy`, `mandateId`, `version` or `iat` → 400. A new registration with `exp` less than or equal to the server time in epoch seconds → 400 `BAD_REQUEST`; the current mandate does not change. The `operationId` replay rule takes precedence, even when the original mandate has expired. No current mandate → 404. An expired mandate is not current.
 
 ## SPEC-009 Rule checks and reason codes
 

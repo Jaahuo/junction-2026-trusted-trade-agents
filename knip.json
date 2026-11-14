@@ -3,30 +3,11 @@
   "ignoreUnresolved": ["scripts/.+\\.ts", "apps/api/src/main\\.ts"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts", ".omp/hooks/*/*.ts"]
+      "entry": ["scripts/*.ts", ".omp/hooks/*/*.ts"],
+      "ignoreDependencies": ["@app/contract"]
     },
     "apps/api": {
       "entry": ["src/main.ts!", "src/server.ts!"]
-    },
-    "contexts/catalog": {
-      "ignoreDependencies": ["@app/kernel", "@ctx/mandates", "@elysia/eden", "zod"]
-    },
-    "contexts/mandates": {
-      "ignoreDependencies": ["@app/kernel", "drizzle-orm", "zod"]
-    },
-    "contexts/mcp": {
-      "ignoreDependencies": [
-        "@app/contract",
-        "@app/kernel",
-        "@ctx/catalog",
-        "@ctx/mandates",
-        "@ctx/offers",
-        "@ctx/orders",
-        "@elysia/eden",
-        "@modelcontextprotocol/ext-apps",
-        "@modelcontextprotocol/sdk",
-        "zod"
-      ]
     },
     "contexts/offers": {
       "ignoreDependencies": [
@@ -39,25 +20,14 @@
       ]
     },
     "contexts/orders": {
-      "ignoreDependencies": [
-        "react",
-        "@app/kernel",
-        "@ctx/mandates",
-        "@elysia/eden",
-        "@tanstack/react-query",
-        "drizzle-orm",
-        "zod"
-      ]
+      "ignoreDependencies": ["react", "@tanstack/react-query", "zod"]
     },
     "contexts/views": {
       "entry": ["src/views/*/main.{ts,tsx}"],
       "ignoreDependencies": ["@ctx/mandates", "@ctx/orders", "@elysia/eden"]
     },
-    "packages/contract": {
-      "ignoreDependencies": ["@app/server-kit", "jose"]
-    },
-    "contexts/*": {
-      "ignoreDependencies": ["react"]
+    "contexts/mandates": {
+      "ignoreDependencies": ["zod"]
     }
   },
   "ignoreBinaries": ["gitleaks"]

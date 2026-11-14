@@ -727,7 +727,7 @@ export class ApprovalCard extends LitElement {
             .map((c) => ({
               where: c.product.name,
               target: lineId(c),
-              reason: "Out of stock, a substitute is proposed",
+              reason: `Out of stock${c.nextDeliveryDate === null ? "" : ` until ${day(c.nextDeliveryDate)}`}`,
               action: "Check the replacement",
             }));
         case "PRICE_CHANGED":
@@ -850,7 +850,10 @@ export class ApprovalCard extends LitElement {
   /** The note under a product that something applies to; a price change is a warning (v17). */
   private lineNote(order: Order, c: OfferClaims): { text: string; warning: boolean } | null {
     if (c.replaces !== null)
-      return { text: "Out of stock · a substitute is proposed", warning: false };
+      return {
+        text: `Substitute proposed · out of stock${c.nextDeliveryDate === null ? "" : ` until ${day(c.nextDeliveryDate)}`}`,
+        warning: false,
+      };
     const requote = order.requotes.find((r) => r.current.offerId === c.offerId);
     if (requote !== undefined)
       return {

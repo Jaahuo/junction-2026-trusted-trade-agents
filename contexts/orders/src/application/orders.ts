@@ -19,13 +19,14 @@ import {
   netTotal,
   reasonsByProduct,
 } from "../domain/evaluate.ts";
-import { commitPlacement } from "./commit-placement.ts";
+import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import type {
   MandatePort,
   OfferVerifier,
   OrderStore,
   OrderTx,
   PaymentPort,
+  ReceiptSigner,
   StoredOrder,
 } from "./ports.ts";
 
@@ -34,6 +35,7 @@ export interface OrderDeps {
   verifyOffer: OfferVerifier;
   mandates: MandatePort;
   payment: PaymentPort;
+  signReceipt: ReceiptSigner;
   now: () => Date;
 }
 
@@ -244,13 +246,16 @@ const refuse = async (
   now: Date,
 ): Promise<Result<never, Refusal>> => {
   // An unreachable mandate service is not a refusal of the request (SPEC-009 R3-R6).
-  if (error.code !== "UPSTREAM_FAILED")
-    await store.refuse(principal.customer, {
+  if (error.code !== "UPSTREAM_FAILED") {
+    const recorded = await store.refuse(principal.customer, {
       at: now.toISOString(),
       actor: "agent",
       event: "order_refused",
       detail: error.code,
     });
+    if (!recorded.ok)
+      return err(refusal("UPSTREAM_FAILED", "The audit record could not be verified."));
+  }
   return err(error);
 };
 
@@ -277,7 +282,11 @@ export const placeOrder = async (
   if (!checked.ok) return refuse(deps.store, principal, checked.error, now);
   const evaluated = await evaluateChecked(deps, principal, checked.value, now);
   const { evaluation } = evaluated;
-  const order = buildOrder(principal, request, checked.value, evaluated, now);
+  const unchained = buildOrder(principal, request, checked.value, evaluated, now);
+  const chained = await appendOrderAudit(unchained, unchained.audit, true);
+  if (!chained.ok)
+    return err(refusal("UPSTREAM_FAILED", "The audit record could not be verified."));
+  const order = chained.value;
 
   const result = await deps.store.withCustomerLock(principal.customer, async (tx: OrderTx) => {
     // A parallel request with the same key may have stored its order while this one was checked.
@@ -297,11 +306,13 @@ export const placeOrder = async (
             order,
             creditLimit: principal.creditLimit,
             payment: deps.payment,
+            signReceipt: deps.signReceipt,
             now,
           })
-        : order;
-    await tx.insert(final);
-    return ok({ order: final, created: true });
+        : ok(order);
+    if (!final.ok) return err(refusal("UPSTREAM_FAILED", "The order could not be finalized."));
+    await tx.insert(final.value);
+    return ok({ order: final.value, created: true });
   });
   if (!result.ok && result.error.code === "OFFER_INVALID")
     return refuse(deps.store, principal, result.error, now);

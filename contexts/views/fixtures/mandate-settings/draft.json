@@ -1,0 +1,86 @@
+{
+  "draft": {
+    "limits": {
+      "maxOrderTotal": {
+        "value": 500,
+        "currency": "EUR",
+        "basis": "gross"
+      },
+      "categories": null,
+      "substitutions": "ask",
+      "newProducts": "ask",
+      "minDeliveryReliability": {
+        "value": 0.9,
+        "ifNoData": "auto"
+      },
+      "maxCo2PerKg": {
+        "value": 3,
+        "ifNoData": "auto"
+      },
+      "allergenData": {
+        "ifNoData": "ask"
+      },
+      "paymentTerms": {
+        "invoice": "auto",
+        "pay_on_order": "ask"
+      }
+    },
+    "standingConstraints": {
+      "hard": [],
+      "soft": [
+        {
+          "attribute": "countryOfOrigin",
+          "prefer": "fi"
+        }
+      ]
+    }
+  },
+  "current": {
+    "mandate": {
+      "iss": "cust_fixture_all",
+      "mandateId": "mnd_fixture_all",
+      "version": 1,
+      "agent": "agent_fixture_buyer",
+      "signedBy": "acct_fixture_owner",
+      "limits": {
+        "maxOrderTotal": {
+          "value": 1000,
+          "currency": "EUR",
+          "basis": "gross"
+        },
+        "categories": null,
+        "substitutions": "ask",
+        "newProducts": "ask",
+        "minDeliveryReliability": {
+          "value": 0.9,
+          "ifNoData": "auto"
+        },
+        "maxCo2PerKg": {
+          "value": 3,
+          "ifNoData": "auto"
+        },
+        "allergenData": {
+          "ifNoData": "ask"
+        },
+        "paymentTerms": {
+          "invoice": "auto",
+          "pay_on_order": "ask"
+        }
+      },
+      "standingConstraints": {
+        "hard": [],
+        "soft": [
+          {
+            "attribute": "countryOfOrigin",
+            "prefer": "fi"
+          }
+        ]
+      },
+      "iat": 1794650400,
+      "exp": 4102444800
+    },
+    "jws": "fixture-mandate-jws",
+    "status": "active",
+    "registeredAt": "2026-11-14T10:00:00+00:00"
+  }
+}

@@ -18,7 +18,10 @@ type Responder = (call: Call) => Response | Promise<Response>;
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-const harness = (responder: Responder) => {
+const harness = (
+  responder: Responder,
+  options: { now?: () => number; sleep?: (ms: number, signal: AbortSignal) => Promise<void> } = {},
+) => {
   const calls: Call[] = [];
   const fetchStub = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -37,8 +40,25 @@ const harness = (responder: Responder) => {
     baseUrl: "https://wholesaler.test/",
     apiKey: "test-key",
     fetch: fetchStub,
+    ...options,
   });
   return { live, calls };
+};
+
+const fakeClock = (initial = Date.parse("2026-11-14T10:00:00Z")) => {
+  let time = initial;
+  const waits: number[] = [];
+  return {
+    now: () => time,
+    sleep: async (ms: number, _signal: AbortSignal) => {
+      waits.push(ms);
+      time += ms;
+    },
+    advance: (ms: number) => {
+      time += ms;
+    },
+    waits,
+  };
 };
 
 const query = (productIds: string[], requestedDate = "2026-11-16"): LiveQuery => ({
@@ -501,6 +521,119 @@ describe("transport", () => {
       expect(prices, label).toEqual({ ok: false, error: "UPSTREAM_FAILED" });
     }
   });
+
+  for (const method of ["getAvailability", "getPrices"] as const) {
+    test(`${method} retries a 429 and uses the successful quote`, async () => {
+      const clock = fakeClock();
+      let attempts = 0;
+      const { live, calls } = harness(() => {
+        attempts++;
+        if (attempts === 1)
+          return new Response(null, { status: 429, headers: { "Retry-After": "4" } });
+        return json(
+          method === "getPrices"
+            ? priceBody([priceItem("p-retry")])
+            : availabilityBody([
+                product("p-retry", [line("2026-11-16T00:00:00"), line("2026-11-17T00:00:00")]),
+              ]),
+        );
+      }, clock);
+      const result = await live[method](query(["p-retry"]));
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected a successful quote");
+      expect(result.value.quotes.map((quote) => quote.productId)).toEqual(["p-retry"]);
+      expect(calls).toHaveLength(2);
+      expect(clock.waits).toEqual([4000]);
+    });
+
+    test(`${method} stops after three 429 responses`, async () => {
+      const clock = fakeClock();
+      const { live, calls } = harness(
+        () => new Response(null, { status: 429, headers: { "Retry-After": "4" } }),
+        clock,
+      );
+      expect(await live[method](query(["p-retry"]))).toEqual({
+        ok: false,
+        error: "UPSTREAM_FAILED",
+      });
+      expect(calls).toHaveLength(3);
+      expect(clock.waits).toEqual([4000, 4000]);
+    });
+
+    test(`${method} uses the fallback for missing and invalid Retry-After`, async () => {
+      for (const header of [null, "-1", "garbage"]) {
+        const clock = fakeClock();
+        const { live, calls } = harness(
+          () =>
+            new Response(null, {
+              status: 429,
+              headers: header === null ? {} : { "Retry-After": header },
+            }),
+          clock,
+        );
+        expect(await live[method](query(["p-retry"]))).toEqual({
+          ok: false,
+          error: "UPSTREAM_FAILED",
+        });
+        expect(calls).toHaveLength(3);
+        expect(clock.waits).toEqual([1000, 1000]);
+      }
+    });
+
+    test(`${method} honors an HTTP-date Retry-After`, async () => {
+      const clock = fakeClock();
+      const retryAt = new Date(clock.now() + 4000).toUTCString();
+      const { live, calls } = harness(
+        () => new Response(null, { status: 429, headers: { "Retry-After": retryAt } }),
+        clock,
+      );
+      expect(await live[method](query(["p-retry"]))).toEqual({
+        ok: false,
+        error: "UPSTREAM_FAILED",
+      });
+      expect(calls).toHaveLength(3);
+      expect(clock.waits).toEqual([4000, 0]);
+    });
+
+    test(`${method} does not shorten an oversized Retry-After`, async () => {
+      const clock = fakeClock();
+      const { live, calls } = harness(
+        () => new Response(null, { status: 429, headers: { "Retry-After": "9" } }),
+        clock,
+      );
+      expect(await live[method](query(["p-retry"]))).toEqual({
+        ok: false,
+        error: "UPSTREAM_FAILED",
+      });
+      expect(calls).toHaveLength(1);
+      expect(clock.waits).toEqual([]);
+    });
+
+    test(`${method} includes request time in the single deadline`, async () => {
+      const clock = fakeClock();
+      const { live, calls } = harness(() => {
+        clock.advance(2500);
+        return new Response(null, { status: 429, headers: { "Retry-After": "4" } });
+      }, clock);
+      expect(await live[method](query(["p-retry"]))).toEqual({
+        ok: false,
+        error: "UPSTREAM_FAILED",
+      });
+      expect(calls).toHaveLength(2);
+      expect(clock.waits).toEqual([4000]);
+    });
+
+    test(`${method} fails a 500 immediately`, async () => {
+      const clock = fakeClock();
+      const { live, calls } = harness(() => json({ detail: "boom" }, 500), clock);
+      expect(await live[method](query(["p-retry"]))).toEqual({
+        ok: false,
+        error: "UPSTREAM_FAILED",
+      });
+      expect(calls).toHaveLength(1);
+      expect(clock.waits).toEqual([]);
+    });
+  }
 
   test("a blocked earlier line does not block a later open line", async () => {
     const { live } = harness(({ body }) =>

@@ -7,6 +7,7 @@ import {
   chatEnv,
   chatSettings,
   deployEnv,
+  deployWarning,
   type Outputs,
   parseEnv,
   push,
@@ -145,6 +146,7 @@ test("the deploy skips the chat host until the inference key is set", () => {
     secretKey: "session-key",
     adminEmail: "admin@example.com",
     adminPassword: "admin-password",
+    recipePermission: "False",
   });
 });
 
@@ -159,6 +161,11 @@ test("the chat host runs with login on, sign-up off and the hosted inference end
   const env = chatEnv(outputs, chat);
   expect(env.get("WEBUI_AUTH")).toBe("True");
   expect(env.get("ENABLE_SIGNUP")).toBe("False");
+  expect(env.get("ENABLE_OLLAMA_API")).toBe("False");
+  expect(env.get("ENABLE_TITLE_GENERATION")).toBe("False");
+  expect(env.get("ENABLE_FOLLOW_UP_GENERATION")).toBe("False");
+  expect(env.get("ENABLE_TAGS_GENERATION")).toBe("False");
+  expect(env.has("ENABLE_VOICE")).toBe(false);
   expect(env.get("WEBUI_URL")).toBe("https://chat.203-0-113-7.sslip.io");
   expect(env.get("OPENAI_API_BASE_URL")).toBe(
     "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1",
@@ -177,6 +184,12 @@ test("Caddy serves the chat host on its own subdomain when the chat runs", () =>
 test("the chat unit keeps its data in a volume and listens on loopback only", () => {
   expect(CHAT_SERVICE).toContain("-p 127.0.0.1:8080:8080");
   expect(CHAT_SERVICE).toContain("-v trusted-trade-chat:/app/backend/data");
+  expect(CHAT_SERVICE).toContain(
+    "-v /opt/trusted-trade-chat/branding/custom.css:/app/backend/open_webui/static/custom.css:ro",
+  );
+  expect(CHAT_SERVICE).toContain(
+    "-v /opt/trusted-trade-chat/branding:/app/backend/open_webui/static/acme:ro",
+  );
   expect(CHAT_SERVICE).toContain("--env-file /etc/trusted-trade-chat.env");
   expect(CHAT_SERVICE).toContain("ghcr.io/open-webui/open-webui:v0.13.3");
 });
@@ -321,4 +334,27 @@ test("the service runs the persisted digest on loopback with read-only host data
     "ExecStop=/usr/bin/docker stop --time 30 trusted-trade\nTimeoutStopSec=40\n",
   );
   expect(() => renderService({ ...outputs, app_dir: "/opt/a:b" })).toThrow(/app_dir/);
+});
+
+const deployRun = (conclusion: string) => [
+  {
+    conclusion,
+    headSha: "4dd8571c935a769c38b296e033b52130e8d2055f",
+    url: "https://example.test/runs/1",
+  },
+];
+
+test("deployWarning warns only when the latest completed deploy of main failed", () => {
+  expect(deployWarning(deployRun("failure"))).toBe(
+    "Warning: the latest deploy of main (4dd8571) ended in failure, so the hosted demo may be stale. See https://example.test/runs/1.",
+  );
+  expect(deployWarning(deployRun("timed_out"))).toContain("timed_out");
+  expect(deployWarning(deployRun("startup_failure"))).toContain("startup_failure");
+  expect(deployWarning(deployRun("success"))).toBeUndefined();
+  expect(deployWarning(deployRun("cancelled"))).toBeUndefined();
+  expect(deployWarning([])).toBeUndefined();
+  expect(deployWarning({})).toBeUndefined();
+  expect(deployWarning([{ conclusion: "failure" }])).toBe(
+    "Warning: the latest deploy of main (?) ended in failure, so the hosted demo may be stale. See the deploy workflow.",
+  );
 });

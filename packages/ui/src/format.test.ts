@@ -77,6 +77,10 @@ describe("dates", () => {
       formatTimestamp("2026-11-16T01:30:00Z"),
     );
     expect(formatTimestamp("2026-11-16T00:30:00Z")).toContain("UTC");
+    for (const fraction of ["1", "123", "123456", "123456789"])
+      expect(formatTimestamp(`2026-11-16T00:30:00.${fraction}Z`)).toBe(
+        formatTimestamp("2026-11-16T00:30:00Z"),
+      );
     for (const value of [
       "",
       "2026-02-30T12:00:00Z",

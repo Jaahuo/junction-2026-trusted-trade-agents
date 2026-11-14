@@ -78,9 +78,7 @@ export function formatDeliveryDate(value: string): string {
 
 export function formatTimestamp(value: string): string {
   const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.exec(
-      value,
-    );
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
   if (
     !match ||
     !validDateParts(Number(match[1]), Number(match[2]), Number(match[3])) ||

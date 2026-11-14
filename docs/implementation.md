@@ -79,7 +79,7 @@ The server then checks every choice, so a wrong model choice cannot become an un
 Codex models did most of the development, in the OhMyPi agent harness and as a reviewer next to Claude Code.
 
 - **Orchestration and implementation.** 49 of 52 main OhMyPi sessions ran on `gpt-6.1-sol`. 377 subagent sessions ran on `gpt-6.1-sol` (159) and `gpt-6.1-terra` (218). They ran delivery waves in parallel worktrees, and plan, code, adversarial and security reviews.
-- **Independent review.** In Claude Code sessions, Codex reviewed Claude's diffs, plans and approaches: 82 review runs and 104 recorded findings. We fixed 96, rejected 7 with a reason and left 1 open.
+- **Independent review.** Codex reviewed the code Claude wrote. In the Claude Code sessions alone, Codex ran 82 reviews of diffs, plans and approaches and recorded 104 findings: we fixed 96, rejected 7 with a reason and left 1 open.
   Example: a hosted database reset used `DROP … CASCADE`. After the Codex finding, the reset drops an exact list of our tables in one transaction, with a test that fails first.
 - **Process.** A high-impact PR needs a review by a different agent, with the reviewer's model in the PR evidence ([workflow](workflow.md)). Issues are the task state, and each task has its own worktree. The [`backlog-loop`](../.agents/skills/backlog-loop/SKILL.md) skill picks, builds, checks and ships ready issues.
 

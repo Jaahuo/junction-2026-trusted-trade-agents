@@ -23,6 +23,7 @@ import { intlLocale, lang, LocaleController, pick } from "../../shared/locale.ts
 import { base } from "../../shared/styles.ts";
 import {
   allergenChips,
+  allergenName,
   allergenText,
   brokenRule,
   seal,
@@ -881,7 +882,10 @@ export class ApprovalCard extends LitElement {
               where: c.product.name,
               target: lineId(c),
               reason: allergenText(a),
-              action: a.status === "error" ? brokenRule(a) : text.checkAllergenRule(a.allergen),
+              action:
+                a.status === "error"
+                  ? brokenRule(a)
+                  : text.checkAllergenRule(allergenName(a.allergen)),
             })),
     );
   }
@@ -1696,13 +1700,13 @@ export class ApprovalCard extends LitElement {
     const log = logUrl(order);
     return html`<div class="result sent" part="result" role="status" tabindex="-1">
         ${statusDisc("success")}
-        <h3 class="section-title">${text.sentTitle(brand.name)}</h3>
+        <h3 class="section-title">${text.orderSent}</h3>
       </div>
       <div class="receipt">
         ${rows([
           [text.orderNo, formatOrderNumber(order.orderId)],
           [text.delivery, earliest === undefined ? null : day(earliest)],
-          [text.total, `${money(order.total.net)} ${vat("net")}`],
+          [text.total, text.exclVat(money(order.total.net))],
           [
             text.confirmedBy,
             decision === null ? null : text.youAt(timeOnly(new Date(decision.at))),

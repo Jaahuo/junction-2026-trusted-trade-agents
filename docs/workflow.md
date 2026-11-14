@@ -54,7 +54,18 @@ Claude resolves the active worktree from the hook input's `cwd`, even when the s
 | `impact`   | Authentication or database isolation change affecting multiple areas | Green CI and independent current-head GitHub approval or agent review evidence. |
 | `lock-in`  | Irreversible data deletion or a hard-to-reverse external commitment  | Green CI and independent human approval on the exact head.                      |
 
-Assess actual blast radius and reversibility rather than choosing based on file location. Record what was reviewed and who approved it. For an independent agent review, `bun run ship --risk impact --review-file report.json` posts a PR-author-attributed evidence comment. The JSON requires the full exact SHA in `head`, distinct nonempty `taskOwnerAgent` and `reviewerAgent`, `method`, complete review `findings` and disposition, and `verdict` exactly `approved`. Repeat the review after a new commit.
+Assess actual blast radius and reversibility rather than choosing based on file location. Record what was reviewed and who approved it. For an independent agent review, `bun run ship --risk impact --review-file report.json` posts a PR-author-attributed evidence comment. The JSON requires the full exact SHA in `head`, distinct nonempty `taskOwnerAgent` and `reviewerAgent`, `method`, `findings` as one nonempty string that lists each finding with its disposition, and `verdict` exactly `approved`. Repeat the review after a new commit.
+
+```json
+{
+  "head": "<full commit SHA>",
+  "taskOwnerAgent": "implementer (model)",
+  "reviewerAgent": "reviewer (model)",
+  "method": "What was reviewed and how.",
+  "findings": "R1 (high): <defect> -> fixed: <how> | R2 (medium): <defect> -> deferred: <why>",
+  "verdict": "approved"
+}
+```
 
 The script checks exact head, required gate and current main; updates can invalidate review or checks. It cannot establish that an account represents a human, that agents are independent, or that a review was substantive. These are team conventions, not cryptographically verified or server-enforced guarantees.
 

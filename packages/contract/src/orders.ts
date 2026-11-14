@@ -36,13 +36,29 @@ export const AuditEventSchema = z.strictObject({
   detail: z.string().optional(),
   /** The product a check applies to, for a reason about one product (a new product, CO₂ …). */
   productId: z.string().optional(),
+  /** False when the entry no longer matches its signature (SPEC-010 audit integrity). */
+  integrityOk: z.boolean().optional(),
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
+
+const ALLERGEN_RELATIONS = ["free_from", "contains", "may_contain"] as const;
+
+/** An allergen fact of a line; `status` is its relation to the buyer's hard rules. */
+const LineAllergenSchema = z.strictObject({
+  allergen: z.string(),
+  type: z.enum(ALLERGEN_RELATIONS),
+  status: z.enum(["default", "warning", "error"]),
+  /** The buyer's rule it meets or breaks, such as "no egg". */
+  rule: z.string().optional(),
+});
 
 export const OrderLineSchema = z.strictObject({
   offerId: z.string(),
   token: z.string(),
   claims: OfferClaimsSchema,
+  /** One sentence from the agent on why it picked this product. */
+  rationale: z.string().optional(),
+  allergens: z.array(LineAllergenSchema).optional(),
 });
 export type OrderLine = z.infer<typeof OrderLineSchema>;
 
@@ -92,6 +108,18 @@ export const OrderSchema = z.strictObject({
   nextDeliveryDate: DateSchema.nullable(),
   audit: z.array(AuditEventSchema),
   createdAt: TimeSchema,
+  /** What the order is for, written by the agent from the buyer's request. */
+  purpose: z.string().optional(),
+  offerSignature: z
+    .strictObject({ state: z.enum(["verified", "expired", "invalid"]), validUntil: TimeSchema })
+    .optional(),
+  receiptSignature: z
+    .strictObject({
+      state: z.enum(["verified", "pending", "invalid"]),
+      signedAt: TimeSchema.nullable(),
+    })
+    .optional(),
+  auditIntegrity: z.enum(["intact", "unverified", "broken"]).optional(),
 });
 export type Order = z.infer<typeof OrderSchema>;
 

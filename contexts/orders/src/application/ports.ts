@@ -25,6 +25,7 @@ export interface PaymentPort {
   /** The pay-on-order step of placement. */
   authorize(order: StoredOrder): Promise<Result<void, "PAYMENT_FAILED">>;
 }
+export type ReceiptSigner = (order: StoredOrder) => Promise<Result<string, "UPSTREAM_FAILED">>;
 
 /** Work inside one transaction that holds the customer's placement lock. */
 export interface OrderTx {
@@ -48,7 +49,7 @@ export interface OrderStore {
   pending(customer: string): Promise<StoredOrder[]>;
   findByKey(customer: string, idempotencyKey: string): Promise<StoredOrder | null>;
   history(customer: string, productIds: string[]): Promise<HistoryRow[]>;
-  refuse(customer: string, event: AuditEvent): Promise<void>;
+  refuse(customer: string, event: AuditEvent): Promise<Result<void, "AUDIT_INVALID">>;
   /** Runs `work` in one transaction, serialised per customer. */
   withCustomerLock<T>(customer: string, work: (tx: OrderTx) => Promise<T>): Promise<T>;
 }

@@ -10,6 +10,7 @@ import {
 import { err, type Result } from "@app/kernel";
 import type { z } from "zod";
 import {
+  draftSummary,
   errorSummary,
   mandateSummary,
   offersSummary,
@@ -29,6 +30,7 @@ export interface TradeRest {
   place(body: ToolInput<"place_order">): Reply<"place_order">;
   status(orderId: string): Reply<"get_order_status">;
   mandate(): Reply<"get_mandate">;
+  draft(body: ToolInput<"draft_mandate">): Reply<"draft_mandate">;
   pending(): Reply<"list_pending_approvals">;
   decide(orderId: string, body: DecideApprovalRequest): Reply<"decide_approval">;
   register(body: ToolInput<"register_mandate">): Reply<"register_mandate">;
@@ -93,6 +95,11 @@ const TOOLS: { [T in ToolName]: Tool<T> } = {
     input: TOOL_INPUT.get_mandate,
     call: (rest) => rest.mandate(),
     text: mandateSummary,
+  },
+  draft_mandate: {
+    input: TOOL_INPUT.draft_mandate,
+    call: (rest, input) => rest.draft(input),
+    text: draftSummary,
   },
   list_pending_approvals: {
     input: TOOL_INPUT.list_pending_approvals,

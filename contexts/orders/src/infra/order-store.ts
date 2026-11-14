@@ -1,7 +1,9 @@
 import type { Db } from "@app/server-kit";
+import { appendAudit, verifyAuditChain } from "@app/contract/server";
+import { err, ok } from "@app/kernel";
 import { and, asc, eq, inArray, or, sql, sum } from "drizzle-orm";
 import type { OrderStore, OrderTx, StoredOrder } from "../application/ports.ts";
-import { history, orders, refusals } from "./schema.ts";
+import { history, orders, refusalAnchors, refusals } from "./schema.ts";
 
 type Row = typeof orders.$inferSelect;
 type Executor = Pick<Db, "select" | "insert" | "update">;
@@ -28,6 +30,8 @@ const toStored = (row: Row): StoredOrder => ({
   requotes: row.requotes,
   nextDeliveryDate: row.nextDeliveryDate,
   audit: row.audit,
+  ...(row.receipt === null ? {} : { receipt: row.receipt }),
+  ...(row.auditAnchor === null ? {} : { auditAnchor: row.auditAnchor }),
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -53,6 +57,8 @@ const toRow = (order: StoredOrder): Row => ({
   requotes: order.requotes,
   nextDeliveryDate: order.nextDeliveryDate,
   audit: order.audit,
+  receipt: order.receipt ?? null,
+  auditAnchor: order.auditAnchor ?? null,
   createdAt: new Date(order.createdAt),
 });
 
@@ -152,7 +158,41 @@ export const postgresOrderStore = (db: Db): OrderStore => ({
           .from(history)
           .where(and(eq(history.customer, customer), inArray(history.productId, productIds))),
   refuse: async (customer, event) => {
-    await db.insert(refusals).values({ customer, event });
+    return db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`orders:${customer}`}, 0))`,
+      );
+      const [anchor] = await tx
+        .select({ hash: refusalAnchors.hash, count: refusalAnchors.count })
+        .from(refusalAnchors)
+        .where(eq(refusalAnchors.customer, customer));
+      const rows = await tx
+        .select({ event: refusals.event })
+        .from(refusals)
+        .where(eq(refusals.customer, customer))
+        .orderBy(asc(refusals.id));
+      const scope = `refusals:${customer}`;
+      const events = rows.map((row) => row.event);
+      if (anchor) {
+        if (anchor.count !== events.length || !(await verifyAuditChain(scope, events, anchor)).ok)
+          return err("AUDIT_INVALID" as const);
+      } else if (events.length > 0) {
+        return err("AUDIT_INVALID" as const);
+      }
+      const chained = await appendAudit(scope, events, [event]);
+      if (!chained.ok) return err("AUDIT_INVALID" as const);
+      const appended = chained.value[chained.value.length - 1];
+      if (appended?.hash === undefined) return err("AUDIT_INVALID" as const);
+      await tx.insert(refusals).values({ customer, event: appended });
+      await tx
+        .insert(refusalAnchors)
+        .values({ customer, hash: appended.hash, count: chained.value.length })
+        .onConflictDoUpdate({
+          target: refusalAnchors.customer,
+          set: { hash: appended.hash, count: chained.value.length },
+        });
+      return ok(undefined);
+    });
   },
   withCustomerLock: (customer, work) =>
     db.transaction(async (tx) => {

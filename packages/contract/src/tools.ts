@@ -1,6 +1,12 @@
 import { EmptySchema } from "./common.ts";
 import { DecideApprovalInputSchema } from "./decision.ts";
-import { MandateRefSchema, RegisterMandateRequestSchema, StoredMandateSchema } from "./mandate.ts";
+import {
+  DraftMandateRequestSchema,
+  MandateDraftSchema,
+  MandateRefSchema,
+  RegisterMandateRequestSchema,
+  StoredMandateSchema,
+} from "./mandate.ts";
 import { OffersRequestSchema, OffersResultSchema } from "./offers.ts";
 import {
   OrderRefSchema,
@@ -17,6 +23,7 @@ export const MODEL_TOOLS = [
   "place_order",
   "get_order_status",
   "get_mandate",
+  "draft_mandate",
   "list_pending_approvals",
 ] as const;
 /** Only a view calls these. */
@@ -29,6 +36,7 @@ export const TOOL_INPUT = {
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
+  draft_mandate: DraftMandateRequestSchema,
   list_pending_approvals: EmptySchema,
   decide_approval: DecideApprovalInputSchema,
   register_mandate: RegisterMandateRequestSchema,
@@ -41,6 +49,7 @@ export const TOOL_OUTPUT = {
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,
+  draft_mandate: MandateDraftSchema,
   list_pending_approvals: PendingListSchema,
   decide_approval: OrderSchema,
   register_mandate: StoredMandateSchema,

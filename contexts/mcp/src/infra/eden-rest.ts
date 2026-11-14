@@ -65,6 +65,7 @@ export const edenTradeRest = (
     status: (orderId) =>
       settle("status", TOOL_OUTPUT.get_order_status, () => orders()({ orderId }).get()),
     mandate: () => settle("mandate", TOOL_OUTPUT.get_mandate, () => mandates().current.get()),
+    draft: (body) => settle("draft", TOOL_OUTPUT.draft_mandate, () => mandates().drafts.post(body)),
     pending: () =>
       settle("pending", TOOL_OUTPUT.list_pending_approvals, () => orders().pending.get()),
     decide: (orderId, body) =>

@@ -1,0 +1,139 @@
+// Text of the mandate settings view, in each view language. Order-limit and pay-on-order
+// labels come from ORDER_WORDING in @app/ui/format.
+
+const en = {
+  agentSettings: "Agent settings",
+  title: "Agent limits",
+  loading: "Loading agent limits…",
+  noMandateTitle: "No current mandate",
+  noMandateBody:
+    "The agent has no current authority to place orders. Ask an approver to set up a mandate.",
+  loadFailedTitle: "Agent limits could not be loaded",
+  loadFailedBody: "Try again or open the limits page.",
+  tryAgain: "Try again",
+  openLimitsPage: "Open limits page",
+  status: { active: "Active", revoked: "Revoked", expired: "Expired" },
+  version: (version: number) => `Version ${version}`,
+  activeNote: "Automatic placement is subject to these limits and other fixed checks.",
+  inactiveNote:
+    "No current authority: these historical limits are not in force and cannot authorize orders.",
+  previousLimits: "Previous limits and policies",
+  orderLimits: "Order limits",
+  perOrder: (amount: string) =>
+    `${amount} per order, including VAT and deposits. At or below this limit, automatic placement is allowed subject to other checks; above it, approval is required.`,
+  categories: "Categories",
+  allCategories: "All categories",
+  noCategories: "No categories",
+  categoriesAll: "All categories are eligible for automatic placement, subject to other checks.",
+  categoriesNone: "No categories are eligible for automatic placement; approval is required.",
+  categoriesListed:
+    "Listed categories are eligible for automatic placement, subject to other checks; other categories require approval.",
+  substitutions: "Substitutions",
+  newProducts: "Products not previously ordered by this customer",
+  productData: "Product data",
+  minReliability: "Minimum delivery reliability",
+  reliabilityRule:
+    "At or above the minimum, automatic placement is allowed subject to other checks; below it, approval is required.",
+  maxCo2: "Maximum estimated CO₂-equivalent per kg",
+  co2PerKg: (amount: string) => `${amount} CO₂-eq per kg`,
+  co2Rule:
+    "At or below the maximum, automatic placement is allowed subject to other checks; above it, approval is required.",
+  missingAllergen: "Missing allergen data",
+  allergenRule: (policy: string) =>
+    `${policy} when an allergen constraint is unknown. Contradicted or missing matches still require approval.`,
+  paymentTerms: "Payment terms",
+  invoice: "Invoice",
+  standingConstraints: "Standing constraints",
+  required: "Required",
+  preferred: "Preferred",
+  none: "None",
+  freeFromLactose: "Free from lactose",
+  countryOfOrigin: "Country of origin",
+  category: "Category",
+  validity: "Validity",
+  issued: "Issued",
+  expires: "Expires",
+  readOnly:
+    "This view is read-only. An approver must authorize changes. Unusual quantities and unconfirmed stock can still require approval; other checks also apply.",
+  technicalDetails: "Technical details",
+  mandateId: "Mandate ID",
+  customer: "Customer",
+  agent: "Agent",
+  signedBy: "Signed by",
+  registered: "Registered",
+  autoPolicy: "Automatic placement allowed, subject to other checks",
+  askPolicy: "Ask for approval",
+  noSubstitutes: "Substitute offers are not allowed",
+  noThreshold: "No threshold set",
+  threshold: (value: string, policy: string) => `${value}. If data is missing: ${policy}.`,
+};
+
+const fi: typeof en = {
+  agentSettings: "Agentin asetukset",
+  title: "Agentin rajat",
+  loading: "Ladataan agentin rajoja…",
+  noMandateTitle: "Ei voimassa olevaa valtuutusta",
+  noMandateBody:
+    "Agentilla ei ole valtuutusta tehdä tilauksia. Pyydä hyväksyjää laatimaan valtuutus.",
+  loadFailedTitle: "Agentin rajoja ei voitu ladata",
+  loadFailedBody: "Yritä uudelleen tai avaa rajasivu.",
+  tryAgain: "Yritä uudelleen",
+  openLimitsPage: "Avaa rajasivu",
+  status: { active: "Voimassa", revoked: "Peruttu", expired: "Vanhentunut" },
+  version: (version) => `Versio ${version}`,
+  activeNote: "Automaattinen tilaus noudattaa näitä rajoja ja muita kiinteitä tarkistuksia.",
+  inactiveNote:
+    "Ei voimassa olevaa valtuutusta: nämä aiemmat rajat eivät ole voimassa eivätkä oikeuta tilauksiin.",
+  previousLimits: "Aiemmat rajat ja käytännöt",
+  orderLimits: "Tilausrajat",
+  perOrder: (amount) =>
+    `${amount} tilausta kohden, sisältää ALV:n ja panttimaksut. Rajan alittuessa tai täyttyessä tilaus voidaan tehdä automaattisesti muiden tarkistusten puitteissa; rajan ylittyessä tarvitaan hyväksyntä.`,
+  categories: "Tuoteryhmät",
+  allCategories: "Kaikki tuoteryhmät",
+  noCategories: "Ei tuoteryhmiä",
+  categoriesAll:
+    "Kaikki tuoteryhmät voidaan tilata automaattisesti muiden tarkistusten puitteissa.",
+  categoriesNone: "Mitään tuoteryhmää ei voi tilata automaattisesti; tarvitaan hyväksyntä.",
+  categoriesListed:
+    "Luetellut tuoteryhmät voidaan tilata automaattisesti muiden tarkistusten puitteissa; muut tuoteryhmät vaativat hyväksynnän.",
+  substitutions: "Korvaavat tuotteet",
+  newProducts: "Tuotteet, joita asiakas ei ole aiemmin tilannut",
+  productData: "Tuotetiedot",
+  minReliability: "Toimitusvarmuuden vähimmäistaso",
+  reliabilityRule:
+    "Vähimmäistasolla tai sen yli tilaus voidaan tehdä automaattisesti muiden tarkistusten puitteissa; sen alla tarvitaan hyväksyntä.",
+  maxCo2: "Arvioidun CO₂-ekvivalentin enimmäismäärä kilolta",
+  co2PerKg: (amount) => `${amount} CO₂-ekv. kilolta`,
+  co2Rule:
+    "Enimmäismäärässä tai sen alle tilaus voidaan tehdä automaattisesti muiden tarkistusten puitteissa; sen yli tarvitaan hyväksyntä.",
+  missingAllergen: "Puuttuva allergeenitieto",
+  allergenRule: (policy) =>
+    `${policy}, kun allergeenivaatimuksen tieto puuttuu. Ristiriitaiset tai puuttuvat osumat vaativat silti hyväksynnän.`,
+  paymentTerms: "Maksuehdot",
+  invoice: "Lasku",
+  standingConstraints: "Pysyvät vaatimukset",
+  required: "Pakollinen",
+  preferred: "Toivottu",
+  none: "Ei mitään",
+  freeFromLactose: "Laktoositon",
+  countryOfOrigin: "Alkuperämaa",
+  category: "Tuoteryhmä",
+  validity: "Voimassaolo",
+  issued: "Myönnetty",
+  expires: "Päättyy",
+  readOnly:
+    "Tätä näkymää voi vain lukea. Muutokset vaativat hyväksyjän luvan. Poikkeavat määrät ja vahvistamaton saldo voivat silti vaatia hyväksynnän; myös muut tarkistukset ovat voimassa.",
+  technicalDetails: "Tekniset tiedot",
+  mandateId: "Valtuutuksen tunnus",
+  customer: "Asiakas",
+  agent: "Agentti",
+  signedBy: "Allekirjoittaja",
+  registered: "Rekisteröity",
+  autoPolicy: "Automaattinen tilaus sallittu muiden tarkistusten puitteissa",
+  askPolicy: "Pyydä hyväksyntä",
+  noSubstitutes: "Korvaavia tarjouksia ei sallita",
+  noThreshold: "Rajaa ei ole asetettu",
+  threshold: (value, policy) => `${value}. Jos tieto puuttuu: ${policy}.`,
+};
+
+export const MANDATE = { en, fi };

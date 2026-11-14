@@ -17,7 +17,7 @@ Before creating any task or exploration worktree, fetch its upstream and use the
 | `bun run new:context <name>` | Create a bounded context.                                               |
 | `bun run db:generate`        | Generate migrations after schema changes.                               |
 | `bun run db:reset`           | Reset this worktree's database and load demo data.                      |
-| `bun scripts/chat-check.ts`  | Run chat sentences in the Open WebUI host; see the `chat-check` skill.  |
+| `bun scripts/chat-check.ts`  | Run chat sentences in the Open WebUI host; see the `verify` skill.      |
 
 To run a script in another worktree, use `bun run --cwd <dir> <script>`. `bun --cwd <dir> run <script>` prints usage and exits 0 without running the script.
 

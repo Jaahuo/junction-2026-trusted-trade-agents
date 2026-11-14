@@ -1,117 +1,114 @@
+/* Valio Aimo look: the app skin's brand tokens (packages/ui/src/skin.css) and its OFL fonts. */
 @font-face {
-  font-family: "Zilla Slab";
-  src: url("/static/acme/fonts/zilla-slab.ttf") format("truetype");
+  font-family: "Barlow Condensed";
+  src: url("/static/acme/fonts/barlow-condensed-latin-700-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Barlow Condensed";
+  src: url("/static/acme/fonts/barlow-condensed-latin-800-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Nunito";
+  src: url("/static/acme/fonts/nunito-latin-400-normal.woff2") format("woff2");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Rethink Sans";
-  src: url("/static/acme/fonts/rethink-sans-regular.ttf") format("truetype");
+  font-family: "Nunito";
+  src: url("/static/acme/fonts/nunito-latin-600-normal.woff2") format("woff2");
   font-style: normal;
-  font-weight: 400;
+  font-weight: 500 600;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Rethink Sans";
-  src: url("/static/acme/fonts/rethink-sans-medium.ttf") format("truetype");
+  font-family: "Nunito";
+  src: url("/static/acme/fonts/nunito-latin-700-normal.woff2") format("woff2");
   font-style: normal;
-  font-weight: 500 700;
+  font-weight: 700;
   font-display: swap;
 }
 
 :root {
-  --font-display: "Zilla Slab", Georgia, serif;
-  --font-text: "Rethink Sans", system-ui, sans-serif;
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-text: "Nunito", system-ui, sans-serif;
   --app-font-family: var(--font-text);
-  --display-weight: 400;
-  --display-tracking: -0.018em;
+  --display-weight: 800;
+  --display-tracking: 0;
   --acme-photo: url("/static/acme/kitchen.jpg");
-  --color-white: #fffdf7;
-  --color-gray-50: #f8f4e9;
-  --color-gray-100: #eee8d9;
-  --color-gray-200: #e0d7c4;
-  --color-gray-300: #c6bba4;
-  --color-gray-400: #988c75;
-  --color-gray-500: #776d5a;
-  --color-gray-600: #625a49;
-  --color-gray-700: #484c3f;
-  --color-gray-800: #303e33;
-  --color-gray-850: #24382c;
-  --color-gray-900: #192f25;
-  --color-gray-950: #10231b;
-  --acme-paper: #faf8f1;
-  --acme-panel: #fffdf7;
-  --acme-ink: #173e35;
-  --acme-muted: #62655d;
-  --acme-accent: #173e35;
-  --acme-line: #d8d8cc;
-  --acme-wash: #e8eee8;
-  --acme-shadow: 0 4px 20px #173e3506;
+  /* Aimo brand tokens, the same values as the app skin. */
+  --aimo-teal: #005670;
+  --aimo-teal-deep: #003747;
+  --aimo-lime: #c0e021;
+  --aimo-lavender: #eee8f5;
+  --color-white: #ffffff;
+  --color-gray-50: #f6f8f9;
+  --color-gray-100: #eceff1;
+  --color-gray-200: #dde3e6;
+  --color-gray-300: #c3ccd0;
+  --color-gray-400: #95a2a8;
+  --color-gray-500: #6c787e;
+  --color-gray-600: #555759;
+  --color-gray-700: #3e4a50;
+  --color-gray-800: #2e3a40;
+  --color-gray-850: #263238;
+  --color-gray-900: #23282d;
+  --color-gray-950: #161b1f;
+  --acme-paper: #ffffff;
+  --acme-panel: #ffffff;
+  --acme-ink: #23282d;
+  --acme-heading: var(--aimo-teal);
+  --acme-muted: #555759;
+  --acme-accent: var(--aimo-teal);
+  --acme-link: var(--aimo-teal);
+  --acme-line: #c3d3d9;
+  --acme-wash: var(--aimo-lavender);
+  --acme-sidebar: var(--aimo-lavender);
+  --acme-button: var(--aimo-lime);
+  --acme-button-text: var(--aimo-teal-deep);
+  --acme-shadow: 0 4px 20px #00567008;
 }
 
+/* Dark mode keeps the brand on deep teal surfaces, like the teal bands of the Aimo site. */
 html.dark {
-  --color-gray-50: #faf8f1;
-  --color-gray-100: #f7e9c9;
-  --color-gray-200: #deddd3;
-  --color-gray-300: #c8ccc5;
-  --color-gray-400: #aeb7af;
-  --color-gray-500: #8e9a91;
-  --color-gray-600: #69766c;
-  --color-gray-700: #454c47;
-  --color-gray-800: #333a35;
-  --color-gray-850: #2b302c;
-  --color-gray-900: #1e211f;
-  --color-gray-950: #171a18;
-  --acme-paper: #1e211f;
-  --acme-panel: #272c28;
-  --acme-ink: #f7e9c9;
-  --acme-muted: #bdc4b9;
-  --acme-accent: #9dbdaa;
-  --acme-line: #454d46;
-  --acme-wash: #303c33;
-  --acme-shadow: 0 4px 20px #00000018;
+  --color-gray-50: #f7fafb;
+  --color-gray-100: #eef4f6;
+  --color-gray-200: #d9e6ea;
+  --color-gray-300: #bcd2d8;
+  --color-gray-400: #8fb0ba;
+  --color-gray-500: #6a93a0;
+  --color-gray-600: #3f7486;
+  --color-gray-700: #1d5a6c;
+  --color-gray-800: #004457;
+  --color-gray-850: #003c4c;
+  --color-gray-900: #00323f;
+  --color-gray-950: #002833;
+  --acme-paper: #002b37;
+  --acme-panel: var(--aimo-teal-deep);
+  --acme-ink: #ffffff;
+  --acme-heading: #ffffff;
+  --acme-muted: #d9e6ea;
+  --acme-accent: var(--aimo-lime);
+  --acme-link: #d9e6ea;
+  --acme-line: #1d5a6c;
+  --acme-wash: #004457;
+  --acme-sidebar: var(--aimo-teal-deep);
+  --acme-shadow: 0 4px 20px #00000030;
 }
 
 /* The picker identifies the selected brand without depending on chat history. */
 :root:has(#model-selector-model-button[aria-label$="Acme Bakery"]) {
-  --color-gray-700: #5d4437;
-  --color-gray-800: #452d21;
-  --color-gray-850: #39251c;
-  --color-gray-900: #2d1e17;
-  --color-gray-950: #241912;
-  --acme-paper: #fbf6ee;
-  --acme-panel: #fffcf5;
-  --acme-ink: #4f3023;
-  --acme-muted: #756051;
-  --acme-accent: #783e27;
-  --acme-line: #e0d3c2;
-  --acme-wash: #f2e5d5;
   --acme-photo: url("/static/acme/bakery.webp");
-}
-
-html.dark:has(#model-selector-model-button[aria-label$="Acme Bakery"]) {
-  --color-gray-50: #fffcf5;
-  --color-gray-100: #f7e9c9;
-  --color-gray-200: #e4d9cd;
-  --color-gray-300: #d4c6b6;
-  --color-gray-400: #beab97;
-  --color-gray-500: #a48e79;
-  --color-gray-600: #7a6757;
-  --color-gray-700: #5a483b;
-  --color-gray-800: #40342b;
-  --color-gray-850: #332b25;
-  --color-gray-900: #241f1b;
-  --color-gray-950: #1b1714;
-  --acme-paper: #241f1b;
-  --acme-panel: #302822;
-  --acme-ink: #f7e9c9;
-  --acme-muted: #cbbbaa;
-  --acme-accent: #d6ab8d;
-  --acme-line: #584638;
-  --acme-wash: #403025;
 }
 
 body,
@@ -121,7 +118,7 @@ body,
 }
 
 #chat-container {
-  border-top: 4px solid var(--acme-accent);
+  border-top: 6px solid var(--aimo-teal);
 }
 
 #chat-pane {
@@ -129,13 +126,15 @@ body,
 }
 
 #sidebar {
-  background-color: var(--acme-panel);
+  background-color: var(--acme-sidebar);
   border-color: var(--acme-line);
 }
 
 #sidebar-webui-name {
   font-family: var(--font-display);
-  font-weight: 400;
+  font-weight: var(--display-weight);
+  color: var(--acme-heading);
+  text-transform: uppercase;
 }
 
 #sidebar a:hover,
@@ -143,7 +142,12 @@ body,
   background-color: var(--acme-wash);
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) {
+/* Acme home layout: keyed to the Acme profile image as well as the suggestions, because Open WebUI removes the suggestions while the user types. */
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  ) {
   max-width: 72rem;
   padding: 2rem clamp(1.25rem, 4vw, 4rem);
   transform: none;
@@ -163,47 +167,84 @@ body,
   grid-row: 1;
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) > .w-full {
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  )
+  > .w-full {
   text-align: left;
   min-width: 0;
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) > .w-full > .w-full {
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  )
+  > .w-full
+  > .w-full {
   align-items: flex-start;
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) .flex-row:has(> h2) {
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  )
+  .flex-row:has(> h2) {
   padding-inline: 0;
   max-width: 100%;
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) > .mx-auto {
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  )
+  > .mx-auto {
   grid-column: 1 / -1;
   width: 100%;
   max-width: none;
   margin: 0;
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) > .mx-auto > .mx-5 {
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  )
+  > .mx-auto
+  > .mx-5 {
   margin-inline: 0;
 }
 
 #chat-pane h2:has(.line-clamp-1) {
   font-family: var(--font-display);
-  font-size: clamp(2rem, 3.3vw, 3rem);
-  font-weight: 400;
-  line-height: 1.15;
+  font-size: clamp(2.5rem, 4.2vw, 3.75rem);
+  font-weight: var(--display-weight);
+  line-height: 1;
   letter-spacing: var(--display-tracking);
-  color: var(--acme-ink);
+  color: var(--acme-heading);
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) img[src*="/models/model/profile/image"] {
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  )
+  img[src*="/models/model/profile/image"] {
   width: 3rem;
   height: 3rem;
   border-radius: 0.75rem;
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) .markdown {
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  )
+  .markdown {
   padding-inline: 0;
   font-size: 1rem;
   margin-block: 0.75rem 1rem;
@@ -212,36 +253,72 @@ body,
   -webkit-line-clamp: unset;
 }
 
-#chat-pane .m-auto:has(#suggestions-heading) .markdown a {
+#chat-pane
+  .m-auto:is(
+    :has(#suggestions-heading),
+    :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+  )
+  .markdown
+  a {
   font-size: 0.8125rem;
   text-underline-offset: 0.2em;
 }
 
+#chat-pane .markdown a {
+  color: var(--acme-link);
+}
+
 #message-input-container {
   background: var(--acme-panel);
-  border: 1px solid var(--acme-line);
-  border-radius: 0.75rem;
+  border: 2px solid var(--acme-line);
+  border-radius: 0.5rem;
   box-shadow: var(--acme-shadow);
 }
 
 #message-input-container:focus-within {
   border-color: var(--acme-accent);
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--acme-accent) 18%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--acme-accent) 22%, transparent),
     var(--acme-shadow);
 }
 
 #model-selector-model-button {
-  color: var(--acme-accent);
-  font-weight: 500;
+  color: var(--acme-heading);
+  font-weight: 700;
+}
+
+/* Aimo primary buttons: lime fill, deep teal bold condensed uppercase label. */
+#send-message-button,
+button[aria-label="Voice mode"],
+button.bg-black,
+html.dark button.dark\:bg-white {
+  background-color: var(--acme-button);
+  color: var(--acme-button-text);
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+#send-message-button:hover,
+button[aria-label="Voice mode"]:hover,
+button.bg-black:hover,
+html.dark button.dark\:bg-white:hover {
+  background-color: color-mix(in srgb, var(--acme-button) 85%, var(--aimo-teal-deep));
+}
+
+#send-message-button:disabled {
+  background-color: var(--color-gray-200);
+  color: var(--color-gray-600);
 }
 
 #suggestions-heading {
-  color: var(--acme-muted);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  letter-spacing: normal;
-  text-transform: none;
+  color: var(--acme-heading);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   margin-block: 0.5rem;
 }
 
@@ -289,9 +366,11 @@ body,
 }
 
 [aria-labelledby="suggestions-heading"] button .text-sm {
-  color: var(--acme-ink);
-  font-size: 1rem;
-  font-weight: 500;
+  color: var(--acme-heading);
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.1;
   margin-bottom: 0.5rem;
 }
 
@@ -328,7 +407,12 @@ body,
 }
 
 @media (max-width: 640px) {
-  #chat-pane .m-auto:has(#suggestions-heading) img[src*="/models/model/profile/image"] {
+  #chat-pane
+    .m-auto:is(
+      :has(#suggestions-heading),
+      :has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])
+    )
+    img[src*="/models/model/profile/image"] {
     width: 3rem;
     height: 3rem;
   }
@@ -346,6 +430,13 @@ body,
 :root :is(a, button, input, textarea, [contenteditable="true"]):focus-visible {
   outline: 2px solid var(--acme-accent) !important;
   outline-offset: 3px;
+}
+
+/* The message box shows focus on its container (:focus-within), so its text field draws no second ring. */
+:root
+  #message-input-container
+  :is(input, textarea, [contenteditable="true"]):is(:focus, :focus-visible) {
+  outline: none !important;
 }
 
 /* WebUI leaves disabled attachment controls visible for users without Workspace access. */

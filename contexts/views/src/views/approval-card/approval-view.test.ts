@@ -12,7 +12,8 @@ test("the error card names the approval page when there is one, else the open ap
   const without = markup(errorCard(null, () => undefined, "The tool result does not match."));
   expect(without).not.toContain("approval page");
   expect(without).toContain("Open approvals");
-  expect(without).toContain("/views/approval-card");
+  expect(without).toContain("/approvals");
+  expect(without).not.toContain("/views/approval-card");
   expect(without).toContain("Try again in a moment.");
   expect(without).toContain("The tool result does not match.");
 

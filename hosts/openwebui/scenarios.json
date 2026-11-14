@@ -4,7 +4,10 @@
     "steps": [{ "say": "We need 20 litres of whole milk on Monday." }],
     "expect": [
       { "noError": "OFFER_INVALID", "known": "#162" },
-      { "order": "placed", "known": "#165" }
+      { "order": "placed", "known": "#165" },
+      { "notCalled": "search_products" },
+      { "notCalled": "get_offers" },
+      { "notCalled": "get_order_status" }
     ]
   },
   {
@@ -21,13 +24,14 @@
   {
     "name": "banana-yogurt",
     "steps": [{ "say": "I want 10 litres of banana yogurt for Monday." }],
-    "expect": [{ "called": "search_products" }, { "notCalled": "place_order" }, { "order": "none" }]
+    "expect": [{ "called": "find_products" }, { "notCalled": "place_order" }, { "order": "none" }]
   },
   {
     "name": "approve-on-card",
     "steps": [
       { "say": "I want 10 litres of banana yogurt for Monday." },
-      { "say": "Yes please." },
+      { "say": "Order 10 kilos of banana yogurt instead." },
+      { "click": "(Approve|Confirm) order" },
       { "click": "(Approve|Confirm) order" },
       { "dialog": "confirm" }
     ],
@@ -40,6 +44,7 @@
     "name": "over-limit-approve",
     "steps": [
       { "say": "A thousand litres of whole milk by Monday." },
+      { "click": "(Approve|Confirm) order" },
       { "click": "(Approve|Confirm) order" },
       { "dialog": "confirm" }
     ],

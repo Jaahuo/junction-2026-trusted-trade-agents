@@ -135,12 +135,12 @@ export function shortReason(line: OfferLine): string | null {
 
 /** auto only when nothing needs a look: shortReason is null only for an automatic pre-check
  * on a whole, on-time offer. */
-function statusOf(line: OfferLine): Exclude<Status, "none"> {
+export function statusOf(line: OfferLine): Exclude<Status, "none"> {
   return shortReason(line) === null ? "auto" : "attention";
 }
 
 /** The status in words, for the row's accessible name. */
-function statusWords(line: OfferLine): string {
+export function statusWords(line: OfferLine): string {
   const check = line.precheck;
   const words = pick(OFFERS).words;
   if (check === null) return words.notChecked;

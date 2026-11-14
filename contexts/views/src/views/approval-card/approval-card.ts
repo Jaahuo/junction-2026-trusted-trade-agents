@@ -1,6 +1,7 @@
 import {
   type DecideApprovalRequest,
   type OfferClaims,
+  type OfferLine,
   type Order,
   type ReasonCode,
   samePair,
@@ -33,6 +34,14 @@ import {
   statusDisc,
   trustStyles,
 } from "../../shared/trust.ts";
+import {
+  details,
+  explain,
+  pricePerStdUnit,
+  shortReason,
+  statusOf,
+  statusWords,
+} from "../offer-comparison/model.ts";
 import { CARD } from "./card-strings.ts";
 import { productImage } from "./images.ts";
 import { reduceToFit } from "./reduce.ts";
@@ -62,8 +71,11 @@ import {
 
 type Reason = { title: string; detail: string | null; tone: "warning" | "info" };
 
-/** How a short line (split, later, fewer) or a late line (accept, remove) is delivered. */
-type Handling = "split" | "later" | "fewer" | "accept" | "remove";
+/**
+ * How a short line (split, later, fewer, or topped up with a substitute's offer) or a late line
+ * (accept, remove) is delivered.
+ */
+type Handling = "split" | "later" | "fewer" | "accept" | "remove" | `topup:${string}`;
 type HandlingChoice = {
   value: Handling;
   label: string;
@@ -158,6 +170,22 @@ const substitutionOf = (order: Order, c: OfferClaims): Substitution | null => {
   const proposed = alternatives.filter((a) => a.replaces === c.productId);
   return proposed.length === 0 ? null : { original: c, options: proposed };
 };
+/**
+ * A short line's top-up: the substitute in the order that covers its missing amount, and the
+ * other substitutes proposed for it. Null when the line is not short or nothing tops it up.
+ */
+const topUpOf = (order: Order, c: OfferClaims) => {
+  if (c.shortfall === null) return null;
+  const inOrder = order.lines.find((l) => l.claims.replaces === c.productId)?.claims;
+  if (inOrder === undefined) return null;
+  const others = order.alternatives.map((l) => l.claims).filter((a) => a.replaces === c.productId);
+  return [inOrder, ...others];
+};
+/** A substitute that tops up a short line: it is a choice of that line, not its own product. */
+const isTopUp = (order: Order, c: OfferClaims) => {
+  const original = order.lines.find((l) => l.claims.productId === c.replaces)?.claims;
+  return original !== undefined && topUpOf(order, original)?.[0] === c;
+};
 /** A substitution rule the human can make from a decided order; the view adds `decidedAt`. */
 export type RuleChoice = Omit<SubstitutionRule, "decidedAt">;
 /**
@@ -192,6 +220,43 @@ const ruleChoice = (order: Order): RuleChoice | null => {
 };
 /** A line that arrives after the requested date (`AVAILABILITY_DIFFERS`). */
 const isLate = (c: OfferClaims) => c.deliveryDate > c.requestedDate;
+
+/**
+ * The reasons a pending order's line raises, in the order the row names them: over the limit
+ * on its own (gross, against the mandate's limit), a different amount or date, then the
+ * product's own audit reasons that the order still carries.
+ */
+const lineReasons = (order: Order, c: OfferClaims, limit: number | null): ReasonCode[] => {
+  const still = (reason: ReasonCode) => order.reasons.includes(reason);
+  const over =
+    still("SPEND_OVER_LIMIT") && limit !== null && c.total.gross > limit
+      ? (["SPEND_OVER_LIMIT"] as const)
+      : [];
+  const differs =
+    still("AVAILABILITY_DIFFERS") && (c.shortfall !== null || isLate(c))
+      ? (["AVAILABILITY_DIFFERS"] as const)
+      : [];
+  const own = order.audit.flatMap((e) =>
+    e.productId === c.productId && e.reason !== undefined && still(e.reason) ? [e.reason] : [],
+  );
+  return [...new Set<ReasonCode>([...over, ...differs, ...own])];
+};
+
+/** A pending line as an offer with the pre-check the order holds for it, so the offer
+ * comparison's rules (reason, price per l/kg, sentence, details) read it the same way. */
+const offerOf = (order: Order, c: OfferClaims, limit: number | null): OfferLine => {
+  const reasons = lineReasons(order, c, limit);
+  return {
+    offerId: c.offerId,
+    token: "",
+    claims: c,
+    precheck: { decision: reasons.length === 0 ? "auto" : "needs_approval", reasons },
+    rank: null,
+    comparison: null,
+  };
+};
+
+const STATUS_ICON = { auto: checkCircle, attention: warning16 } as const;
 const daysLate = (c: OfferClaims) =>
   Math.round((Date.parse(c.deliveryDate) - Date.parse(c.requestedDate)) / 86_400_000);
 /** A short line in sales units: what arrives on its date, what is missing, and both together. */
@@ -220,9 +285,9 @@ export function reasonSummaries(order: Order): string[] {
     if (r === "SUBSTITUTION") {
       const replaced = claims.flatMap((c) => {
         const sub = substitutionOf(order, c);
-        return sub === null ? [] : [sub.original ?? c];
+        return sub === null || isTopUp(order, c) ? [] : [sub.original ?? c];
       });
-      return [text.outOfStockNamed(names(replaced))];
+      return replaced.length === 0 ? [] : [text.outOfStockNamed(names(replaced))];
     }
     if (r === "AVAILABILITY_DIFFERS") {
       const short = claims.filter((c) => c.shortfall !== null);
@@ -296,10 +361,10 @@ export class ApprovalCard extends LitElement {
     requoting: { state: true },
     reduced: { state: true },
     rejecting: { state: true },
-    confirming: { state: true },
     remembered: { type: Boolean },
     rules: { attribute: false },
     ruleDismissed: { state: true },
+    openLine: { state: true },
   };
 
   static override styles = [
@@ -717,11 +782,6 @@ export class ApprovalCard extends LitElement {
         flex-wrap: wrap;
         gap: var(--spacing-lg);
       }
-      .confirm {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-md);
-      }
       .group {
         display: flex;
         flex-direction: column;
@@ -842,6 +902,72 @@ export class ApprovalCard extends LitElement {
       .receipt .row dt {
         width: 140px;
       }
+      .line-offer {
+        padding-top: var(--spacing-xs);
+      }
+      .offer-toggle {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        width: 100%;
+        min-height: 44px;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .offer-status.auto .icon {
+        color: var(--color-text-success);
+      }
+      .offer-status.attention .icon,
+      .offer-reason,
+      .offer-sentence.attention {
+        color: var(--color-text-warning);
+      }
+      .offer-reason {
+        flex: 1;
+        font-size: var(--font-size-xs);
+      }
+      .offer-price {
+        margin-left: auto;
+        font-size: var(--font-size-xs);
+        white-space: nowrap;
+      }
+      .offer-toggle .chevron .icon {
+        color: var(--color-text-brand);
+      }
+      .offer-toggle[aria-expanded="true"] .chevron .icon {
+        transform: rotate(180deg);
+      }
+      .offer-details {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        padding-bottom: var(--spacing-sm);
+      }
+      .offer-sentence {
+        margin: 0;
+      }
+      .offer-facts {
+        display: grid;
+        gap: var(--spacing-xs);
+        margin: 0;
+      }
+      .offer-facts div {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+      }
+      .offer-facts dt {
+        color: var(--color-text-secondary);
+      }
+      .offer-facts dd {
+        margin: 0;
+        text-align: right;
+      }
     `,
   ];
 
@@ -868,16 +994,16 @@ export class ApprovalCard extends LitElement {
   declare private reduced: "fitted" | "cannot-fit" | null;
   /** Re-renders the card in the new language when it changes. */
   protected readonly locale = new LocaleController(this);
-  /** The reject picked, from its click until the decision comes back: it says "Rejecting…". */
-  declare private rejecting: "stop" | "alternatives" | null;
-  /** The decision waiting for its second click, which states what happens. */
-  declare private confirming: "approve" | "reject" | null;
+  /** From the Reject click until the decision comes back: it says "Rejecting…". */
+  declare private rejecting: boolean;
   /** True once the view has saved the rule offered on this decided order. */
   declare remembered: boolean;
   /** The mandate's substitution rules, when the view read them: a pair with a rule is not offered. */
   declare rules: SubstitutionRule[];
   /** "Keep asking" hides the offer. */
   declare private ruleDismissed: boolean;
+  /** The offerId of the product row whose offer details are open; one at a time. */
+  declare private openLine: string | null;
 
   constructor() {
     super();
@@ -894,10 +1020,10 @@ export class ApprovalCard extends LitElement {
     this.picked = null;
     this.requoting = false;
     this.reduced = null;
-    this.rejecting = null;
-    this.confirming = null;
+    this.rejecting = false;
     this.remembered = false;
     this.rules = [];
+    this.openLine = null;
     this.ruleDismissed = false;
   }
 
@@ -906,8 +1032,7 @@ export class ApprovalCard extends LitElement {
     // A decision that came back without a new order failed: the buttons are ready again.
     if (changed.has("busy") && !this.busy) {
       this.requoting = false;
-      this.rejecting = null;
-      this.confirming = null;
+      this.rejecting = false;
     }
     if (changed.has("order")) {
       this.edits = {};
@@ -915,8 +1040,7 @@ export class ApprovalCard extends LitElement {
       this.picked = null;
       this.handling = {};
       this.requoting = false;
-      this.rejecting = null;
-      this.confirming = null;
+      this.rejecting = false;
       if (changed.get("order")?.orderId !== this.order?.orderId) this.ruleDismissed = false;
     }
   }
@@ -1028,7 +1152,7 @@ export class ApprovalCard extends LitElement {
           return lines.flatMap((c) => {
             const sub = substitutionOf(order, c);
             const head = sub?.original ?? c;
-            return sub === null
+            return sub === null || isTopUp(order, c)
               ? []
               : [
                   {
@@ -1273,6 +1397,22 @@ export class ApprovalCard extends LitElement {
     if (short === null) return isLate(c) ? this.lateDecision(c) : nothing;
     const later = c.nextDeliveryDate;
     const perPack = c.total.net / c.quantity.value;
+    // Each substitute that covers the missing amount, priced against the missing packs.
+    const topUps: HandlingChoice[] = (topUpOf(order, c) ?? []).map((t) => {
+      const pack = t.product.perSalesUnit;
+      return {
+        value: `topup:${t.offerId}`,
+        label: text.topUpWith(t.product.name),
+        note: lineOf(order, t)?.rationale ?? null,
+        facts: [
+          [
+            day(t.deliveryDate),
+            pack === null ? amount(t.quantity) : `${number(t.quantity.value)} × ${amount(pack)}`,
+          ],
+        ],
+        price: signed(round(t.total.net - perPack * short.missing)),
+      };
+    });
     const options: HandlingChoice[] =
       later === null
         ? []
@@ -1295,6 +1435,7 @@ export class ApprovalCard extends LitElement {
               price: money(0),
             },
           ];
+    options.unshift(...topUps);
     options.push({
       value: "fewer",
       label: text.orderFewer,
@@ -1412,7 +1553,21 @@ export class ApprovalCard extends LitElement {
     const changes: { productId: string; quantity: OfferClaims["quantity"]; deliverBy?: string }[] =
       [];
     for (const { claims: c } of order.lines) {
-      const picked = this.handling[c.offerId];
+      const topUps = topUpOf(order, c);
+      const picked =
+        this.handling[c.offerId] ?? (topUps === null ? undefined : `topup:${topUps[0]?.offerId}`);
+      if (topUps !== null) {
+        const [inOrder] = topUps;
+        const other = topUps.find((t) => picked === `topup:${t.offerId}` && t !== inOrder);
+        if (other !== undefined)
+          return { decision: "pick_alternative", offerId: other.offerId, proposalVersion };
+        // Without the top-up, its substitute leaves the order.
+        if (inOrder !== undefined && !picked?.startsWith("topup:"))
+          changes.push({
+            productId: inOrder.productId,
+            quantity: { ...inOrder.quantity, value: 0 },
+          });
+      }
       const short = shortOf(c);
       if (picked === "remove" && isLate(c))
         changes.push({ productId: c.productId, quantity: { ...c.quantity, value: 0 } });
@@ -1479,7 +1634,7 @@ export class ApprovalCard extends LitElement {
                     </div>`
                   : amounts
               }
-              ${this.lineTrust(order, head)}
+              ${this.lineTrust(order, head)} ${this.lineOffer(order, head)}
             </div>
           </div>`;
     return html`<li
@@ -1489,6 +1644,55 @@ export class ApprovalCard extends LitElement {
     >
       ${summary} ${flagged ? this.lineDecision(order, c) : nothing}
     </li>`;
+  }
+
+  /**
+   * The offer summary of a pending line: status icon, short reason and price per l/kg, with a
+   * chevron that opens the sentence and the offer's facts inline; one row open at a time.
+   */
+  private lineOffer(order: Order, c: OfferClaims) {
+    if (order.status !== "pending_approval") return nothing;
+    const text = pick(CARD);
+    const line = offerOf(order, c, this.orderLimit);
+    const status = statusOf(line);
+    const reason = shortReason(line);
+    const price = pricePerStdUnit(c);
+    const open = this.openLine === c.offerId;
+    const panel = `offer-${c.offerId}`;
+    const label = [statusWords(line), reason, price?.spoken ?? text.priceUnknown, text.offerDetails]
+      .filter((part) => part !== null)
+      .join(", ");
+    return html`<div class="line-offer">
+      <button
+        type="button"
+        class="offer-toggle"
+        aria-expanded=${open ? "true" : "false"}
+        aria-controls=${panel}
+        aria-label=${label}
+        @click=${() => (this.openLine = open ? null : c.offerId)}
+      >
+        <span class="offer-status ${status}">${icon(STATUS_ICON[status])}</span>
+        <span class="offer-reason">${reason ?? nothing}</span>
+        <span class="offer-price">${price?.shown ?? "—"}</span>
+        <span class="chevron">${icon(chevronDown)}</span>
+      </button>
+      ${
+        open
+          ? html`<div class="offer-details" id=${panel}>
+              <p class="offer-sentence body-small ${status}">${explain(line, this.orderLimit)}</p>
+              <dl class="offer-facts body-small">
+                ${details(line).map(
+                  ([name, value]) =>
+                    html`<div>
+                      <dt>${name}</dt>
+                      <dd>${value}</dd>
+                    </div>`,
+                )}
+              </dl>
+            </div>`
+          : nothing
+      }
+    </div>`;
   }
 
   /** The agent's reason for a product and its allergen chips (#74). */
@@ -1507,6 +1711,7 @@ export class ApprovalCard extends LitElement {
   private isFlagged(order: Order, c: OfferClaims) {
     return (
       order.status === "pending_approval" &&
+      !isTopUp(order, c) &&
       (substitutionOf(order, c) !== null || c.shortfall !== null || isLate(c))
     );
   }
@@ -1531,8 +1736,15 @@ export class ApprovalCard extends LitElement {
     const lead = (c: OfferClaims) =>
       (lineOf(order, c)?.allergens?.some((a) => a.status !== "default") ? 2 : 0) +
       Number(news.includes(c));
+    // A top-up is a choice in its short line's box (pending only; after that, a line again).
     const ready = all
-      .filter((c) => !isFlagged(c) && !replaced.has(c.productId) && kept(c))
+      .filter(
+        (c) =>
+          !isFlagged(c) &&
+          !replaced.has(c.productId) &&
+          !(order.status === "pending_approval" && isTopUp(order, c)) &&
+          kept(c),
+      )
       .toSorted((a, b) => lead(b) - lead(a));
     const removed = all.filter((c) => !kept(c));
     const visible = this.allProducts ? ready : ready.slice(0, SHOWN);
@@ -1578,92 +1790,36 @@ export class ApprovalCard extends LitElement {
     const over = this.overLimit(order);
     const confirm = !order.reasons.includes("SPEND_OVER_LIMIT") || (over !== null && over <= 0);
     const text = pick(CARD);
-    if (this.busy && !this.requoting && this.rejecting === null)
+    if (this.busy && !this.requoting && !this.rejecting)
       return confirm ? text.confirming : text.approving;
     return confirm ? text.confirmOrder : text.approveOrder;
   }
 
-  /** Approve (or Confirm) and Reject; each asks its question before anything is sent. */
-  private actions(order: Order) {
-    // The question takes focus, so a keyboard user hears it and lands on its first answer.
-    const ask = (question: "approve" | "reject") => () => {
-      if (this.busy) return;
-      this.confirming = question;
-      void this.updateComplete.then(() =>
-        this.renderRoot.querySelector<HTMLElement>(".confirm button")?.focus(),
-      );
-    };
+  /** Approve (or Confirm) and Reject: one click each. */
+  private actions(order: Order, confirm: () => void) {
+    const text = pick(CARD);
+    const rejecting = this.busy && this.rejecting;
     return html`<div class="actions" part="actions">
       <button
         part="button approve"
         class="btn primary"
-        aria-busy=${this.busy ? "true" : "false"}
-        @click=${ask("approve")}
+        aria-busy=${this.busy && !this.rejecting ? "true" : "false"}
+        @click=${() => (this.busy ? undefined : confirm())}
       >
         ${this.approveLabel(order)}
       </button>
-      <button part="button reject" class="btn brand" @click=${ask("reject")}>
-        ${pick(CARD).reject}
-      </button>
-    </div>`;
-  }
-
-  /**
-   * The second click: Approve states the total it commits to; Reject offers to stop or to let
-   * the agent look for alternatives. Cancel goes back to the buttons.
-   */
-  private confirmation(order: Order, confirm: () => void) {
-    const text = pick(CARD);
-    const cancel = html`<button
-      type="button"
-      part="button cancel"
-      class="btn ghost"
-      @click=${() => (this.busy ? undefined : (this.confirming = null))}
-    >
-      ${text.cancel}
-    </button>`;
-    if (this.confirming === "approve")
-      return html`<div
-        class="confirm"
-        part="confirm"
-        role="group"
-        aria-labelledby="confirm-question"
-      >
-        <p id="confirm-question" class="strong">
-          ${text.approveQuestion(`${money(round(this.total(order, "gross")))} ${vat("gross")}`)}
-        </p>
-        <div class="actions">
-          <button
-            part="button approve-confirm"
-            class="btn primary"
-            aria-busy=${this.busy ? "true" : "false"}
-            @click=${() => (this.busy ? undefined : confirm())}
-          >
-            ${this.approveLabel(order)}
-          </button>
-          ${cancel}
-        </div>
-      </div>`;
-    const actions = ORDER_WORDING[lang()].actions;
-    const reject = (next: "stop" | "alternatives", label: string) =>
-      html`<button
-        part="button reject-${next}"
-        class="btn ${next === "stop" ? "brand" : "secondary"}"
-        aria-busy=${this.busy && this.rejecting === next ? "true" : "false"}
+      <button
+        part="button reject"
+        class="btn brand"
+        aria-busy=${rejecting ? "true" : "false"}
         @click=${() => {
           if (this.busy) return;
-          this.rejecting = next;
-          this.decide({ decision: "reject", next, proposalVersion: order.proposalVersion });
+          this.rejecting = true;
+          this.decide({ decision: "reject", next: "stop", proposalVersion: order.proposalVersion });
         }}
       >
-        ${this.busy && this.rejecting === next ? text.rejecting : label}
-      </button>`;
-    return html`<div class="confirm" part="confirm" role="group" aria-labelledby="confirm-question">
-      <p id="confirm-question" class="strong">${text.rejectQuestion}</p>
-      <div class="actions">
-        ${reject("stop", actions.rejectStop)} ${reject("alternatives", actions.rejectAlternatives)}
-        ${cancel}
-      </div>
+        ${rejecting ? text.rejecting : text.reject}
+      </button>
     </div>`;
   }
 
@@ -1696,8 +1852,7 @@ export class ApprovalCard extends LitElement {
         <span>${text.orderTotal} <span class="vat">${vat("net")}</span></span
         ><span class="value" aria-live="polite">${money(this.total(order, "net"))}</span>
       </p>
-      ${this.errorMessage()}
-      ${this.confirming === null ? this.actions(order) : this.confirmation(order, confirm)}
+      ${this.errorMessage()} ${this.actions(order, confirm)}
       ${
         this.canAsk
           ? html`<button

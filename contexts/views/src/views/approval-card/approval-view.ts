@@ -10,7 +10,6 @@ import { css, html, nothing } from "lit";
 import {
   callAction,
   loadView,
-  plainPageUrl,
   type ViewData,
   type ViewEntryOf,
   viewEntry,
@@ -36,6 +35,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   static override properties = {
     ...ViewElement.properties,
     openId: { state: true },
+    inApp: { attribute: false },
     busyId: { state: true },
     updatingId: { state: true },
     orderLimit: { state: true },
@@ -200,6 +200,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   readonly entry = viewEntry("approval-card");
   declare private openId: string | null;
+  /**
+   * Shown on a page of the web app: each order has its own page, so opening one (or going back)
+   * asks the app to navigate (`tt-approval-navigate`, detail: the order id or null).
+   */
+  declare inApp: boolean;
   declare private busyId: string | null;
   /** The order the agent is updating after a message (prototype P4). */
   declare private updatingId: string | null;
@@ -218,6 +223,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   constructor() {
     super();
     this.openId = null;
+    this.inApp = false;
     this.busyId = null;
     this.updatingId = null;
     this.orderLimit = null;
@@ -347,8 +353,15 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       await this.source?.message?.(text).catch(() => undefined);
   }
 
-  /** Opens an order from the list (or goes back with null) at the top of the view. */
+  /**
+   * Opens an order from the list (or goes back with null) at the top of the view. In the web
+   * app the app's own page changes, so its address and back button follow.
+   */
   private open(orderId: string | null) {
+    if (this.inApp) {
+      this.dispatchEvent(new CustomEvent("tt-approval-navigate", { detail: orderId }));
+      return;
+    }
     this.openId = orderId;
     this.decisionError = null;
     window.scrollTo({ top: 0 });
@@ -443,30 +456,23 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     </article>`;
   }
 
-  /** The row above the list: on the plain page a link back to the app, else kept empty. */
-  private appRow() {
-    return this.plain
-      ? html`<div class="top-row"><a class="back" href="/">${pick(VIEW).backToApp}</a></div>`
-      : html`<div class="top-row" aria-hidden="true"></div>`;
-  }
-
   private empty() {
     const text = pick(VIEW);
-    return html`${this.plain ? this.appRow() : nothing}
-      <article class="card" part="empty">
-        ${brandHeader(text.brandApprovals(brand.name), html`<h2 class="title">${text.approvals}</h2>`)}
-        <div class="body center">
-          ${icon(checkCircle)}
-          <p class="headline">${text.noneWaiting}</p>
-          <p class="secondary">${text.newRequests}</p>
-        </div>
-      </article>`;
+    return html` <article class="card" part="empty">
+      ${brandHeader(text.brandApprovals(brand.name), html`<h2 class="title">${text.approvals}</h2>`)}
+      <div class="body center">
+        ${icon(checkCircle)}
+        <p class="headline">${text.noneWaiting}</p>
+        <p class="secondary">${text.newRequests}</p>
+      </div>
+    </article>`;
   }
 
   private list(orders: Order[]) {
     const pending = orders.filter((o) => o.status === "pending_approval").length;
     const text = pick(VIEW);
-    return html`${this.appRow()}
+    // The empty row lines the list up with an open order's back link; the app has its top bar.
+    return html`${this.inApp ? nothing : html`<div class="top-row" aria-hidden="true"></div>`}
       <article class="card" part="list">
         ${brandHeader(
           text.brandApprovals(brand.name),
@@ -521,8 +527,12 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   }
 
   private selectedOrder(data: ViewData<"approval-card">) {
-    const orders = "orders" in data ? data.orders : [data];
-    return orders.length === 1 ? orders[0] : orders.find((o) => o.orderId === this.openId);
+    if (!("orders" in data)) return data;
+    // A list of one opens its order, except in the web app, where an order has its own page.
+    const { orders } = data;
+    return orders.length === 1 && !this.inApp
+      ? orders[0]
+      : orders.find((o) => o.orderId === this.openId);
   }
 
   protected override renderDone(data: ViewData<"approval-card">) {
@@ -530,19 +540,14 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const open = this.selectedOrder(data);
     if (open === undefined) return orders.length === 0 ? this.empty() : this.list(orders);
     if (this.updatingId === open.orderId) return this.updating(open);
-    // The back link sits in a row the list keeps too, so the card does not move. One order on the
-    // plain page links to the list page.
+    // The back link sits in a row the list keeps too, so the card does not move.
     const text = pick(VIEW);
     return html`${
-        orders.length > 1
+        orders.length > 1 || this.inApp
           ? html`<div class="top-row">
               <button class="back" @click=${() => this.open(null)}>${text.allApprovals}</button>
             </div>`
-          : this.plain
-            ? html`<div class="top-row">
-                <a class="back" href=${listPageUrl()}>${text.allApprovals}</a>
-              </div>`
-            : nothing
+          : nothing
       }
       <tt-approval-card
         .order=${open}
@@ -584,13 +589,13 @@ export const decisionText = (order: Order) => {
   return order.decision?.next === "alternatives" ? decided.alternatives(name) : decided.stop(name);
 };
 
-/** The list page of open approvals, on the server that served the view (relative without a DOM). */
+/** The app's page of open approvals, on the server that served the view (relative without a DOM). */
 const listPageUrl = () => {
   const server =
     globalThis.document?.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ??
     globalThis.location?.origin ??
     "";
-  return plainPageUrl("approval-card", server) ?? "/views/approval-card";
+  return `${server}/approvals`;
 };
 
 /**

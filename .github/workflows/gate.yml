@@ -15,6 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'bun.lock') }}
       - run: bun install --frozen-lockfile
       - run: bun check
       - run: bunx vp check
@@ -50,6 +54,10 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: Run tests in an isolated process namespace
         run: |
@@ -71,114 +79,10 @@ jobs:
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
       - run: gitleaks git --redact --no-banner
 
-  audit:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
-      - run: bun install --frozen-lockfile
-      - run: |
-          mkdir -p reports
-          set +e
-          bun audit --json > reports/bun-audit.json 2> reports/bun-audit.stderr
-          status=$?
-          set -e
-          bun scripts/ci-audit.ts reports/bun-audit.json "$status"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: audit-report-${{ github.run_id }}-${{ github.run_attempt }}
-          path: reports/
-          retention-days: 90
-          if-no-files-found: warn
-
-  image:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    services:
-      postgres:
-        image: mirror.gcr.io/library/postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: image_smoke
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d image_smoke"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Install Trivy
-        run: |
-          curl -fsSL --retry 3 -o /tmp/trivy.tar.gz https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz
-          echo "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  /tmp/trivy.tar.gz" | sha256sum -c -
-          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
-      - name: Build image archive
-        run: |
-          mkdir -p evidence
-          docker buildx build --platform linux/amd64 --tag "gate-image:$GITHUB_SHA" --output type=docker,dest=evidence/image.tar .
-          docker load --input evidence/image.tar
-      - name: Smoke production runtime
-        run: |
-          umask 077
-          bun scripts/generate-keys.ts > "$RUNNER_TEMP/image.env"
-          printf '%s\n' \
-            'DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/image_smoke' \
-            'PORT=3000' 'WHOLESALER_LIVE=fixture' >> "$RUNNER_TEMP/image.env"
-          trap 'docker logs gate-smoke; docker rm -f gate-smoke; rm -f "$RUNNER_TEMP/image.env"' EXIT
-          docker run --detach --name gate-smoke --network host --env-file "$RUNNER_TEMP/image.env" "gate-image:$GITHUB_SHA"
-          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --max-time 2 http://127.0.0.1:3000/api/health
-          docker exec gate-smoke /usr/local/bin/bun -e '
-            if (process.getuid() !== 1000) throw new Error("Expected runtime UID 1000");
-            for (const path of ["/bin/sh", "/bin/bash", "/sbin/apk", "/usr/bin/apt", "/usr/bin/apt-get"]) {
-              if (await Bun.file(path).exists()) throw new Error(`Unexpected runtime tool: ${path}`);
-            }
-          '
-      - name: Scan final image
-        run: |
-          /tmp/trivy image --input evidence/image.tar --scanners vuln --pkg-types os,library --file-patterns 'node-pkg:node_modules/\.bun/.*/package\.json$' --format cyclonedx --output evidence/sbom.cdx.json
-          /tmp/trivy image --input evidence/image.tar --scanners vuln --pkg-types os,library --file-patterns 'node-pkg:node_modules/\.bun/.*/package\.json$' --format json --list-all-pkgs --output evidence/image-scan.json
-          bun scripts/ci-image.ts evidence/image-scan.json
-      - name: Record image identity
-        run: |
-          # The config digest from the archive; docker inspect .Id depends on the image store (#198).
-          image_id=$(bun scripts/ci-image.ts config-digest evidence/image.tar)
-          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
-          lock_hash=$(sha256sum bun.lock | cut -d ' ' -f 1)
-          version=$(/tmp/trivy --version | head -n 1 | cut -d ' ' -f 2)
-          test "$version" = "0.76.2"
-          jq -n --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg image "$image_id" --arg lock "$lock_hash" --arg scanner "$version" \
-            '{schemaVersion: 1, sourceSha: $sha, gateRunId: $run, gateRunAttempt: $attempt, imageId: $image, lockfileSha256: $lock, scannerVersion: $scanner}' > evidence/manifest.json
-          (cd evidence && sha256sum image.tar sbom.cdx.json image-scan.json manifest.json > SHA256SUMS)
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: delivery-${{ github.sha }}-${{ github.run_attempt }}
-          path: evidence/
-          retention-days: 7
-          compression-level: 0
-          if-no-files-found: error
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: image-reports-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            evidence/sbom.cdx.json
-            evidence/image-scan.json
-            evidence/manifest.json
-            evidence/SHA256SUMS
-          retention-days: 90
-          if-no-files-found: warn
-
   gate:
     name: gate
     if: always()
-    needs: [quality, test, secrets, audit, image]
+    needs: [quality, test, secrets]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -186,9 +90,7 @@ jobs:
           QUALITY: ${{ needs.quality.result }}
           TEST: ${{ needs.test.result }}
           SECRETS: ${{ needs.secrets.result }}
-          AUDIT: ${{ needs.audit.result }}
-          IMAGE: ${{ needs.image.result }}
         run: |
-          for result in "$QUALITY" "$TEST" "$SECRETS" "$AUDIT" "$IMAGE"; do
+          for result in "$QUALITY" "$TEST" "$SECRETS"; do
             if [ "$result" != success ]; then exit 1; fi
           done

@@ -89,7 +89,8 @@ jobs:
           cp SHA256SUMS ../deployment-evidence/artifact-SHA256SUMS
           docker load --input image.tar
           expected=$(jq -er .imageId manifest.json)
-          actual=$(docker image inspect "gate-image:$SHA" --format '{{.Id}}')
+          # The config digest from the archive: docker image inspect .Id depends on the engine's image store.
+          actual=$(tar -xOf image.tar manifest.json | jq -er '.[0].Config | capture("(?<d>[0-9a-f]{64})").d | "sha256:" + .')
           [ "$actual" = "$expected" ]
       - name: Publish verified image
         id: publish

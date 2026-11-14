@@ -147,7 +147,8 @@ jobs:
           bun scripts/ci-image.ts evidence/image-scan.json
       - name: Record image identity
         run: |
-          image_id=$(docker image inspect "gate-image:$GITHUB_SHA" --format '{{.Id}}')
+          # The config digest from the archive: docker image inspect .Id depends on the engine's image store.
+          image_id=$(tar -xOf evidence/image.tar manifest.json | jq -er '.[0].Config | capture("(?<d>[0-9a-f]{64})").d | "sha256:" + .')
           lock_hash=$(sha256sum bun.lock | cut -d ' ' -f 1)
           version=$(/tmp/trivy --version | head -n 1 | cut -d ' ' -f 2)
           test "$version" = "0.76.2"

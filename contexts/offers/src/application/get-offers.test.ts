@@ -164,7 +164,7 @@ describe("getOffers", () => {
     expect(result.offers.map((offer) => offer.claims.productId)).toEqual([RYE]);
   });
 
-  test("confirmed amount below the request is omitted INSUFFICIENT_STOCK", async () => {
+  test("confirmed partial stock produces a reduced offer and signed shortfall", async () => {
     const setup = fakeOffersDeps({
       products: [fakeProduct(OAT), fakeProduct(RYE)],
       live: { ...quoted(OAT, { amount: 3, stock: "confirmed" }), ...quoted(RYE, { amount: 4 }) },
@@ -174,11 +174,99 @@ describe("getOffers", () => {
       await getOffers(setup.deps, principal, request({ lines: [line(OAT, 4), line(RYE, 4)] })),
     );
 
-    expect(reasons(result.omitted)).toEqual({ [OAT]: "INSUFFICIENT_STOCK" });
-    expect(result.offers.map((offer) => offer.claims.productId)).toEqual([RYE]);
+    expect(result.omitted).toEqual([]);
+    expect(result.offers.map((offer) => offer.claims.productId)).toEqual([OAT, RYE]);
+    expect(result.offers[0]?.claims).toMatchObject({
+      quantity: { value: 3, unit: "CT" },
+      shortfall: { value: 1, unit: "CT" },
+      total: { net: 30, gross: 34.2 },
+    });
     expect(
       setup.live.calls.filter((call) => call.kind === "prices").map((c) => c.query.productIds),
-    ).toEqual([[RYE]]);
+    ).toEqual([[OAT, RYE]]);
+  });
+
+  test("shared substitutes are looked up once but ranked and signed for each requested occurrence", async () => {
+    const sub = "prod_test_sub";
+    const perSalesUnit = { value: 1, unit: "LTR" };
+    const setup = fakeOffersDeps({
+      products: [
+        fakeProduct(OAT, { perSalesUnit, substitutes: [sub, sub] }),
+        fakeProduct(RYE, { perSalesUnit, substitutes: [sub] }),
+        fakeProduct(sub, { perSalesUnit }),
+      ],
+      live: { ...quoted(OAT, { amount: 2 }), ...quoted(RYE, { amount: 3 }), ...quoted(sub) },
+    });
+    const req = request({ lines: [line(OAT, 4), line(OAT, 5), line(RYE, 4)] });
+    const first = valueOf(await getOffers(setup.deps, principal, req));
+    const substitutes = first.offers.filter((offer) => offer.claims.replaces !== null);
+    expect(
+      substitutes.map((offer) => [offer.claims.replaces, offer.claims.quantity.value]),
+    ).toEqual([
+      [OAT, 2],
+      [OAT, 3],
+      [RYE, 1],
+    ]);
+    expect(substitutes.every((offer) => offer.rank === "best" && offer.comparison !== null)).toBe(
+      true,
+    );
+    expect(setup.catalog.requests.map((query) => query.productIds)).toEqual([[OAT, RYE], [sub]]);
+    expect(setup.live.calls.filter((call) => call.query.productIds.includes(sub))).toHaveLength(2);
+    const calls = setup.live.calls.length;
+    const second = valueOf(
+      await getOffers(setup.deps, principal, request({ lines: [line(OAT, 6)] })),
+    );
+    expect(setup.live.calls).toHaveLength(calls);
+    expect(
+      second.offers.find((offer) => offer.claims.replaces === OAT)?.claims.quantity.value,
+    ).toBe(4);
+  });
+
+  test("an original expiring during signing cannot leave an orphan or have its omission overwritten", async () => {
+    const sub = "prod_test_sub";
+    const perSalesUnit = { value: 1, unit: "LTR" };
+    const setup = fakeOffersDeps({
+      products: [
+        fakeProduct(OAT, { perSalesUnit, substitutes: [sub] }),
+        fakeProduct(sub, { perSalesUnit }),
+      ],
+      live: {
+        ...quoted(OAT, { amount: 2, cutoffAt: "2026-11-14T10:00:05Z" }),
+        ...quoted(sub, {}, { validTo: "2026-11-14T10:00:05Z" }),
+      },
+    });
+    const signer: OfferSigner = {
+      jwks: () => setup.signer.jwks(),
+      async sign(claims, exp) {
+        setup.clock.set("2026-11-14T10:00:05Z");
+        return setup.signer.sign(claims, exp);
+      },
+    };
+    const result = valueOf(await getOffers({ ...setup.deps, signer }, principal, request()));
+    expect(result.offers).toEqual([]);
+    expect(reasons(result.omitted)).toEqual({ [OAT]: "NO_DELIVERY_DATE" });
+  });
+
+  test("a substitute lookup failure happens before any offer is signed", async () => {
+    const sub = "prod_test_sub";
+    const perSalesUnit = { value: 1, unit: "LTR" };
+    const setup = fakeOffersDeps({
+      products: [
+        fakeProduct(OAT, { perSalesUnit, substitutes: [sub] }),
+        fakeProduct(sub, { perSalesUnit }),
+      ],
+      live: { ...quoted(OAT, { amount: 2 }), ...quoted(sub) },
+    });
+    const live: WholesalerLive = {
+      getAvailability: (query) =>
+        query.productIds.includes(sub)
+          ? Promise.resolve(err("UPSTREAM_FAILED"))
+          : setup.live.getAvailability(query),
+      getPrices: (query) => setup.live.getPrices(query),
+    };
+    const result = await getOffers({ ...setup.deps, live }, principal, request());
+    expect(result.ok ? null : result.error.code).toBe("UPSTREAM_FAILED");
+    expect(setup.signer.signed).toEqual([]);
   });
 
   test("no price, a sales block or no date is omitted NO_PRICE, SALES_BLOCKED, NO_DELIVERY_DATE", async () => {
@@ -323,7 +411,7 @@ describe("getOffers", () => {
   test("an omitted line is not cached", async () => {
     const setup = fakeOffersDeps({
       products: [fakeProduct(OAT)],
-      live: quoted(OAT, { amount: 3 }),
+      live: quoted(OAT, { amount: 0 }),
     });
 
     await getOffers(setup.deps, principal, request());

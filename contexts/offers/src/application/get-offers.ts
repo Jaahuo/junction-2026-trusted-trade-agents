@@ -20,6 +20,11 @@ import {
   mergeConstraints,
   offerExpiry,
 } from "../domain/offer-rules.ts";
+import {
+  planOriginalQuantity,
+  quantityForShortfall,
+  rankSubstitutes,
+} from "../domain/partial-stock.ts";
 import type { CachedQuote, OffersDeps } from "./ports.ts";
 
 export const PRECHECK_CONCURRENCY = 4;
@@ -41,6 +46,11 @@ interface Candidate {
 interface Dated extends Candidate {
   availability: AvailabilityQuote;
   deliveryDate: string;
+  quantity: OfferClaims["quantity"];
+  shortfall: OfferClaims["shortfall"];
+  replaces: string | null;
+  rank: OfferLine["rank"];
+  comparison: OfferLine["comparison"];
 }
 
 interface Signable extends Dated {
@@ -179,67 +189,144 @@ export async function getOffers(
   }
 
   const customer = principal.customer;
-  const cacheKey = (productId: string) => ({
-    customer,
-    requestedDate: req.deliverBy,
-    productId,
-  });
+  const cacheKey = (productId: string) => ({ customer, requestedDate: req.deliverBy, productId });
   const lookedUpAt = deps.now();
   const cached = new Map<string, CachedQuote>();
-  for (const productId of unique(candidates.map((c) => c.line.productId))) {
-    const hit = deps.cache.get(cacheKey(productId), lookedUpAt);
-    if (hit !== undefined) cached.set(productId, hit);
-  }
-  const misses = unique(candidates.map((c) => c.line.productId)).filter((id) => !cached.has(id));
-
   const availability = new Map<string, AvailabilityQuote>();
-  for (const productIds of batchIds(misses)) {
-    const read = await live.getAvailability({
-      customer,
-      requestedDate: req.deliverBy,
-      productIds,
-    });
-    if (!read.ok) return err(upstream("availability could not be read"));
-    for (const quote of read.value.quotes) availability.set(quote.productId, quote);
-  }
-  for (const [productId, hit] of cached) availability.set(productId, hit.availability);
+  const prices = new Map<string, PriceQuote>();
+  const availabilityRead = new Set<string>();
+  const priceRead = new Set<string>();
 
+  const loadAvailability = async (ids: readonly string[]): Promise<boolean> => {
+    const misses: string[] = [];
+    for (const id of unique(ids)) {
+      if (availabilityRead.has(id)) continue;
+      availabilityRead.add(id);
+      const hit = deps.cache.get(cacheKey(id), lookedUpAt);
+      if (hit === undefined) misses.push(id);
+      else {
+        cached.set(id, hit);
+        availability.set(id, hit.availability);
+        prices.set(id, hit.price);
+        priceRead.add(id);
+      }
+    }
+    for (const productIds of batchIds(misses)) {
+      const read = await live.getAvailability({
+        customer,
+        requestedDate: req.deliverBy,
+        productIds,
+      });
+      if (!read.ok) return false;
+      for (const quote of read.value.quotes) availability.set(quote.productId, quote);
+    }
+    return true;
+  };
+
+  const loadPrices = async (lines: readonly Dated[]): Promise<boolean> => {
+    const byDate = new Map<string, string[]>();
+    for (const { product, deliveryDate } of lines) {
+      if (priceRead.has(product.productId)) continue;
+      priceRead.add(product.productId);
+      const ids = byDate.get(deliveryDate) ?? [];
+      ids.push(product.productId);
+      byDate.set(deliveryDate, ids);
+    }
+    for (const [requestedDate, ids] of byDate) {
+      for (const productIds of batchIds(ids)) {
+        const read = await live.getPrices({ customer, requestedDate, productIds });
+        if (!read.ok) return false;
+        for (const quote of read.value.quotes) prices.set(quote.productId, quote);
+      }
+    }
+    return true;
+  };
+
+  if (!(await loadAvailability(candidates.map((candidate) => candidate.product.productId))))
+    return err(upstream("availability could not be read"));
   const dated: Dated[] = [];
   for (const candidate of candidates) {
-    const quote = availability.get(candidate.line.productId);
-    if (quote === undefined) {
-      omit(candidate, "NO_DELIVERY_DATE");
-      continue;
-    }
-    const reason = availabilityOmitReason(quote, candidate.line.quantity.value);
-    const deliveryDate = quote.availableDate;
-    if (reason !== null || deliveryDate === null) {
+    const quote = availability.get(candidate.product.productId);
+    const reason = availabilityOmitReason(quote, 0);
+    if (reason !== null || quote === undefined || quote.availableDate === null) {
       omit(candidate, reason ?? "NO_DELIVERY_DATE");
       continue;
     }
-    dated.push({ ...candidate, availability: quote, deliveryDate });
+    const plan = planOriginalQuantity(candidate.line.quantity, candidate.product, quote);
+    if (!plan.ok) {
+      omit(candidate, plan.error);
+      continue;
+    }
+    dated.push({
+      ...candidate,
+      availability: quote,
+      deliveryDate: quote.availableDate,
+      quantity: plan.value.quantity,
+      shortfall: plan.value.shortfall,
+      replaces: null,
+      rank: null,
+      comparison: null,
+    });
   }
+  if (!(await loadPrices(dated))) return err(upstream("prices could not be read"));
 
-  const missesByDate = new Map<string, string[]>();
-  for (const { line, deliveryDate } of dated) {
-    if (cached.has(line.productId)) continue;
-    missesByDate.set(deliveryDate, [...(missesByDate.get(deliveryDate) ?? []), line.productId]);
+  const substituteOrigins =
+    current?.limits.substitutions === "never"
+      ? []
+      : dated.filter((original) => original.shortfall !== null);
+  const substituteIds = unique(
+    substituteOrigins.flatMap((original) => original.product.substitutes),
+  ).filter((id) => !factsById.has(id) && !unknown.has(id));
+  if (substituteIds.length > 0) {
+    const read = await deps.catalog.facts({ productIds: substituteIds, hard: constraints.hard });
+    if (!read.ok) return err(upstream("the catalog facts could not be read"));
+    for (const product of read.value.products) factsById.set(product.productId, product);
+    for (const id of read.value.unknown) unknown.add(id);
   }
-  const prices = new Map<string, PriceQuote>();
-  for (const [requestedDate, ids] of missesByDate) {
-    for (const productIds of batchIds(ids)) {
-      const read = await live.getPrices({ customer, requestedDate, productIds });
-      if (!read.ok) return err(upstream("prices could not be read"));
-      for (const quote of read.value.quotes) prices.set(quote.productId, quote);
+  const possible: { origin: Dated; product: ProductFacts; quantity: OfferClaims["quantity"] }[] =
+    [];
+  for (const origin of substituteOrigins) {
+    if (origin.shortfall === null) continue;
+    for (const id of unique(origin.product.substitutes)) {
+      const product = factsById.get(id);
+      if (
+        id === origin.product.productId ||
+        unknown.has(id) ||
+        product === undefined ||
+        contradictedAttribute(product.match, constraints.hard) !== null
+      )
+        continue;
+      const quantity = quantityForShortfall(origin.shortfall, origin.product, product);
+      if (quantity !== null) possible.push({ origin, product, quantity });
     }
   }
-  for (const [productId, hit] of cached) prices.set(productId, hit.price);
+  if (!(await loadAvailability(possible.map(({ product }) => product.productId))))
+    return err(upstream("availability could not be read"));
+  const substituteDated: Dated[] = [];
+  for (const { origin, product, quantity } of possible) {
+    const quote = availability.get(product.productId);
+    if (
+      quote === undefined ||
+      quote.availableDate === null ||
+      availabilityOmitReason(quote, quantity.value) !== null
+    )
+      continue;
+    substituteDated.push({
+      ...origin,
+      product,
+      availability: quote,
+      deliveryDate: quote.availableDate,
+      quantity,
+      shortfall: null,
+      replaces: origin.product.productId,
+    });
+  }
+  if (!(await loadPrices(substituteDated))) return err(upstream("prices could not be read"));
 
-  // Re-read: a quote may expire during the upstream calls.
   const now = deps.now();
   const signable: Signable[] = [];
   for (const line of dated) {
-    const price = prices.get(line.line.productId);
+    const price = prices.get(line.product.productId);
     if (price === undefined) {
       omit(line, "NO_PRICE");
       continue;
@@ -249,7 +336,7 @@ export async function getOffers(
       omit(line, expired, EXPIRED_DETAIL[expired]);
       continue;
     }
-    const { total, deposits } = lineTotal(price.unitPrice, price.deposit, line.line.quantity.value);
+    const { total, deposits } = lineTotal(price.unitPrice, price.deposit, line.quantity.value);
     if (![total.net, total.gross, deposits].every(Number.isFinite)) {
       omit(
         line,
@@ -260,18 +347,40 @@ export async function getOffers(
     }
     signable.push({ ...line, price, total, deposits });
   }
+  const originals = [...signable];
+  for (const original of originals) {
+    const available: Signable[] = [];
+    for (const line of substituteDated) {
+      if (line.index !== original.index) continue;
+      const price = prices.get(line.product.productId);
+      if (price === undefined || expiredAt(price, line.availability, now) !== null) continue;
+      const { total, deposits } = lineTotal(price.unitPrice, price.deposit, line.quantity.value);
+      if (![total.net, total.gross, deposits].every(Number.isFinite)) continue;
+      available.push({ ...line, price, total, deposits });
+    }
+    const ranked = rankSubstitutes(
+      { product: original.product, price: original.price },
+      available.map(({ product, price }) => ({ product, price })),
+      constraints.soft,
+    );
+    for (const rank of ranked) {
+      const candidate = available.find(({ product }) => product.productId === rank.productId);
+      if (candidate !== undefined)
+        signable.push({ ...candidate, rank: rank.rank, comparison: rank.comparison });
+    }
+  }
 
   const issuer = deps.issuer();
   const signed = await Promise.all(
     signable.map(async (offer) => {
-      const { line, product, price, availability: quote, total, deposits } = offer;
+      const { product, price, availability: quote, total, deposits } = offer;
       const claims: Omit<OfferClaims, "iat" | "exp"> = {
         iss: issuer,
         offerId: deps.newOfferId(),
         customer,
         agentId: principal.agentId,
-        productId: line.productId,
-        quantity: line.quantity,
+        productId: product.productId,
+        quantity: offer.quantity,
         unitPrice: price.unitPrice,
         deposits,
         total,
@@ -281,8 +390,8 @@ export async function getOffers(
         stock: quote.stock,
         paymentTerms: principal.paymentTerms,
         cutoffAt: quote.cutoffAt,
-        replaces: null,
-        shortfall: null,
+        replaces: offer.replaces,
+        shortfall: offer.shortfall,
         mandateId: current?.mandateId ?? null,
         mandateVersion: current?.version ?? null,
         constraints,
@@ -308,16 +417,24 @@ export async function getOffers(
 
   // Signing and prechecks take time: drop an offer whose token is already expired.
   const returnedAt = jwtSeconds(deps.now().getTime());
+  const survivingOriginals = new Set(
+    prechecked
+      .filter(({ offer, minted }) => offer.replaces === null && minted.claims.exp > returnedAt)
+      .map(({ offer }) => offer.index),
+  );
   const offers: OfferLine[] = [];
   for (const { offer, minted, precheck } of prechecked) {
     if (minted.claims.exp <= returnedAt) {
-      const reason = earlierBound(offer.price, offer.availability);
-      omit(offer, reason, EXPIRED_DETAIL[reason]);
+      if (offer.replaces === null) {
+        const reason = earlierBound(offer.price, offer.availability);
+        omit(offer, reason, EXPIRED_DETAIL[reason]);
+      }
       continue;
     }
-    if (!cached.has(offer.line.productId)) {
+    if (offer.replaces !== null && !survivingOriginals.has(offer.index)) continue;
+    if (!cached.has(offer.product.productId)) {
       deps.cache.set(
-        cacheKey(offer.line.productId),
+        cacheKey(offer.product.productId),
         { availability: offer.availability, price: offer.price },
         new Date(offer.price.validTo),
       );
@@ -327,8 +444,8 @@ export async function getOffers(
       token: minted.token,
       claims: minted.claims,
       precheck,
-      rank: null,
-      comparison: null,
+      rank: offer.rank,
+      comparison: offer.comparison,
     });
   }
 

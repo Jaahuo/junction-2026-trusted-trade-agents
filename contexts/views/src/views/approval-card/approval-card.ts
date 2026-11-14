@@ -109,13 +109,8 @@ export function reasonTitle(order: Order) {
     : reasonCopy(first, order, order.lines[0]?.claims).title;
 }
 
-const REQUOTE: ReadonlySet<ReasonCode> = new Set(["PRICE_CHANGED", "AVAILABILITY_DIFFERS"]);
 const isApproved = (o: Order) => o.status === "placed" || o.status === "awaiting_payment";
 const signed = (value: number) => `${value >= 0 ? "+" : "−"}${money(Math.abs(value))}`;
-const daysBetween = (from: string, to: string) =>
-  Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000);
-const dayShift = (days: number) =>
-  `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ${days > 0 ? "later" : "earlier"}`;
 /** The lines a check names for `reason` in the audit (`detail` is the product id). */
 const linesFor = (order: Order, reason: ReasonCode) => {
   const ids = new Set(order.audit.filter((e) => e.reason === reason).map((e) => e.detail));
@@ -220,25 +215,6 @@ export class ApprovalCard extends LitElement {
         text-align: left;
         text-decoration: underline;
         cursor: pointer;
-      }
-      .changes {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-md);
-      }
-      .change {
-        display: grid;
-        grid-template-columns: 96px 1fr auto;
-        gap: var(--spacing-md);
-        padding: var(--spacing-md) 0;
-        border-bottom: 1px solid var(--color-border);
-      }
-      .change .now,
-      .change .delta {
-        font-weight: 600;
-      }
-      .change .delta {
-        color: var(--color-text-warning);
       }
       .product-list {
         margin-top: var(--spacing-sm);
@@ -647,21 +623,6 @@ export class ApprovalCard extends LitElement {
     return brandHeader(this.eyebrow(order), title, facts, pill);
   }
 
-  /** The requote, if any: the summed change of total and delivery. */
-  private change(order: Order) {
-    const last = order.requotes.at(-1);
-    if (last === undefined) return null;
-    const total = order.total.net;
-    const before = total - last.current.total.net + last.previous.total.net;
-    return {
-      total,
-      before,
-      days: daysBetween(last.previous.deliveryDate, last.current.deliveryDate),
-      deliveryBefore: last.previous.deliveryDate,
-      deliveryNow: last.current.deliveryDate,
-    };
-  }
-
   /** v17 to-dos: one per thing the approver should look at, linked to where it is. */
   private todos(order: Order): Todo[] {
     const lines = order.lines.map((l) => l.claims);
@@ -712,22 +673,6 @@ export class ApprovalCard extends LitElement {
                   },
                 ];
           });
-        case "PRICE_CHANGED":
-          return order.requotes.map((q) => ({
-            where: q.current.product.name,
-            target: lineId(q.current),
-            reason: "Price changed after the offer was made",
-            action: "Check the new price",
-          }));
-        case "AVAILABILITY_DIFFERS":
-          return [
-            {
-              where: "Delivery date",
-              target: "what-changed",
-              reason: "Delivery date changed after the offer was made",
-              action: "Check the new date",
-            },
-          ];
         case "NEW_PRODUCT": {
           const news = linesFor(order, "NEW_PRODUCT");
           if (news.length === 0) return [generic];
@@ -805,43 +750,10 @@ export class ApprovalCard extends LitElement {
       : nothing;
   }
 
-  /** v16 "What changed" for a re-quoted order: total and delivery, then and now. */
-  private whatChanged(order: Order) {
-    const c = this.change(order);
-    if (c === null) return nothing;
-    return html`<section class="changes" id="what-changed" tabindex="-1">
-      <h3 class="section-title">What changed</h3>
-      <div class="change">
-        <span>Total</span>
-        <span
-          ><span class="now">${money(c.total)}</span><br /><span class="body-small"
-            >was ${money(c.before)}</span
-          ></span
-        >
-        <span class="delta">${c.total === c.before ? "" : signed(c.total - c.before)}</span>
-      </div>
-      <div class="change">
-        <span>Delivery</span>
-        <span
-          ><span class="now">${day(c.deliveryNow)}</span><br /><span class="body-small"
-            >was ${day(c.deliveryBefore)}</span
-          ></span
-        >
-        <span class="delta">${c.days === 0 ? "" : dayShift(c.days)}</span>
-      </div>
-    </section>`;
-  }
-
   /** The note under a product that something applies to; a price change is a warning (v17). */
   private lineNote(order: Order, c: OfferClaims): { text: string; warning: boolean } | null {
     if (substitutionOf(order, c) !== null)
       return { text: `Substitute proposed · ${outOfStock(c)}`, warning: false };
-    const requote = order.requotes.find((r) => r.current.offerId === c.offerId);
-    if (requote !== undefined)
-      return {
-        text: `Price changed · was ${money(requote.previous.total.net)} (${signed(c.total.net - requote.previous.total.net)})`,
-        warning: true,
-      };
     if (c.shortfall !== null)
       return {
         text: `${amount(c.shortfall)} short${c.nextDeliveryDate === null ? "" : ` · rest from ${day(c.nextDeliveryDate)}`}`,
@@ -890,13 +802,6 @@ export class ApprovalCard extends LitElement {
         "Let the agent reduce it",
         "reduce it to within my order limit",
         ["Remove the least needed", "Choose cheaper brands", "Order less of each"],
-      );
-    if (order.reasons.some((r) => REQUOTE.has(r)))
-      return this.agentHelp(
-        "the order",
-        "Let the agent find a better offer",
-        "find a better offer",
-        ["Keep the earlier delivery", "Find a cheaper one", "Remove the changed product"],
       );
     if (order.reasons.includes("NEW_PRODUCT") && linesFor(order, "NEW_PRODUCT").length === 0)
       return html`<p class="body-small">
@@ -1158,7 +1063,6 @@ export class ApprovalCard extends LitElement {
   private approveLabel(order: Order) {
     const confirm = order.reasons.includes("SUBSTITUTION") || order.reasons.includes("NEW_PRODUCT");
     if (this.busy && !this.savedEdit) return confirm ? "Confirming…" : "Approving…";
-    if (order.reasons.some((r) => REQUOTE.has(r))) return "Approve new price";
     return confirm ? "Confirm order" : "Approve order";
   }
 
@@ -1170,8 +1074,8 @@ export class ApprovalCard extends LitElement {
           </p>`
         : nothing;
     return html`${gettingOffer} ${this.todoBox(order)} ${this.guidance(order)}
-      ${this.whatChanged(order)} ${this.orderHelp(order)} ${this.products(order)}
-      ${this.orderedFor(order)} ${this.openUntil(order)}
+      ${this.orderHelp(order)} ${this.products(order)} ${this.orderedFor(order)}
+      ${this.openUntil(order)}
       <div class="actions" part="actions">
         <button
           part="button approve"

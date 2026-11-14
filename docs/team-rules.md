@@ -32,9 +32,18 @@ These rules are for every person and agent who works on an issue of the product 
 
 Each issue has exactly one label of each family `area:`, `wave:`, `kind:` and `risk:` (R-10).
 
+Each `area:` label belongs to exactly one lane, so the area label names the lane that owns the issue. The label description starts with its lane.
+
+| Lane                          | Areas                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| 1 Catalogue and integration   | `area:catalog`, `area:mandates`, `area:demo`, `area:docs`, `area:infra` |
+| 2 Offers and MCP              | `area:offers`, `area:mcp`                                               |
+| 3 Contract helpers and orders | `area:contract`, `area:orders`                                          |
+| 4 Host integration and views  | `area:views`                                                            |
+
 | Label                                                                                                                                            | When it applies                                                                                                                                                                                                       |
 | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `area:contract`, `area:catalog`, `area:offers`, `area:mandates`, `area:orders`, `area:mcp`, `area:views`, `area:infra`, `area:docs`, `area:demo` | The area of the largest owned path. Accounts, server-kit, apps and root files are `area:infra`. Discovery and OpenAPI are `area:docs`. The skill is `area:mcp`.                                                       |
+| `area:contract`, `area:catalog`, `area:offers`, `area:mandates`, `area:orders`, `area:mcp`, `area:views`, `area:infra`, `area:docs`, `area:demo` | The area of the largest owned path. Accounts, server-kit, apps and root files are `area:infra`. Discovery and OpenAPI are `area:docs`. The skill is `area:mcp`. Wholesaler adapters are `area:offers`.                |
 | `wave:0` … `wave:4`                                                                                                                              | The build-step group: 0 foundation and spikes, 1 core contexts, 2 host and approval, 3 exceptions, docs and skill, 4 later steps. A wave is not a time gate; an issue starts when its "Depends on" issues are merged. |
 | `kind:feature`, `kind:spike`, `kind:docs`, `kind:chore`                                                                                          | The kind of work.                                                                                                                                                                                                     |
 | `risk:ordinary`, `risk:impact`, `risk:lock-in`                                                                                                   | The `--risk` value of `bun run ship`.                                                                                                                                                                                 |

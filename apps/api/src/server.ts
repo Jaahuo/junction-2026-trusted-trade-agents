@@ -1,6 +1,9 @@
 import { resolve } from "node:path";
 import { closeDb, type ContextModule, type Db, env, mountContext, openDb } from "@app/server-kit";
-import { Elysia } from "elysia";
+import { type Context, Elysia } from "elysia";
+
+const apiNotFound = () =>
+  Response.json({ error: { code: "NOT_FOUND", message: "Unknown API route." } }, { status: 404 });
 
 /**
  * Builds the HTTP app: `/api` with every context API, then the context root routes, then the web fallback.
@@ -19,9 +22,12 @@ export const createApp = async (
   for (const context of contexts) {
     if (context.root !== undefined) app.use(context.root(db));
   }
+  app.get("/api", apiNotFound).get("/api/*", apiNotFound);
+  app.head("/api", apiNotFound).head("/api/*", apiNotFound);
+  app.all("/api", apiNotFound).all("/api/*", apiNotFound);
   if (webDist !== undefined) {
     const root = resolve(webDist);
-    app.get("/*", async ({ path, set, status }) => {
+    const webFallback = async ({ path, set, status }: Pick<Context, "path" | "set" | "status">) => {
       const file = Bun.file(resolve(root, `.${path}`));
       const isAsset = file.name?.startsWith(`${root}/`) === true && (await file.exists());
       if (!isAsset && path.startsWith("/views/")) {
@@ -31,7 +37,8 @@ export const createApp = async (
         set.headers["cache-control"] = "public, max-age=31536000, immutable";
       }
       return isAsset ? file : Bun.file(`${root}/index.html`);
-    });
+    };
+    app.get("/*", webFallback).head("/*", webFallback);
   }
   return app;
 };

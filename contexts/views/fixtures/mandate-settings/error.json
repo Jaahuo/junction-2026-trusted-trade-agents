@@ -1,6 +1,6 @@
 {
   "error": {
     "code": "UPSTREAM_FAILED",
-    "message": "The wholesaler did not answer."
+    "message": "The mandate service did not answer."
   }
 }

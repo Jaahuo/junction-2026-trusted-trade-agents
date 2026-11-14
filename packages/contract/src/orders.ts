@@ -34,6 +34,8 @@ export const AuditEventSchema = z.strictObject({
   rule: z.string().optional(),
   reason: ReasonCodeSchema.optional(),
   detail: z.string().optional(),
+  /** The product a check applies to, for a reason about one product (a new product, CO₂ …). */
+  productId: z.string().optional(),
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 

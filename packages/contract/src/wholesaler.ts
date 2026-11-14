@@ -8,6 +8,8 @@ export const PriceQuoteSchema = z.strictObject({
   unitPrice: z.strictObject({ net: z.number(), vatRate: z.number(), currency: z.literal("EUR") }),
   /** Per sales unit. */
   deposit: z.number(),
+  /** false: the source gives no deposit amount, so `deposit` is 0 and leaves deposits out. Absent = true. */
+  depositKnown: z.boolean().optional(),
   comparisonPrice: z.strictObject({ value: z.number(), unit: z.enum(["LTR", "KGM"]) }).nullable(),
   validTo: TimeSchema,
 });

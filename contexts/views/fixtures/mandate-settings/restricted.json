@@ -1,0 +1,28 @@
+{
+  "mandate": {
+    "iss": "cust_fixture_restricted",
+    "mandateId": "mnd_fixture_restricted",
+    "version": 2,
+    "agent": "agent_fixture_buyer",
+    "signedBy": "acct_fixture_owner",
+    "limits": {
+      "maxOrderTotal": { "value": 250, "currency": "EUR", "basis": "gross" },
+      "categories": ["fixture_dairy_alternatives", "fixture_fruit"],
+      "substitutions": "never",
+      "newProducts": "auto",
+      "minDeliveryReliability": null,
+      "maxCo2PerKg": { "value": 1.5, "ifNoData": "ask" },
+      "allergenData": { "ifNoData": "auto" },
+      "paymentTerms": { "invoice": "ask", "pay_on_order": "auto" }
+    },
+    "standingConstraints": {
+      "hard": [{ "attribute": "lactose", "is": "free_from" }],
+      "soft": [{ "attribute": "packaging", "prefer": "reusable" }]
+    },
+    "iat": 1794650400,
+    "exp": 4102444800
+  },
+  "jws": "fixture-restricted-mandate-jws",
+  "status": "active",
+  "registeredAt": "2026-11-14T10:00:00+00:00"
+}

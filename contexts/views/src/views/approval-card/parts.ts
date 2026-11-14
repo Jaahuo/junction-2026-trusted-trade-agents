@@ -1,19 +1,36 @@
 import type { OfferClaims } from "@app/contract";
+import { brand } from "@app/ui/brand";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import attention16 from "../../shared/icons/attention-16.svg?raw";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 
 // Parts that the card and the view share: the petrol header, the card frame and
 // the formatters. Figma: Junction 2026 › Screens › "Approval request — v8".
 
+/** Units in words, including the Valio Aimo sales units of real offers (KI, SK, PAK …). */
 const UNIT: Record<string, string> = {
   LTR: "l",
   KGM: "kg",
+  KG: "kg",
   GRM: "g",
   CT: "packs",
   PCE: "pcs",
   ST: "pcs",
+  KI: "cases",
+  CS: "cases",
+  PAK: "packs",
+  BAG: "bags",
+  RAS: "boxes",
+  PRK: "tubs",
+  BOT: "bottles",
+  SK: "sacks",
+  KLE: "packages",
+  KRT: "cartons",
+  KAN: "canisters",
+  PAL: "pallets",
+  NIP: "bundles",
+  DSP: "displays",
+  DZ: "dozen",
 };
 /** "packs", "kg": the short name of a unit code. */
 export const unit = (code: string) => UNIT[code] ?? code;
@@ -72,7 +89,7 @@ export const brandHeader = (
 ) =>
   html`<header class="header" part="header">
     <div class="eyebrow-row ${pill ? "spread" : ""}">
-      ${icon(logo, "Valio Aimo")}
+      <img src=${brand.logo} alt=${brand.name} />
       ${
         pill
           ? html`<span class="pill" part="status">${icon(attention16)}${eyebrow}</span>`
@@ -134,20 +151,6 @@ export const cardStyles = css`
   /* v17 dev notes: logo left, status pill right. */
   .eyebrow-row.spread {
     justify-content: space-between;
-  }
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-xs) var(--spacing-md) var(--spacing-xs) var(--spacing-sm);
-    border-radius: var(--radius-full);
-    background: var(--color-bg-attention);
-    color: var(--color-text);
-    font-size: var(--font-size-2xs);
-    font-weight: 700;
-    line-height: 1.25;
-    letter-spacing: 0.2px;
-    white-space: nowrap;
   }
   .divider {
     width: 1px;

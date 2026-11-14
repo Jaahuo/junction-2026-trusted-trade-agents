@@ -260,3 +260,23 @@ test("alternatives are stored and not counted in the total", async () =>
     const read = await orderOf(await call(app, "GET", `/${placed.orderId}`));
     expect(read).toEqual(placed);
   }));
+
+test("a check about one product names it in the audit; an order-level check names none", async () =>
+  withDatabase(async (db) => {
+    const { app, register, sign } = await mount(db);
+    const mandate = await register(limitsWith({ newProducts: "ask" }));
+    const under = { mandateId: mandate.mandateId, mandateVersion: mandate.version };
+    const order = await orderOf(
+      await place(app, [
+        await sign({ ...under, ...overLimit, productId: "prod_new_a" }),
+        await sign({ ...under, productId: "prod_new_b" }),
+      ]),
+    );
+    expect(new Set(order.reasons)).toEqual(new Set(["NEW_PRODUCT", "SPEND_OVER_LIMIT"]));
+    const failed = order.audit.filter((event) => event.event === "check_failed");
+    const named = failed
+      .filter((event) => event.reason === "NEW_PRODUCT")
+      .map((event) => event.productId);
+    expect(new Set(named)).toEqual(new Set(["prod_new_a", "prod_new_b"]));
+    expect(failed.find((event) => event.reason === "SPEND_OVER_LIMIT")?.productId).toBeUndefined();
+  }));

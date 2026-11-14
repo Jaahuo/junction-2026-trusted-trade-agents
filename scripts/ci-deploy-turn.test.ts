@@ -9,7 +9,11 @@ const job = (name: string, status: string, conclusion: string | null = null) => 
 });
 
 test("a run does not wait when every earlier run has completed", () => {
-  expect(deployTurn([run(7, "in_progress")], 7)).toEqual({ wait: false, later: [] });
+  expect(deployTurn([run(7, "in_progress")], 7)).toEqual({
+    listed: true,
+    wait: false,
+    later: [],
+  });
   expect(
     deployTurn([run(7, "in_progress"), run(6, "completed"), run(5, "completed")], 7).wait,
   ).toBe(false);
@@ -25,7 +29,11 @@ test("a run waits while any earlier run is queued, waiting or in progress", () =
 test("a later run does not make a run wait, and is listed for the stale check", () => {
   expect(
     deployTurn([run(9, "completed"), run(8, "in_progress"), run(7, "in_progress")], 7),
-  ).toEqual({ wait: false, later: [90, 80] });
+  ).toEqual({ listed: true, wait: false, later: [90, 80] });
+});
+
+test("a run that the fetched history no longer lists is reported, so it does not deploy", () => {
+  expect(deployTurn([run(400, "completed"), run(399, "completed")], 7).listed).toBe(false);
 });
 
 test("a later run counts as deployed once its deploy job is queued, running or successful", () => {

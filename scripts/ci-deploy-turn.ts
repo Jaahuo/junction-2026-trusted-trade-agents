@@ -22,9 +22,13 @@ const decodeRuns = (runs: unknown): Run[] => {
 };
 
 /** Splits the deploy workflow's runs on main into the earlier runs still active and the later runs. */
-export const deployTurn = (runs: unknown, own: number): { wait: boolean; later: number[] } => {
+export const deployTurn = (
+  runs: unknown,
+  own: number,
+): { listed: boolean; wait: boolean; later: number[] } => {
   const decoded = decodeRuns(runs);
   return {
+    listed: decoded.some((run) => run.number === own),
     wait: decoded.some((run) => run.number < own && !run.completed),
     later: decoded.filter((run) => run.number > own).map((run) => run.id),
   };
@@ -79,6 +83,10 @@ if (import.meta.main) {
   const wait = !process.argv.includes("--no-wait");
   for (let waited = false; ; waited = true) {
     const turn = deployTurn(await listRuns(repo), own);
+    if (!turn.listed) {
+      await report(false, `Skipped: run ${own} is too old to compare with later deploys.`);
+      break;
+    }
     let stale = false;
     for (const id of turn.later) {
       const jobs = await api(`repos/${repo}/actions/runs/${id}/jobs?per_page=100`, ".jobs");

@@ -131,8 +131,24 @@ Set it in the container environment so that a restart does not change it.
 The app frame can reach only the sites that the server declares.
 Inside a host, the views call tools through the MCP Apps bridge and do not fetch the REST API directly (`contexts/views/src/shared/source.ts`), so they need no extra domains.
 
+### Messages from a view
+
+A view can reach the agent in two ways. A view message (`sendMessage`) posts a chat message in the user's name, and the agent answers it in a new turn. A context update (`updateModelContext`) adds text the model reads with the next message; it shows nothing and starts no turn.
+
+After a decision, the approval card sends a context update with the outcome and the order id. Only "Reject, allow alternatives" leaves the agent work to do, so only that decision also sends a view message (`contexts/views/src/views/approval-card/approval-view.ts`). The agent help buttons send their prompt as a view message.
+
+| Host                         | View message                                                      | Context update                       |
+| ---------------------------- | ----------------------------------------------------------------- | ------------------------------------ |
+| Open WebUI v0.13.1+          | Documented: sent after the user confirms it. Not measured (#137). | Not documented. Not measured (#137). |
+| Test page (`/views/harness`) | Accepted and dropped                                              | Accepted and dropped                 |
+| Approval page (plain mode)   | Not sent; the card has no chat                                    | Not sent                             |
+
+In Open WebUI a decision on the card takes two clicks: the card's own confirmation, then the host's "Tool call" dialog for `decide_approval`.
+
 ### Measured results
 
-#9 owns the result lines in this file (its acceptance 7 counts exactly five `<check>: yes|no` lines).
-When #9 runs in Open WebUI, those lines name Open WebUI and its image tag as the host.
-The voice spike #45 posts its results on #44.
+The [voice spike report](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44#issuecomment-6876603612) records a local run on November 14, 2026. It used Open WebUI 0.13.3, image `ghcr.io/open-webui/open-webui:main` built November 8, and server commit `be38e0b`. The no-auth MCP connection worked. A typed request and a simulated microphone recording called `search_products`; the search view rendered after a build. ElevenLabs read the reply. The approval link was not tested because offers were a stub.
+
+The [demo run report](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19#issuecomment-6878500793) records scenario 2 running end to end in Open WebUI with a local model on main commit `8f0c90d`. The approval card rendered in chat with Approve and Reject. The report does not establish that either in-card action was used. It does not record the image tag for that run.
+
+The actual in-card tool action, app-only tool visibility and token round trip remain unmeasured here. #9 remains open and owns the five formal result lines, including the exact host image tag. The [host decision](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44#issuecomment-6878199030) selects Open WebUI with voice and in-chat approval, with the phone approval page as fallback.

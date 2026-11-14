@@ -12,6 +12,9 @@ A human decides every exception.
 Every wholesaler publishes one discovery file on its own domain.
 Start there; it links everything else.
 
+The hosted demo base URL is [https://199-247-4-99.sslip.io](https://199-247-4-99.sslip.io).
+The discovery document is a project-specific format, not a UCP profile ([implementation](contexts/discovery/src/api/well-known.ts)).
+
 | What                    | URL (relative to the public base URL)     |
 | ----------------------- | ----------------------------------------- |
 | Discovery document      | `/.well-known/trusted-trade.json`         |
@@ -28,8 +31,19 @@ curl -s "$BASE_URL/api/discovery/openapi.json" | jq '.paths | keys'
 
 The discovery document lists the endpoint, the MCP URL, the signing key set, the OpenAPI URL, the skill URL, the fixed guardrails, the payment terms, the reason codes, the model tools, the view-only tools and the views.
 `authorization` is `null` because the first build has no authentication.
-The OpenAPI document covers every `/api` route; its paths are relative to `endpoint`, and the schemas are generated from the same contract schemas that the MCP tools use.
+The OpenAPI document covers every `/api` route; its paths are relative to the public base URL, and the schemas are generated from the same contract schemas that the MCP tools use.
 [SPEC-014](docs/specs.md#spec-014-discovery-and-openapi) defines both documents.
+
+## Standards
+
+| Implemented                                                                                                                                                                      | Mapped in docs                                                                          | Next step                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Offer [ES256 JWS signing and JWKS](contexts/offers/src/infra/offer-signer.ts); [public key endpoint](contexts/offers/src/api/routes.ts)                                          | —                                                                                       | Independent public-URL verification script ([#69](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/69)).                         |
+| [OpenAPI 3.1 and JSON Schema](contexts/discovery/src/api/openapi.ts); [MCP tool JSON Schema](contexts/mcp/src/api/mcp-server.ts)                                                 | —                                                                                       | —                                                                                                                                                   |
+| [MCP and MCP Apps resources and tools](contexts/mcp/src/api/mcp-server.ts)                                                                                                       | —                                                                                       | Measure the full approval flow in the chosen host ([#19](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19)).                  |
+| [Nullable GTIN on search candidates](contexts/catalog/src/infra/product-file.ts); [unit codes including UN/CEFACT codes where supplied](contexts/catalog/src/domain/quantity.ts) | —                                                                                       | Data does not always provide a GTIN or a usable unit conversion.                                                                                    |
+| [AP2-style signed mandate](contexts/mandates/src/infra/buyer-key.ts), with server-simulated buyer custody                                                                        | —                                                                                       | Buyer-side key custody and mandate signature verification on use ([#123](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/123)). |
+| [Internal order statuses only](contexts/orders/src/infra/schema.ts)                                                                                                              | [Peppol/UBL status mapping](docs/specs.md#peppolubl-status-mapping), documentation only | Implement an interoperable exchange if needed; no Peppol or UBL exchange is implemented.                                                            |
 
 ## Verify an offer
 
@@ -49,7 +63,7 @@ console.log(protectedHeader.kid, payload.offerId, payload.total);
 ```
 
 A changed claim, another key or an expired offer fails the check.
-The server serves `/.well-known/jwks.json` once signed offers ([#14](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/14)) are merged.
+The server publishes the offer signing key set at `/.well-known/jwks.json`.
 
 ## Known limits of the first build
 
@@ -57,16 +71,37 @@ The server serves `/.well-known/jwks.json` once signed offers ([#14](https://git
 - **Anyone with the demo URL can open the approval page** (`/approvals/<orderId>`) and call every REST route, including the approval decision.
 - **The model sees no decision tool.** The decision, mandate registration and revoke tools are view-only: the MCP server marks them with app-only visibility (`MCP_VIEW_TOOLS=off` removes them), so a host hides them from the model and the agent cannot approve its own order. A human decides on the approval card or the approval page. A direct REST or MCP client can still call the decision until accounts arrive.
 - **The wholesaler uses the buyer's limits only to enforce them.** It returns them only to the buyer's own account.
-- **Key custody is simulated.** The server signs the registered mandate with a demo buyer key on the buyer's behalf; real key custody on the buyer's side is out of scope.
+- **Key custody is simulated.** The server signs the AP2-style mandate with a demo buyer key on the buyer's behalf. The order service [reads the mandate without verifying its signature](contexts/orders/src/infra/mandate-client.ts); signature verification on use is open in [#123](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/123).
 - **The mock ignores the customer number.** Customer-specific limits, credit and payment terms are simulated in our layer.
 - **A sales block after quoting holds until the offer expires.** An offer stays valid until it expires even if the product is blocked after quoting; validation at placement arrives with [#30](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/30).
+- **Offer totals leave deposits out.** The wholesaler's price API gives no deposit amount, and the product data names deposit materials without a price, so every offer says `depositsIncluded: false` and the spend limit is checked on a total without deposits; mentor question in [#76](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/76).
+- **Count sales units are whole units.** Search rounds cases, pieces and packs up to whole sales units and preserves lot multiples. The dataset's fractional `allowedLotSize` values do not establish that customers may split a case; mentor confirmation is pending ([#76](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/76)).
 
 ## Demo host
 
-The first test host is ChatGPT; the team switches host when its spike fails ([#9](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/9), [PRD](docs/prd.md#scope)).
-The build uses only standard MCP, MCP Apps and Skills features, so any host that supports them can run it.
-Evidence so far: Open WebUI 0.13.3 called the MCP tools and rendered the `ui://` views ([#44 result](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44#issuecomment-6876603612)).
-[Host support](docs/host-support.md) has the notes for hosts.
+The owner chose Open WebUI with voice for the demo, with human approval on the in-chat card and the phone approval page as fallback ([#44](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44)).
+In a historical Open WebUI 0.13.3 spike, voice called `search_products` and the search view rendered. The approval link was not tested in that run.
+These results do not establish support in other hosts or for the complete current approval flow. See [host support](docs/host-support.md) for measured results and limits.
+
+## Assumptions
+
+- The demo uses one unauthenticated account. It is not a production access boundary.
+- The wholesaler enforces the buyer's mandate and can see its limits. Buyer key custody is simulated.
+- The challenge dataset is illustrative. Product identifiers and conversions can be missing, and fractional case splitting needs mentor confirmation.
+- The reference Notes screen is currently included by the [web shell](apps/web/src/main.tsx). Removing it and its seed from the production build is tracked in [#134](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/134); the reference context remains.
+
+## Next steps
+
+- Authenticate approvers separately, for example with a passkey or OpenID CIBA. Add accounts, pay-on-order and MCP OAuth ([#34](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/34)).
+- Verify mandate signatures on use and move buyer key custody to the buyer ([#123](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/123)).
+- Add offer validation and re-quote, remaining decisions and placement checks ([#29](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/29), [#30](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/30)).
+- Complete the offer comparison and mandate settings views ([#22](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/22), [#31](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/31)), and approval edits and alternatives ([#124](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/124)).
+- Prove portability with a second adapter ([#33](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/33)). Add a rolling budget across orders if time remains ([#75](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/75)).
+- Add the first Valio Aimo skin as a wholesaler theme when [#73](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/73) is complete.
+- Harden offers: add comparison prices and deposits, identify unconfirmed stock, and refresh availability ([#120](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/120)).
+- Consider the proposed trust chain: verify signatures in views ([#68](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/68)), and add signed receipts and a hash-chained audit record ([#70](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/70)).
+- Consider the proposed support for all GS1 allergens and free-from claims ([#71](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/71)) and agent rationale on order lines ([#72](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/72)).
+- Demonstrate only attacks the first build stops; measure the host flow and rogue-agent scenarios ([#19](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19)).
 
 ## Setup
 

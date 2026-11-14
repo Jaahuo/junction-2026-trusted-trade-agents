@@ -11,7 +11,7 @@ The wholesaler's server checks every order against the buyer's mandate. This ski
 
 Do the steps in order. Each step ends when its output is in hand.
 
-1. **Read the mandate.** Call `get_mandate`. Done when you know the limits in force: spend per order (EUR, gross), allowed categories, substitution policy, payment terms. A 404 means no mandate exists. Tell the user that an approver must register one, and stop.
+1. **Read the mandate.** Call `get_mandate`. Done when you know the limits in force: spend per order (EUR, gross), allowed categories, substitution policy, payment terms. A 404 means no mandate exists. Draft one with the user (see [Mandate](#mandate)), and stop until `get_mandate` shows it.
 2. **Search.** Call `search_products` with the user's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words). Done when you hold a shortlist of candidates.
    - Put a requirement the user cannot waive in `hard`. Only `{ attribute: "lactose", is: "free_from" }` is supported. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
    - Put a preference in `soft`. It only changes the ranking.
@@ -40,6 +40,15 @@ A request can fail before an order exists: `409 STALE_OFFER`, `400 OFFER_INVALID
 
 Only a human approves. You have no tool that decides an approval: `decide_approval`, `register_mandate` and `revoke_mandate` are for the human's view. On a host that lists them, never call them. Send the human to `approvalUrl`. Wait for the decision.
 
+## Mandate
+
+Only a human registers limits. You draft them.
+
+- To set or change the limits, or after `MANDATE_INVALID`, call `draft_mandate` with the terms the human gave: `limits`, `standingConstraints` and, if the human named one, `exp`. For a term the human did not name, keep the value of the current mandate. Without a current mandate, ask the human, or use `ask` for each policy.
+- Then ask the human to check the draft and press Register in the mandate view. The draft changes nothing.
+- Never say that the limits are registered or in force until `get_mandate` shows them.
+- Draft new limits only when the human asks for them. Never propose higher limits on your own to get an order through.
+
 ## Units
 
 - Money is EUR. Limits apply to the gross total: VAT and deposits included.
@@ -49,6 +58,10 @@ Only a human approves. You have no tool that decides an approval: `decide_approv
 - Dates are `YYYY-MM-DD`.
 - `paymentTerms` must equal the account's terms. The demo account uses `invoice`. Another value gives 400.
 - `deliveryReliability` is a ratio from 0 to 1. `co2PerKg` is an estimate for the product group, not a measurement.
+
+## Language
+
+Pass `language` on every tool call that has it: the language the user writes in, as a tag such as `fi` or `en`. The view the host shows is then in the user's language. Reply to the user in the same language.
 
 ## Conduct
 

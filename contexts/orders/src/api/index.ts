@@ -15,11 +15,11 @@ import {
   badRequestEnvelope,
   type ContextModule,
   type Db,
-  notImplemented,
   publicBaseUrl,
   selfBaseUrl,
 } from "@app/server-kit";
 import { Elysia } from "elysia";
+import { type DecisionError, decide, listPending } from "../application/approvals.ts";
 import {
   findOrder,
   type OrderDeps,
@@ -31,6 +31,7 @@ import type { StoredOrder } from "../application/ports.ts";
 import { mandateClient } from "../infra/mandate-client.ts";
 import { processOfferVerifier } from "../infra/offer-verifier.ts";
 import { postgresOrderStore } from "../infra/order-store.ts";
+import { envReceiptSigner } from "../infra/receipt-signer.ts";
 import { refusingPayment } from "../infra/payment/refusing-payment.ts";
 import { seed } from "./seed.ts";
 
@@ -42,7 +43,7 @@ const principalFrom = async (request: Request): Promise<Principal> => {
 
 /** The approval page of a pending order, under the base URL of this read. */
 const approvalUrl = (baseUrl: string, orderId: string): string =>
-  `${baseUrl}/approvals?order=${encodeURIComponent(orderId)}`;
+  `${baseUrl}/approvals/${encodeURIComponent(orderId)}`;
 
 const toOrder = (
   { idempotencyKey: _key, requested: _requested, ...order }: StoredOrder,
@@ -65,8 +66,17 @@ const REFUSAL_STATUS = {
   UPSTREAM_FAILED: 502,
 } as const satisfies Record<Refusal["code"], 400 | 409 | 502>;
 
-const envelope = (refusal: Refusal) => ({
-  error: { code: refusal.code, message: refusal.message },
+const DECISION_STATUS = {
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  STALE_OFFER: 409,
+  OFFER_EXPIRED: 409,
+  NOT_IMPLEMENTED: 501,
+  UPSTREAM_FAILED: 502,
+} as const satisfies Record<DecisionError["code"], 404 | 409 | 501 | 502>;
+
+const envelope = (failure: Refusal | DecisionError) => ({
+  error: { code: failure.code, message: failure.message },
 });
 
 const refused = {
@@ -81,8 +91,11 @@ const defaultDeps = (db: Db): ApiDeps => {
     store: postgresOrderStore(db),
     verifyOffer: processOfferVerifier(),
     // Resolved on first use: the base URL needs the server's environment.
-    mandates: { current: () => (mandates ??= mandateClient(`${selfBaseUrl()}/api`)).current() },
+    mandates: {
+      current: (agentId) => (mandates ??= mandateClient(`${selfBaseUrl()}/api`)).current(agentId),
+    },
     payment: refusingPayment,
+    signReceipt: envReceiptSigner,
     now: () => new Date(),
     publicBaseUrl,
   };
@@ -105,11 +118,11 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
         return result.value.created ? status(201, order) : order;
       },
     )
-    .get(
-      "/pending",
-      { response: { 200: PendingListSchema, 501: ErrorEnvelopeSchema } },
-      ({ status }) => status(501, notImplemented("pending")),
-    )
+    .get("/pending", { response: { 200: PendingListSchema } }, async ({ request }) => ({
+      orders: (await listPending(deps, await principalFrom(request))).map((order) =>
+        toOrder(order, deps.publicBaseUrl),
+      ),
+    }))
     .post(
       "/precheck",
       { body: PrecheckRequestSchema, response: { 200: PrecheckSchema, ...refused } },
@@ -135,9 +148,20 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
       {
         params: OrderRefSchema,
         body: DecideApprovalRequestSchema,
-        response: { 200: OrderSchema, 501: ErrorEnvelopeSchema },
+        response: {
+          200: OrderSchema,
+          404: ErrorEnvelopeSchema,
+          409: ErrorEnvelopeSchema,
+          501: ErrorEnvelopeSchema,
+          502: ErrorEnvelopeSchema,
+        },
       },
-      ({ status }) => status(501, notImplemented("decide")),
+      async ({ body, params, request, status }) => {
+        const result = await decide(deps, await principalFrom(request), params.orderId, body);
+        return result.ok
+          ? toOrder(result.value, deps.publicBaseUrl)
+          : status(DECISION_STATUS[result.error.code], envelope(result.error));
+      },
     );
 };
 

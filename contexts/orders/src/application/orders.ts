@@ -9,16 +9,24 @@ import {
   type Precheck,
   type Principal,
   REASON_TEXT,
+  type ReasonCode,
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
-import { evaluate, grossTotal, nextDeliveryDateAfterCutoff, netTotal } from "../domain/evaluate.ts";
-import { commitPlacement } from "./commit-placement.ts";
+import {
+  evaluate,
+  grossTotal,
+  nextDeliveryDateAfterCutoff,
+  netTotal,
+  reasonsByProduct,
+} from "../domain/evaluate.ts";
+import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import type {
   MandatePort,
   OfferVerifier,
   OrderStore,
   OrderTx,
   PaymentPort,
+  ReceiptSigner,
   StoredOrder,
 } from "./ports.ts";
 
@@ -27,6 +35,7 @@ export interface OrderDeps {
   verifyOffer: OfferVerifier;
   mandates: MandatePort;
   payment: PaymentPort;
+  signReceipt: ReceiptSigner;
   now: () => Date;
 }
 
@@ -66,7 +75,7 @@ const verifyAll = async (
   return ok(lines);
 };
 
-/** SPEC-009 R3-R5. Neither precheck nor place_order goes past a refusal. */
+/** SPEC-009 R3-R5, plus the payment terms of SPEC-002. Neither precheck nor place_order goes past a refusal. */
 const checkTokens = async (
   deps: OrderDeps,
   principal: Principal,
@@ -83,14 +92,23 @@ const checkTokens = async (
   if (!alternativeLines.ok) return alternativeLines;
 
   const claims = [...lines.value, ...alternativeLines.value].map((line) => line.claims);
+  if (new Set(claims.map((claim) => claim.offerId)).size !== claims.length)
+    return err(refusal("OFFER_INVALID", "The request repeats an offer ID."));
   if (claims.some((claim) => claim.customer !== principal.customer))
     return err(refusal("BAD_REQUEST", "An offer was issued to another customer."));
-  if (new Set(lines.value.map((line) => line.claims.paymentTerms)).size > 1)
-    return err(refusal("BAD_REQUEST", "The offers have different payment terms."));
+  // Every token, alternatives included, must carry the account's payment terms; so they also agree.
+  if (claims.some((claim) => claim.paymentTerms !== principal.paymentTerms))
+    return err(refusal("BAD_REQUEST", "The offers' payment terms are not the account's."));
 
-  const mandate = await deps.mandates.current();
+  const mandate = await deps.mandates.current(principal.agentId);
   if (!mandate.ok) return err(refusal("UPSTREAM_FAILED", "The mandate could not be read."));
-  const current = mandate.value;
+  // A mandate signed for another agent or customer is not this principal's mandate.
+  const current =
+    mandate.value !== null &&
+    mandate.value.agent === principal.agentId &&
+    mandate.value.iss === principal.customer
+      ? mandate.value
+      : null;
   const stale = claims.some(
     (claim) =>
       claim.agentId !== principal.agentId ||
@@ -104,17 +122,23 @@ const checkTokens = async (
   return ok({ lines: lines.value, alternatives: alternativeLines.value, mandate: current });
 };
 
+/** The evaluation, and the reasons each product raises (for the audit). */
+type Evaluated = { evaluation: Evaluation; byProduct: Map<string, ReasonCode[]> };
+
 const evaluateChecked = async (
   deps: OrderDeps,
   principal: Principal,
   checked: Checked,
   now: Date,
-): Promise<Evaluation> => {
+): Promise<Evaluated> => {
   const claims = checked.lines.map((line) => line.claims);
   const history = await deps.store.history(principal.customer, [
     ...new Set(claims.map((claim) => claim.productId)),
   ]);
-  return evaluate({ claims, mandate: checked.mandate, history, live: null, now });
+  return {
+    evaluation: evaluate({ claims, mandate: checked.mandate, history, live: null, now }),
+    byProduct: reasonsByProduct(claims, checked.mandate, history),
+  };
 };
 
 /** Runs R3-R5 and the rule checks without writing anything and without the credit check. */
@@ -126,7 +150,7 @@ export const precheck = async (
   const now = deps.now();
   const checked = await checkTokens(deps, principal, offers, [], now);
   if (!checked.ok) return checked;
-  return ok(await evaluateChecked(deps, principal, checked.value, now));
+  return ok((await evaluateChecked(deps, principal, checked.value, now)).evaluation);
 };
 
 const sameTokens = (order: StoredOrder, request: PlaceOrderRequest): boolean =>
@@ -141,20 +165,35 @@ const replayOrConflict = (
     ? ok({ order, created: false })
     : err(refusal("CONFLICT", "The idempotency key was used with other offers."));
 
-const auditOf = (evaluation: Evaluation, at: string): AuditEvent[] => {
+/**
+ * The audit of a new order. A reason about one product gets one check_failed per product, with
+ * its productId, so the approval card can name the product.
+ */
+const auditOf = (
+  evaluation: Evaluation,
+  byProduct: Map<string, ReasonCode[]>,
+  at: string,
+): AuditEvent[] => {
   const opened: AuditEvent[] = [
     { at, actor: "agent", event: "order_requested" },
     { at, actor: "server", event: "offer_verified" },
   ];
   if (evaluation.decision === "auto")
     return [...opened, { at, actor: "server", event: "check_passed" }];
-  const failed: AuditEvent[] = evaluation.reasons.map((reason) => ({
-    at,
-    actor: "server",
-    event: "check_failed",
-    reason,
-    detail: REASON_TEXT[reason],
-  }));
+  const failed = evaluation.reasons.flatMap((reason) => {
+    const failedFor = (productId?: string): AuditEvent => ({
+      at,
+      actor: "server",
+      event: "check_failed",
+      reason,
+      detail: REASON_TEXT[reason],
+      ...(productId === undefined ? {} : { productId }),
+    });
+    const products = [...byProduct].filter(([, reasons]) => reasons.includes(reason));
+    return products.length === 0
+      ? [failedFor()]
+      : products.map(([productId]) => failedFor(productId));
+  });
   const outcome: AuditEvent =
     evaluation.decision === "rejected"
       ? { at, actor: "server", event: "rejected" }
@@ -166,7 +205,7 @@ const buildOrder = (
   principal: Principal,
   request: PlaceOrderRequest,
   checked: Checked,
-  evaluation: Evaluation,
+  { evaluation, byProduct }: Evaluated,
   now: Date,
 ): StoredOrder => {
   const claims = checked.lines.map((line) => line.claims);
@@ -195,7 +234,7 @@ const buildOrder = (
     nextDeliveryDate: evaluation.reasons.includes("CUTOFF_PASSED")
       ? nextDeliveryDateAfterCutoff(claims, now)
       : null,
-    audit: auditOf(evaluation, at),
+    audit: auditOf(evaluation, byProduct, at),
     createdAt: at,
   };
 };
@@ -207,13 +246,16 @@ const refuse = async (
   now: Date,
 ): Promise<Result<never, Refusal>> => {
   // An unreachable mandate service is not a refusal of the request (SPEC-009 R3-R6).
-  if (error.code !== "UPSTREAM_FAILED")
-    await store.refuse(principal.customer, {
+  if (error.code !== "UPSTREAM_FAILED") {
+    const recorded = await store.refuse(principal.customer, {
       at: now.toISOString(),
       actor: "agent",
       event: "order_refused",
       detail: error.code,
     });
+    if (!recorded.ok)
+      return err(refusal("UPSTREAM_FAILED", "The audit record could not be verified."));
+  }
   return err(error);
 };
 
@@ -238,13 +280,25 @@ export const placeOrder = async (
     now,
   );
   if (!checked.ok) return refuse(deps.store, principal, checked.error, now);
-  const evaluation = await evaluateChecked(deps, principal, checked.value, now);
-  const order = buildOrder(principal, request, checked.value, evaluation, now);
+  const evaluated = await evaluateChecked(deps, principal, checked.value, now);
+  const { evaluation } = evaluated;
+  const unchained = buildOrder(principal, request, checked.value, evaluated, now);
+  const chained = await appendOrderAudit(unchained, unchained.audit, true);
+  if (!chained.ok)
+    return err(refusal("UPSTREAM_FAILED", "The audit record could not be verified."));
+  const order = chained.value;
 
-  return deps.store.withCustomerLock(principal.customer, async (tx: OrderTx) => {
+  const result = await deps.store.withCustomerLock(principal.customer, async (tx: OrderTx) => {
     // A parallel request with the same key may have stored its order while this one was checked.
     const stored = await tx.findByKey(principal.customer, request.idempotencyKey);
     if (stored !== null) return replayOrConflict(stored, request);
+    if (
+      await tx.hasUsedOffers(
+        principal.customer,
+        checked.value.lines.map((line) => line.offerId),
+      )
+    )
+      return err(refusal("OFFER_INVALID", "An offer has already been used in an order."));
     const final =
       evaluation.decision === "auto"
         ? await commitPlacement({
@@ -252,12 +306,17 @@ export const placeOrder = async (
             order,
             creditLimit: principal.creditLimit,
             payment: deps.payment,
+            signReceipt: deps.signReceipt,
             now,
           })
-        : order;
-    await tx.insert(final);
-    return ok({ order: final, created: true });
+        : ok(order);
+    if (!final.ok) return err(refusal("UPSTREAM_FAILED", "The order could not be finalized."));
+    await tx.insert(final.value);
+    return ok({ order: final.value, created: true });
   });
+  if (!result.ok && result.error.code === "OFFER_INVALID")
+    return refuse(deps.store, principal, result.error, now);
+  return result;
 };
 
 export const findOrder = (

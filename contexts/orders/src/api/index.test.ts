@@ -1,118 +1,18 @@
 import { expect, test } from "bun:test";
-import {
-  DEMO_ACCOUNT,
-  ErrorEnvelopeSchema,
-  fixtures,
-  type MandateLimits,
-  type OfferClaims,
-  type Order,
-  OrderSchema,
-  PrecheckSchema,
-  StoredMandateSchema,
-} from "@app/contract";
-import { localOfferKeys, type OfferSigningKey, signOfferToken } from "@app/contract/server";
-import { type Db, mountContext } from "@app/server-kit";
-import { context as mandatesContext, createApi as createMandatesApi } from "@ctx/mandates/api";
-import type { AnyElysia } from "elysia";
-import { mandateClient } from "../infra/mandate-client.ts";
-import { offerVerifier } from "../infra/offer-verifier.ts";
+import { DEMO_ACCOUNT, fixtures, PrecheckSchema } from "@app/contract";
 import { refusals } from "../infra/schema.ts";
-import { context, createApi } from "./index.ts";
+import {
+  call,
+  counts,
+  errorOf,
+  inMinutes,
+  limitsWith,
+  mount,
+  orderOf,
+  overLimit,
+  place,
+} from "./test-support.ts";
 import { withDatabase } from "./test-database.ts";
-
-const now = new Date("2026-11-16T08:00:00Z");
-const inMinutes = (minutes: number) => new Date(now.getTime() + minutes * 60_000);
-
-const testKey = async (): Promise<OfferSigningKey> => {
-  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
-    "sign",
-    "verify",
-  ]);
-  const kid = "offer-test";
-  const publicJwk = { ...(await crypto.subtle.exportKey("jwk", pair.publicKey)), kid };
-  return { kid, privateKey: pair.privateKey, publicJwk };
-};
-
-const limitsWith = (changes: Partial<MandateLimits> = {}): MandateLimits => ({
-  ...fixtures.registerMandateRequest.limits,
-  newProducts: "auto",
-  ...changes,
-});
-
-/** The orders context and the real mandates context on one test database, with a test signing key. */
-const mount = async (db: Db) => {
-  await mountContext(db, mandatesContext);
-  await mountContext(db, context);
-  const mandates = createMandatesApi(db, () => now);
-  const key = await testKey();
-  const keys = localOfferKeys({ keys: [key.publicJwk] });
-  // Stands in for PUBLIC_BASE_URL, which the server reads on every response.
-  const publicBase = { url: "https://orders.test" };
-  const app = createApi(db, {
-    verifyOffer: offerVerifier(async () => keys),
-    mandates: mandateClient(mandates),
-    now: () => now,
-    publicBaseUrl: () => publicBase.url,
-  });
-  const register = async (limits: MandateLimits = limitsWith()) => {
-    const response = await mandates.handle(
-      new Request("http://localhost/mandates", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ limits, standingConstraints: { hard: [], soft: [] } }),
-      }),
-    );
-    return StoredMandateSchema.parse(await response.json()).mandate;
-  };
-  const mandate = await register();
-  const sign = (changes: Partial<OfferClaims> = {}, exp = inMinutes(10)) => {
-    const { iat: _iat, exp: _exp, ...claims } = fixtures.offerClaims;
-    return signOfferToken(
-      {
-        ...claims,
-        offerId: `off_${crypto.randomUUID()}`,
-        mandateId: mandate.mandateId,
-        mandateVersion: mandate.version,
-        ...changes,
-      },
-      key,
-      exp,
-    );
-  };
-  return { app, mandates, mandate, register, sign, publicBase };
-};
-
-const call = (app: AnyElysia, method: string, path: string, body?: object) =>
-  app.handle(
-    new Request(`http://localhost/orders${path}`, {
-      method,
-      ...(body === undefined
-        ? {}
-        : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-    }),
-  );
-
-const place = (app: AnyElysia, offers: string[], extra: object = {}) =>
-  call(app, "POST", "", { offers, idempotencyKey: crypto.randomUUID(), ...extra });
-
-const orderOf = async (response: Response): Promise<Order> =>
-  OrderSchema.parse(await response.json());
-
-const errorOf = async (response: Response) =>
-  ErrorEnvelopeSchema.parse(await response.json()).error.code;
-
-const count = async (db: Db, table: string): Promise<number> => {
-  const [row] = await db.$client.unsafe(`select count(*)::int as n from ${table}`);
-  return Number(row?.n);
-};
-
-const counts = async (db: Db) => ({
-  orders: await count(db, "orders_orders"),
-  refusals: await count(db, "orders_refusals"),
-  history: await count(db, "orders_history"),
-});
-
-const overLimit = { total: { net: 1100, gross: 1250 } };
 
 test("an in-limit offer gives 201 placed with audit order_requested, offer_verified, check_passed, placed", async () =>
   withDatabase(async (db) => {
@@ -146,7 +46,9 @@ test("an over-limit offer gives pending_approval with reasons exactly [SPEND_OVE
     const order = await orderOf(response);
     expect(order.status).toBe("pending_approval");
     expect(order.reasons).toEqual(["SPEND_OVER_LIMIT"]);
-    expect(order.approvalUrl).toBe(`https://first.example/approvals?order=${order.orderId}`);
+    expect(order.approvalUrl).toBe(
+      `https://first.example/approvals/${encodeURIComponent(order.orderId)}`,
+    );
     expect(order.audit.map((event) => event.event)).toEqual([
       "order_requested",
       "offer_verified",
@@ -156,7 +58,9 @@ test("an over-limit offer gives pending_approval with reasons exactly [SPEND_OVE
 
     publicBase.url = "https://second.example";
     const read = await orderOf(await call(app, "GET", `/${order.orderId}`));
-    expect(read.approvalUrl).toBe(`https://second.example/approvals?order=${order.orderId}`);
+    expect(read.approvalUrl).toBe(
+      `https://second.example/approvals/${encodeURIComponent(order.orderId)}`,
+    );
   }));
 
 test("precheck gives the same decision and reasons as place_order would and leaves orders, credit and audit unchanged", async () =>
@@ -355,4 +259,24 @@ test("alternatives are stored and not counted in the total", async () =>
     expect(placed.total).toEqual(fixtures.offerClaims.total);
     const read = await orderOf(await call(app, "GET", `/${placed.orderId}`));
     expect(read).toEqual(placed);
+  }));
+
+test("a check about one product names it in the audit; an order-level check names none", async () =>
+  withDatabase(async (db) => {
+    const { app, register, sign } = await mount(db);
+    const mandate = await register(limitsWith({ newProducts: "ask" }));
+    const under = { mandateId: mandate.mandateId, mandateVersion: mandate.version };
+    const order = await orderOf(
+      await place(app, [
+        await sign({ ...under, ...overLimit, productId: "prod_new_a" }),
+        await sign({ ...under, productId: "prod_new_b" }),
+      ]),
+    );
+    expect(new Set(order.reasons)).toEqual(new Set(["NEW_PRODUCT", "SPEND_OVER_LIMIT"]));
+    const failed = order.audit.filter((event) => event.event === "check_failed");
+    const named = failed
+      .filter((event) => event.reason === "NEW_PRODUCT")
+      .map((event) => event.productId);
+    expect(new Set(named)).toEqual(new Set(["prod_new_a", "prod_new_b"]));
+    expect(failed.find((event) => event.reason === "SPEND_OVER_LIMIT")?.productId).toBeUndefined();
   }));

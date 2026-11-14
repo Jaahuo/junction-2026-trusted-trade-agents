@@ -4,12 +4,19 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./theme.css": "./src/theme.css"
+    "./brand": "./src/brand.ts",
+    "./format": "./src/format.ts",
+    "./theme.css": "./src/theme.css",
+    "./skin.css": "./src/skin.css",
+    "./parts.css": "./src/parts.css",
+    "./fonts.css": "./src/fonts.css",
+    "./fonts/*": "./src/fonts/*"
   },
   "dependencies": {
     "clsx": "^2.1.1",
     "react": "catalog:",
     "sonner": "^2.0.0",
-    "tailwind-merge": "^3.3.0"
+    "tailwind-merge": "^3.3.0",
+    "tailwindcss": "catalog:"
   }
 }

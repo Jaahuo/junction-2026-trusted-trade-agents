@@ -1,0 +1,1 @@
+CREATE INDEX "orders_history_customer_product" ON "orders_history" USING btree ("customer","productId");

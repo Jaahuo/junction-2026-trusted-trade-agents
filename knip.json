@@ -1,10 +1,10 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreUnresolved": ["scripts/.+\\.ts", "apps/api/src/main\\.ts"],
+  "ignoreUnresolved": ["scripts/.+\\.ts", "apps/api/src/(main|remote-reset)\\.ts"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.ts", ".omp/hooks/*/*.ts"],
-      "ignoreDependencies": ["@app/contract"]
+      "ignoreDependencies": ["@app/contract", "exact-mirror", "openapi-types", "typebox"]
     },
     "apps/api": {
       "entry": ["src/main.ts!", "src/server.ts!"]
@@ -30,5 +30,5 @@
       "ignoreDependencies": ["zod"]
     }
   },
-  "ignoreBinaries": ["gitleaks"]
+  "ignoreBinaries": ["gitleaks", "tofu"]
 }

@@ -8,6 +8,27 @@
       "when": 1794651570829,
       "tag": "0000_cloudy_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794666315925,
+      "tag": "0001_shallow_lockjaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794668518476,
+      "tag": "0002_green_millenium_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794670399084,
+      "tag": "0003_dizzy_night_nurse",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,39 @@
+#cloud-config
+package_update: true
+packages:
+  - caddy
+  - rsync
+  - docker.io
+write_files:
+  - path: /etc/systemd/system/trusted-trade.service
+    content: |
+      [Unit]
+      Description=Trusted trade agents API
+      After=docker.service network-online.target
+      Wants=network-online.target
+      Requires=docker.service
+      ConditionPathExists=/etc/trusted-trade.env
+      ConditionPathExists=/etc/trusted-trade-image.env
+
+      [Service]
+      EnvironmentFile=/etc/trusted-trade-image.env
+      ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:${app_port}:3000 -v "${app_dir}/data:/app/data:ro" $${TRUSTED_TRADE_IMAGE}
+      ExecStop=/usr/bin/docker stop --time 30 trusted-trade
+      TimeoutStopSec=40
+      Restart=on-failure
+      RestartSec=2
+
+      [Install]
+      WantedBy=multi-user.target
+%{ if ci_ssh_public_key != "" ~}
+  - path: /root/.ssh/authorized_keys
+    append: true
+    permissions: "0600"
+    content: |
+      ${ci_ssh_public_key}
+%{ endif ~}
+runcmd:
+  - systemctl enable --now docker.service
+  - mkdir -p ${app_dir}/data
+  - systemctl daemon-reload
+  - systemctl enable trusted-trade.service

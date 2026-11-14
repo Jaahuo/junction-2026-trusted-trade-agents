@@ -79,6 +79,8 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "Place an order from signed offer tokens with an idempotency key. The order is placed, pending human approval or rejected, with reason codes. A pending order has an approvalUrl for the human; do not approve it yourself.",
   get_order_status: "Get the current status and the audit record of an order.",
   get_mandate: "Get the purchasing limits currently in force for this agent.",
+  draft_mandate:
+    "Draft new purchasing limits (a mandate) from the terms the human gave, to set or change the limits or after MANDATE_INVALID. Nothing is registered: the mandate view shows the draft next to the current limits, and only the human registers it there with the Register button. The limits are not in force until get_mandate shows them.",
   list_pending_approvals: "List the orders that wait for a human approval decision.",
   decide_approval:
     "Record a human approval decision on a pending order. Only the approval view calls this tool.",
@@ -87,12 +89,24 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   revoke_mandate: "Revoke a mandate. Only the mandate view calls this tool.",
 };
 
+/**
+ * Views a host does not show in the chat yet. The offer comparison is a placeholder until #22,
+ * and the agent calls get_offers several times per order, so each call would add an empty card.
+ */
+export const VIEWS_NOT_IN_CHAT: ReadonlySet<string> = new Set(["offer-comparison"]);
+
+/** The view a tool shows in the chat, if any. */
+const chatViewOf = (name: ToolName) => {
+  const view = VIEWS.find((entry) => entry.tools.some((tool) => tool === name));
+  return view === undefined || VIEWS_NOT_IN_CHAT.has(view.view) ? undefined : view;
+};
+
 const toolMeta = (name: ToolName): Record<string, unknown> => {
   if (VIEW_TOOLS.some((tool) => tool === name)) {
     const ui: McpUiToolMeta = { visibility: ["app"] };
     return { ui };
   }
-  const view = VIEWS.find((entry) => entry.tools.some((tool) => tool === name));
+  const view = chatViewOf(name);
   if (view === undefined) return {};
   const ui: McpUiToolMeta = { resourceUri: view.uri };
   // The flat key mirrors ext-apps' registerAppTool, for hosts that read the older form.
@@ -108,12 +122,29 @@ const toCallToolResult = (reply: ToolReply<ToolName>): CallToolResult => {
   return reply.isError ? { content, isError: true } : { content, structuredContent: reply.data };
 };
 
+// A tool with a view also takes the conversation's language, which only the view reads
+// (SPEC-012). It is not part of the REST input, so the server drops it before the call.
+const LANGUAGE = {
+  type: "string",
+  description:
+    "The language the user writes in, as a BCP 47 tag such as fi or en. The view shows its text in it.",
+};
+
+const inputSchema = (name: ToolName) => {
+  const schema = z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" });
+  if (chatViewOf(name) === undefined) return schema;
+  return { ...schema, properties: { ...schema["properties"], language: LANGUAGE } };
+};
+
+const withoutLanguage = (args: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(args).filter(([key]) => key !== "language"));
+
 // The same JSON Schema options as McpServer.registerTool uses; ToolSchema checks they are object schemas.
 const toolDefinition = (name: ToolName): Tool =>
   ToolSchema.parse({
     name,
     description: DESCRIPTIONS[name],
-    inputSchema: z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" }),
+    inputSchema: inputSchema(name),
     outputSchema: z.toJSONSchema(TOOL_OUTPUT[name], { target: "draft-7", io: "output" }),
     _meta: toolMeta(name),
   });
@@ -133,7 +164,7 @@ const createMcpServer = ({ rest, views, viewTools, skills }: McpDeps): McpServer
     if (name === undefined) {
       throw new McpError(ErrorCode.InvalidParams, `Tool ${params.name} not found.`);
     }
-    return toCallToolResult(await runTool(rest, name, params.arguments ?? {}));
+    return toCallToolResult(await runTool(rest, name, withoutLanguage(params.arguments ?? {})));
   });
   for (const { view, uri } of VIEWS) {
     server.registerResource(view, uri, { mimeType: RESOURCE_MIME_TYPE }, async () => {

@@ -2,7 +2,13 @@ import { z } from "zod";
 import { AccountSchema } from "./account.ts";
 import { EmptySchema } from "./common.ts";
 import { DecideApprovalRouteInputSchema } from "./decision.ts";
-import { MandateRefSchema, RegisterMandateRequestSchema, StoredMandateSchema } from "./mandate.ts";
+import {
+  DraftMandateRequestSchema,
+  MandateDraftSchema,
+  MandateRefSchema,
+  RegisterMandateRequestSchema,
+  StoredMandateSchema,
+} from "./mandate.ts";
 import {
   OffersRequestSchema,
   OffersResultSchema,
@@ -76,6 +82,15 @@ export const ROUTES = [
     output: StoredMandateSchema,
   },
   {
+    key: "draft",
+    tool: "draft_mandate",
+    method: "POST",
+    path: "/api/mandates/drafts",
+    context: "mandates",
+    input: DraftMandateRequestSchema,
+    output: MandateDraftSchema,
+  },
+  {
     key: "pending",
     tool: "list_pending_approvals",
     method: "GET",
@@ -132,6 +147,8 @@ export const ROUTES = [
   {
     key: "requote",
     tool: null,
+    /** Typed stub: always answers 501 NOT_IMPLEMENTED until its hardening issue builds it. */
+    notImplemented: true,
     method: "POST",
     path: "/api/offers/requote",
     context: "offers",
@@ -141,6 +158,8 @@ export const ROUTES = [
   {
     key: "validate",
     tool: null,
+    /** Typed stub: always answers 501 NOT_IMPLEMENTED until its hardening issue builds it. */
+    notImplemented: true,
     method: "POST",
     path: "/api/offers/validate",
     context: "offers",

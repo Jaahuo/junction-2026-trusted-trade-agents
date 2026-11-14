@@ -1,4 +1,15 @@
-@import "tailwindcss";
-@import "@app/ui/theme.css" theme(static);
-@source "..";
-@source "../../../../packages/ui/src";
+@import "@app/ui/skin.css";
+
+body {
+  margin: 0;
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+  font-family: var(--font-family-sans);
+}
+
+/* A view opened as its own page (plain mode): a card-sized column, centred. */
+html.page #root {
+  max-width: 35rem;
+  margin: 3rem auto;
+  padding: 0 1rem;
+}

@@ -218,6 +218,35 @@ test("with no history the cap is 2000 std units, and no conversion counts as ove
   ]);
 });
 
+test("a unit size that is not a positive number counts as no conversion", () => {
+  for (const value of [0, -12, Number.NaN]) {
+    const odd = claim({}, { perSalesUnit: { value, unit: "LTR" } });
+    expect(run([odd], { history: [] }).reasons).toEqual(["QUANTITY_UNUSUAL"]);
+    expect(run([{ ...odd, stock: "unconfirmed" }], { history: [] }).reasons).toEqual([
+      "QUANTITY_UNUSUAL",
+      "UNCONFIRMED_STOCK",
+    ]);
+  }
+});
+
+test("lines of one product in different units count as over every quantity cap", () => {
+  const cartons = claim({ quantity: { value: 4, unit: "CT" } });
+  const litres = { ...cartons, offerId: "off_test_2", quantity: { value: 4, unit: "LTR" } };
+  expect(run([cartons, litres]).reasons).toEqual(["QUANTITY_UNUSUAL"]);
+  expect(run([cartons, litres], { history: [] }).reasons).toEqual(["QUANTITY_UNUSUAL"]);
+  expect(
+    run(
+      [
+        { ...cartons, stock: "unconfirmed" },
+        { ...litres, stock: "unconfirmed" },
+      ],
+      {
+        history: [],
+      },
+    ).reasons,
+  ).toEqual(["QUANTITY_UNUSUAL", "UNCONFIRMED_STOCK"]);
+});
+
 test("history in std units is compared after conversion to sales units", () => {
   const litres: HistoryRow[] = [
     { productId: fixtures.offerClaims.productId, quantity: { value: 48, unit: "LTR" } },

@@ -1,5 +1,6 @@
 import {
   DecideApprovalInputSchema,
+  ErrorEnvelopeSchema,
   type Order,
   OrderSchema,
   PendingListSchema,
@@ -8,7 +9,8 @@ import {
   type ToolName,
   VIEWS,
 } from "@app/contract";
-import { harnessDecide } from "./harness-decide.ts";
+import { pick } from "./locale.ts";
+import { HARNESS_MANDATE, harnessDecide } from "./harness-decide.ts";
 
 /** The orders in a loaded tool result: a pending list or one order. */
 const ordersIn = (raw: unknown): Order[] => {
@@ -43,6 +45,10 @@ export type Source = {
   call: (tool: ToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** Sends a message to the agent in the chat; absent outside a chat (plain mode). */
   message?: (text: string) => Promise<void>;
+  /** Tells the model something without a chat message (MCP Apps updateModelContext). */
+  context?: (text: string) => Promise<void>;
+  /** The tool's arguments, which a host sends before the result (MCP Apps ontoolinput). */
+  input?: Promise<Record<string, unknown>>;
 };
 
 /** The part of the MCP Apps bridge (`App` of ext-apps) a view uses. */
@@ -51,9 +57,13 @@ export type Host = {
   callServerTool: (request: {
     name: string;
     arguments: Record<string, unknown>;
-  }) => Promise<{ isError?: boolean; structuredContent?: unknown }>;
+  }) => Promise<{ isError?: boolean; structuredContent?: unknown; text?: string }>;
   /** Posts a user message to the chat; false when the host rejects it. */
   sendMessage: (text: string) => Promise<boolean>;
+  /** Updates what the model knows about the view, without a chat message. */
+  updateModelContext: (text: string) => Promise<void>;
+  /** Receives the tool's arguments, before the result. */
+  onToolInput?: (listener: (args: Record<string, unknown>) => void) => void;
 };
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -68,16 +78,22 @@ export function viewEntry<V extends ViewName>(view: V) {
 /** Host mode: the tool result arrives through the bridge, actions are server-tool calls. */
 export function hostSource(host: Host): Source {
   const result = new Promise<unknown>((resolve) => host.onToolResult(resolve));
+  const onToolInput = host.onToolInput;
   return {
+    ...(onToolInput === undefined
+      ? {}
+      : { input: new Promise<Record<string, unknown>>((resolve) => onToolInput(resolve)) }),
     load: () => result,
     call: async (name, args) => {
       const response = await host.callServerTool({ name, arguments: args });
-      if (response.isError === true) throw new Error(`${name} failed.`);
+      // The server's reason ("OFFER_EXPIRED: …") is the error's text content.
+      if (response.isError === true) throw new Error(response.text ?? `${name} failed.`);
       return response.structuredContent;
     },
     message: async (text) => {
       if (!(await host.sendMessage(text))) throw new Error("The chat did not take the message.");
     },
+    context: (text) => host.updateModelContext(text),
   };
 }
 
@@ -102,7 +118,14 @@ async function request(fetch: Fetch, baseUrl: string, route: Route, args: Record
           body: JSON.stringify(body),
         },
   );
-  if (!response.ok) throw new Error(`${route.method} ${path} answered ${response.status}.`);
+  if (!response.ok) {
+    const envelope = ErrorEnvelopeSchema.safeParse(await response.json().catch(() => null));
+    throw new Error(
+      envelope.success
+        ? `${envelope.data.error.code}: ${envelope.data.error.message}`
+        : `${route.method} ${path} answered ${response.status}.`,
+    );
+  }
   return response.json();
 }
 
@@ -122,9 +145,11 @@ export function plainSource(
   };
   return {
     load: async () => {
-      const route = routeOf((r) => r.key === entry.plainLoad, "loading");
-      const param = /:(\w+)/.exec(route.path)?.[1];
       const id = entry.plainQuery === null ? null : options.query.get(entry.plainQuery);
+      // Without the query, a view with a list route loads the list (the open orders).
+      const key = id === null && entry.plainList !== null ? entry.plainList : entry.plainLoad;
+      const route = routeOf((r) => r.key === key, "loading");
+      const param = /:(\w+)/.exec(route.path)?.[1];
       const args = param === undefined || id === null ? {} : { [param]: id };
       return request(options.fetch, options.baseUrl, route, args);
     },
@@ -149,6 +174,7 @@ export function fixtureSource(fixture: unknown, now = () => new Date().toISOStri
   return {
     load: () => result,
     call: async (tool, args) => {
+      if (tool === "get_mandate") return HARNESS_MANDATE;
       const input = DecideApprovalInputSchema.safeParse(args);
       if (tool !== "decide_approval" || !input.success)
         throw new Error(`The harness has no server to call ${tool}.`);
@@ -162,6 +188,7 @@ export function fixtureSource(fixture: unknown, now = () => new Date().toISOStri
     },
     // The harness shows the chat states, so messages are accepted and dropped.
     message: async () => {},
+    context: async () => {},
   };
 }
 
@@ -207,7 +234,13 @@ export function parseResult<E extends ViewEntry>(
   value: unknown,
 ): ViewState<EntryData<E>> {
   const data = parse<E["tools"][number]>(entry.tools, value);
-  if (data === null) return error("The tool result does not match the contract.");
+  if (data === null)
+    return error(
+      pick({
+        en: "The tool result does not match the contract.",
+        fi: "Työkalun tulos ei ole sovitussa muodossa.",
+      }),
+    );
   return isEmpty(data) ? { kind: "empty" } : { kind: "done", data };
 }
 

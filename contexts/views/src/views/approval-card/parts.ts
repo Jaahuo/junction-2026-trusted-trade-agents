@@ -1,25 +1,20 @@
-import type { OfferClaims } from "@app/contract";
+import type { OfferClaims, Order } from "@app/contract";
+import { brand } from "@app/ui/brand";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import attention16 from "../../shared/icons/attention-16.svg?raw";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
+import { intlLocale, pick } from "../../shared/locale.ts";
+import { PARTS, VIEW } from "./strings.ts";
 
 // Parts that the card and the view share: the petrol header, the card frame and
 // the formatters. Figma: Junction 2026 › Screens › "Approval request — v8".
 
-const UNIT: Record<string, string> = {
-  LTR: "l",
-  KGM: "kg",
-  GRM: "g",
-  CT: "packs",
-  PCE: "pcs",
-  ST: "pcs",
-};
+const UNIT: Record<string, string> = { LTR: "l", KGM: "kg", KG: "kg", GRM: "g" };
 /** "packs", "kg": the short name of a unit code. */
-export const unit = (code: string) => UNIT[code] ?? code;
+export const unit = (code: string) => UNIT[code] ?? pick(PARTS).units[code] ?? code;
 
 const euro = (digits: number) =>
-  new Intl.NumberFormat("en-GB", {
+  new Intl.NumberFormat(intlLocale(), {
     style: "currency",
     currency: "EUR",
     minimumFractionDigits: digits,
@@ -27,7 +22,7 @@ const euro = (digits: number) =>
   });
 /** Totals: "€1,428", or "€57.60" when there are cents. */
 export const money = (value: number) => euro(value % 1 === 0 ? 0 : 2).format(value);
-export const number = (value: number) => new Intl.NumberFormat("en-GB").format(value);
+export const number = (value: number) => new Intl.NumberFormat(intlLocale()).format(value);
 /** "1,008 l", "120 kg"; below one kilogram or litre in grams or millilitres ("500 g"). */
 export const amount = (q: { value: number; unit: string }) =>
   q.value > 0 && q.value < 1 && (q.unit === "KGM" || q.unit === "LTR")
@@ -39,16 +34,25 @@ export const stdUnits = (c: OfferClaims) =>
     ? c.quantity
     : { value: c.quantity.value * c.product.perSalesUnit.value, unit: c.product.perSalesUnit.unit };
 export const day = (date: string) =>
-  new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" }).format(
-    new Date(date),
-  );
+  new Intl.DateTimeFormat(intlLocale(), {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(new Date(date));
+/** "Order for Mon 16 Nov": an order named by its earliest delivery day. */
+export const orderName = (order: Order) => {
+  const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
+  return earliest === undefined ? pick(VIEW).order : pick(VIEW).orderFor(day(earliest));
+};
+/** The VAT label that goes after a total: net totals exclude VAT, gross ones include it. */
+export const vat = (basis: "net" | "gross") => pick(PARTS).vat[basis];
 const clock = (at: Date) =>
-  new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(at);
+  new Intl.DateTimeFormat(intlLocale(), { hour: "2-digit", minute: "2-digit" }).format(at);
 /** "Today 21:40", or "14 Nov, 21:40" on another day. */
 export const when = (at: Date, now = new Date()) =>
   at.toDateString() === now.toDateString()
-    ? `Today ${clock(at)}`
-    : `${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(at)}, ${clock(at)}`;
+    ? `${pick(PARTS).today} ${clock(at)}`
+    : `${new Intl.DateTimeFormat(intlLocale(), { day: "numeric", month: "short" }).format(at)}, ${clock(at)}`;
 export const timeOnly = clock;
 
 export const icon = (svg: string, label?: string) =>
@@ -61,8 +65,8 @@ export const icon = (svg: string, label?: string) =>
   >`;
 
 /**
- * The petrol header: logo with the eyebrow (or, v17, a yellow status pill), then a title row
- * and optional facts.
+ * The petrol header: logo with the eyebrow (or, v17, a yellow status pill; or nothing when the
+ * eyebrow is empty), then a title row and optional facts.
  */
 export const brandHeader = (
   eyebrow: string,
@@ -72,12 +76,14 @@ export const brandHeader = (
 ) =>
   html`<header class="header" part="header">
     <div class="eyebrow-row ${pill ? "spread" : ""}">
-      ${icon(logo, "Valio Aimo")}
+      <img src=${brand.logo} alt=${brand.name} />
       ${
         pill
           ? html`<span class="pill" part="status">${icon(attention16)}${eyebrow}</span>`
-          : html`<span class="divider" aria-hidden="true"></span>
-              <p class="label-small eyebrow">${eyebrow}</p>`
+          : eyebrow === ""
+            ? nothing
+            : html`<span class="divider" aria-hidden="true"></span>
+                <p class="label-small eyebrow">${eyebrow}</p>`
       }
     </div>
     ${title ?? nothing} ${facts ?? nothing}
@@ -133,20 +139,6 @@ export const cardStyles = css`
   .eyebrow-row.spread {
     justify-content: space-between;
   }
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-xs) var(--spacing-md) var(--spacing-xs) var(--spacing-sm);
-    border-radius: var(--radius-full);
-    background: var(--color-yellow-aimo);
-    color: var(--color-text);
-    font-size: var(--font-size-2xs);
-    font-weight: 700;
-    line-height: 1.25;
-    letter-spacing: 0.2px;
-    white-space: nowrap;
-  }
   .divider {
     width: 1px;
     height: 14px;
@@ -170,6 +162,14 @@ export const cardStyles = css`
   .headline .name {
     flex: 1;
     min-width: 0;
+  }
+  .headline .vat {
+    display: block;
+    color: var(--color-text-on-brand-subtle);
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    text-align: right;
   }
   .facts {
     display: flex;

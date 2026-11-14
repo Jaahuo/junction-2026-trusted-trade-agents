@@ -50,6 +50,7 @@ export const SearchCandidateSchema = z.strictObject({
   match: MatchSchema,
   orderQuantity: QuantitySchema.nullable(),
   equals: QuantitySchema.nullable(),
+  quantityReason: z.string().optional(),
   deliveryReliability: z.number().min(0).max(1).nullable(),
   co2PerKg: z.number().nullable(),
   substitutes: z.array(z.string()),

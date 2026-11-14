@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import type { TradeRest, ViewName, ViewPages } from "../application/tools.ts";
 import { createRoot } from "./index.ts";
-import { type McpDeps, viewToolsMode } from "./mcp-server.ts";
+import { type McpDeps, VIEWS_NOT_IN_CHAT, viewToolsMode } from "./mcp-server.ts";
 
 const placed: Order = { ...fixtures.order, status: "placed", approvalUrl: null };
 
@@ -41,6 +41,7 @@ const fakeRest = (failure?: ErrorEnvelope) => {
     place: reply("place", fixtures.order),
     status: reply("status", placed),
     mandate: reply("mandate", fixtures.storedMandate),
+    draft: reply("draft", fixtures.mandateDraft),
     pending: reply("pending", fixtures.pendingList),
     decide: reply("decide", placed),
     register: reply("register", fixtures.storedMandate),
@@ -60,6 +61,7 @@ const inputs: { [T in ToolName]: z.input<(typeof TOOL_INPUT)[T]> } = {
   place_order: fixtures.placeOrderRequest,
   get_order_status: { orderId: fixtures.order.orderId },
   get_mandate: {},
+  draft_mandate: fixtures.draftMandateRequest,
   list_pending_approvals: {},
   decide_approval: fixtures.decideApprovalInput,
   register_mandate: fixtures.registerMandateRequest,
@@ -114,7 +116,7 @@ const mcp = (overrides: Partial<McpDeps> = {}) => {
 };
 
 describe("tools/list", () => {
-  test("MCP_VIEW_TOOLS=app lists the six model tools and the three view tools as app-only", async () => {
+  test("MCP_VIEW_TOOLS=app lists the seven model tools and the three view tools as app-only", async () => {
     const tools = await mcp().listTools();
     expect(tools.map((tool) => tool.name).toSorted()).toEqual(
       [...MODEL_TOOLS, ...VIEW_TOOLS].toSorted(),
@@ -140,28 +142,41 @@ describe("tools/list", () => {
     expect(() => viewToolsMode("hidden")).toThrow("MCP_VIEW_TOOLS");
   });
 
-  test("every tool's inputSchema is TOOL_INPUT[tool] and its outputSchema is TOOL_OUTPUT[tool]", async () => {
+  test("every tool's inputSchema is TOOL_INPUT[tool], plus language on a tool with a view, and its outputSchema is TOOL_OUTPUT[tool]", async () => {
     for (const tool of await mcp().listTools()) {
       const name = z.enum([...MODEL_TOOLS, ...VIEW_TOOLS]).parse(tool.name);
+      const input = z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" });
+      const hasView = VIEWS.some(
+        (view) => !VIEWS_NOT_IN_CHAT.has(view.view) && view.tools.some((entry) => entry === name),
+      );
       expect({ name, input: tool.inputSchema, output: tool.outputSchema }).toEqual({
         name,
-        input: z.toJSONSchema(TOOL_INPUT[name], { target: "draft-7", io: "input" }),
+        input: hasView
+          ? {
+              ...input,
+              properties: {
+                ...input["properties"],
+                language: { type: "string", description: expect.any(String) },
+              },
+            }
+          : input,
         output: z.toJSONSchema(TOOL_OUTPUT[name], { target: "draft-7", io: "output" }),
       });
     }
   });
 
-  test("each tool in VIEWS declares the view's ui:// resource", async () => {
+  test("each tool in VIEWS declares the view's ui:// resource, except views not in the chat", async () => {
     const tools = await mcp().listTools();
     for (const view of VIEWS) {
       for (const name of view.tools) {
         const tool = tools.find((entry) => entry.name === name);
         expect({ name, uri: tool === undefined ? undefined : uiOf(tool)?.resourceUri }).toEqual({
           name,
-          uri: view.uri,
+          uri: VIEWS_NOT_IN_CHAT.has(view.view) ? undefined : view.uri,
         });
       }
     }
+    expect(VIEWS_NOT_IN_CHAT.has("offer-comparison")).toBe(true);
   });
 });
 
@@ -181,6 +196,38 @@ describe("tools/call", () => {
     const result = await callTool("search_products", fixtures.searchRequest);
     expect(result.structuredContent).toEqual(fixtures.searchResult);
     expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
+  });
+
+  test("language reaches no REST route: search_products sends the request without it", async () => {
+    const { callTool, calls } = mcp();
+    const result = await callTool("search_products", { ...fixtures.searchRequest, language: "fi" });
+    expect(result.isError).toBeUndefined();
+    expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
+  });
+
+  test("draft_mandate is model-visible, shows the mandate view and sends the draft without language", async () => {
+    const { callTool, calls, listTools } = mcp();
+    const tool = (await listTools()).find((entry) => entry.name === "draft_mandate");
+    expect(tool === undefined ? undefined : uiOf(tool)).toEqual({
+      resourceUri: "ui://trusted-trade/mandate-settings",
+    });
+    expect(MODEL_TOOLS).toContain("draft_mandate");
+    expect(VIEW_TOOLS).toEqual(["decide_approval", "register_mandate", "revoke_mandate"]);
+    const result = await callTool("draft_mandate", {
+      ...fixtures.draftMandateRequest,
+      language: "fi",
+    });
+    expect(result.structuredContent).toEqual(fixtures.mandateDraft);
+    expect(result.content[0]?.text).toContain("not registered");
+    expect(calls).toEqual([{ route: "draft", args: [fixtures.draftMandateRequest] }]);
+  });
+
+  test("draft_mandate with an operationId gives isError BAD_REQUEST without a REST call", async () => {
+    const { callTool, calls } = mcp();
+    const result = await callTool("draft_mandate", fixtures.registerMandateRequest);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/^BAD_REQUEST: .*operationId/);
+    expect(calls).toEqual([]);
   });
 
   test("a pending place_order text contains the approvalUrl", async () => {

@@ -4,8 +4,9 @@ export const VIEWS = [
     view: "approval-card",
     uri: "ui://trusted-trade/approval-card",
     tools: ["place_order", "list_pending_approvals"],
-    plainQuery: null,
-    plainLoad: null,
+    plainQuery: "order",
+    plainLoad: "status",
+    plainList: "pending",
     actions: ["decide_approval"],
   },
   {
@@ -14,6 +15,7 @@ export const VIEWS = [
     tools: ["get_offers"],
     plainQuery: null,
     plainLoad: null,
+    plainList: null,
     actions: [],
   },
   {
@@ -22,6 +24,7 @@ export const VIEWS = [
     tools: ["get_order_status"],
     plainQuery: "order",
     plainLoad: "status",
+    plainList: null,
     actions: [],
   },
   {
@@ -30,14 +33,16 @@ export const VIEWS = [
     tools: ["search_products"],
     plainQuery: null,
     plainLoad: null,
+    plainList: null,
     actions: [],
   },
   {
     view: "mandate-settings",
     uri: "ui://trusted-trade/mandate-settings",
-    tools: ["get_mandate"],
+    tools: ["get_mandate", "draft_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
+    plainList: null,
     actions: ["register_mandate", "revoke_mandate"],
   },
 ] as const;

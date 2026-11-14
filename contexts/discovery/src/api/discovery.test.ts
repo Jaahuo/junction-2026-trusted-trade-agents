@@ -87,6 +87,23 @@ test("openapi.json has every /api ROUTES entry with request and response schemas
   }
 });
 
+test("the OpenAPI document marks requote and validate as not implemented, and no other operation", () => {
+  const { paths } = openApiDocument("https://x.test");
+  const marked = Object.entries(paths).flatMap(([path, methods]) =>
+    Object.values(methods)
+      .filter((op) => "x-not-implemented" in op)
+      .map((op) => [path, op.operationId, op.description]),
+  );
+  expect(marked).toEqual([
+    ["/api/offers/requote", "requote", "Not implemented yet: always answers 501 NOT_IMPLEMENTED."],
+    [
+      "/api/offers/validate",
+      "validate",
+      "Not implemented yet: always answers 501 NOT_IMPLEMENTED.",
+    ],
+  ]);
+});
+
 test("the decision body has no orderId and keeps its decision union", () => {
   const operation =
     openApiDocument("https://x.test").paths["/api/orders/{orderId}/decision"]?.["post"];

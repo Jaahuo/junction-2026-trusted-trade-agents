@@ -4,7 +4,7 @@
   "workspaces": {
     ".": {
       "entry": ["scripts/*.ts", ".omp/hooks/*/*.ts"],
-      "ignoreDependencies": ["@app/contract"]
+      "ignoreDependencies": ["@app/contract", "exact-mirror", "openapi-types", "typebox"]
     },
     "apps/api": {
       "entry": ["src/main.ts!", "src/server.ts!"]

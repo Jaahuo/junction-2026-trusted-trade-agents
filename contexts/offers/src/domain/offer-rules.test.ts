@@ -8,6 +8,7 @@ import {
   expiredOmitReason,
   lineTotal,
   mergeConstraints,
+  priceCacheExpiry,
   offerExpiry,
 } from "./offer-rules.ts";
 
@@ -175,5 +176,24 @@ describe("batchIds", () => {
   test("batchIds honours a smaller max", () => {
     expect(batchIds(["a", "b", "c"], 2)).toEqual([["a", "b"], ["c"]]);
     expect(batchIds([])).toEqual([]);
+  });
+});
+
+describe("priceCacheExpiry", () => {
+  const lookedUpAt = new Date("2026-11-14T10:00:00Z");
+
+  test("caps the price cache at 5 minutes after the lookup", () => {
+    expect(
+      priceCacheExpiry("9999-12-31T00:00:00+02:00", "2026-11-15T17:00:00+02:00", lookedUpAt),
+    ).toEqual(new Date("2026-11-14T10:05:00Z"));
+  });
+
+  test("ends the price cache at an earlier cut-off or validTo", () => {
+    expect(
+      priceCacheExpiry("9999-12-31T00:00:00+02:00", "2026-11-14T10:02:00Z", lookedUpAt),
+    ).toEqual(new Date("2026-11-14T10:02:00Z"));
+    expect(priceCacheExpiry("2026-11-14T10:01:00Z", null, lookedUpAt)).toEqual(
+      new Date("2026-11-14T10:01:00Z"),
+    );
   });
 });

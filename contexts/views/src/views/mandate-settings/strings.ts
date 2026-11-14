@@ -66,6 +66,22 @@ const en = {
   noSubstitutes: "Substitute offers are not allowed",
   noThreshold: "No threshold set",
   threshold: (value: string, policy: string) => `${value}. If data is missing: ${policy}.`,
+  oneYear: "One year after registration",
+  draftStatus: "Draft · not registered",
+  draftNote:
+    "The agent drafted these limits from your request. Check them and press Register to put them in force. Nothing changes before you register.",
+  draftCompare: (version: number) =>
+    `Compared with version ${version}, which is in force now. A changed term shows the value in force under it.`,
+  draftNoCurrent:
+    "No mandate is in force now. The agent cannot place orders until you register limits.",
+  proposedLimits: "Proposed limits",
+  inForce: (value: string) => `In force now: ${value}`,
+  register: "Register limits",
+  registering: "Registering…",
+  registerFailedTitle: "The limits were not registered",
+  registerFailedBody:
+    "Press Register again. A repeated Register does not register the limits twice.",
+  humanOnly: "Only you can register limits. The agent cannot register them.",
 };
 
 const fi: typeof en = {
@@ -134,6 +150,22 @@ const fi: typeof en = {
   noSubstitutes: "Korvaavia tarjouksia ei sallita",
   noThreshold: "Rajaa ei ole asetettu",
   threshold: (value, policy) => `${value}. Jos tieto puuttuu: ${policy}.`,
+  oneYear: "Vuoden kuluttua rekisteröinnistä",
+  draftStatus: "Luonnos · ei rekisteröity",
+  draftNote:
+    "Agentti laati nämä rajat pyyntösi perusteella. Tarkista ne ja paina Rekisteröi, niin ne tulevat voimaan. Mikään ei muutu ennen rekisteröintiä.",
+  draftCompare: (version) =>
+    `Verrattu versioon ${version}, joka on nyt voimassa. Muuttuneen kohdan alla näkyy voimassa oleva arvo.`,
+  draftNoCurrent:
+    "Mikään valtuutus ei ole nyt voimassa. Agentti ei voi tehdä tilauksia ennen kuin rekisteröit rajat.",
+  proposedLimits: "Ehdotetut rajat",
+  inForce: (value) => `Nyt voimassa: ${value}`,
+  register: "Rekisteröi rajat",
+  registering: "Rekisteröidään…",
+  registerFailedTitle: "Rajoja ei rekisteröity",
+  registerFailedBody:
+    "Paina Rekisteröi uudelleen. Toistettu rekisteröinti ei rekisteröi rajoja kahdesti.",
+  humanOnly: "Vain sinä voit rekisteröidä rajat. Agentti ei voi rekisteröidä niitä.",
 };
 
 export const MANDATE = { en, fi };

@@ -2,7 +2,13 @@ import type { Account } from "./account.ts";
 import type { DecideApprovalInput, DecideApprovalRequest } from "./decision.ts";
 import { DEMO_ACCOUNT, type DemoProducts } from "./demo.ts";
 import type { ErrorEnvelope } from "./errors.ts";
-import type { MandateLimits, RegisterMandateRequest, StoredMandate } from "./mandate.ts";
+import type {
+  DraftMandateRequest,
+  MandateDraft,
+  MandateLimits,
+  RegisterMandateRequest,
+  StoredMandate,
+} from "./mandate.ts";
 import type {
   OfferClaims,
   OffersRequest,
@@ -171,6 +177,11 @@ const registerMandateRequest: RegisterMandateRequest = {
   standingConstraints: { hard: [], soft },
 };
 
+const draftMandateRequest: DraftMandateRequest = {
+  limits: { ...mandateLimits, maxOrderTotal: { value: 500, currency: "EUR", basis: "gross" } },
+  standingConstraints: { hard: [], soft },
+};
+
 const storedMandate: StoredMandate = {
   mandate: {
     iss: DEMO_ACCOUNT.customer,
@@ -187,6 +198,8 @@ const storedMandate: StoredMandate = {
   status: "active",
   registeredAt: "2026-11-14T10:00:00+00:00",
 };
+
+const mandateDraft: MandateDraft = { draft: draftMandateRequest, current: storedMandate };
 
 const placeOrderRequest: PlaceOrderRequest = {
   offers: [token],
@@ -275,6 +288,8 @@ export const fixtures = {
   mandateLimits,
   registerMandateRequest,
   storedMandate,
+  draftMandateRequest,
+  mandateDraft,
   placeOrderRequest,
   precheckRequest,
   order,

@@ -78,6 +78,7 @@ export const MODEL_TOOLS = [
   "place_order",
   "get_order_status",
   "get_mandate",
+  "draft_mandate",
   "list_pending_approvals",
 ] as const; // the model sees these
 export const VIEW_TOOLS = ["decide_approval", "register_mandate", "revoke_mandate"] as const; // only a view calls these
@@ -132,6 +133,7 @@ export const TOOL_INPUT = {
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
+  draft_mandate: DraftMandateRequestSchema,
   list_pending_approvals: EmptySchema,
   decide_approval: DecideApprovalInputSchema,
   register_mandate: RegisterMandateRequestSchema,
@@ -146,6 +148,7 @@ export const TOOL_INPUT = {
 | place    | place_order            | POST /api/orders                     | orders    | input = body                                                          | PlaceOrderRequest → 201 Order (200 on replay)              |
 | status   | get_order_status       | GET /api/orders/:orderId             | orders    | `orderId` → path                                                      | → Order                                                    |
 | mandate  | get_mandate            | GET /api/mandates/current            | mandates  | none                                                                  | → StoredMandate                                            |
+| draft    | draft_mandate          | POST /api/mandates/drafts            | mandates  | input = body                                                          | DraftMandateRequest → MandateDraft                         |
 | pending  | list_pending_approvals | GET /api/orders/pending              | orders    | none                                                                  | → PendingList                                              |
 | decide   | decide_approval        | POST /api/orders/:orderId/decision   | orders    | `orderId` → path; the rest → body as DecideApprovalRequest (SPEC-011) | DecideApprovalRequest → Order                              |
 | register | register_mandate       | POST /api/mandates                   | mandates  | input = body                                                          | RegisterMandateRequest → 201 StoredMandate (200 on replay) |
@@ -159,7 +162,7 @@ export const TOOL_INPUT = {
 
 - `DecideApprovalInput` is flat because a tool input schema is one object. The MCP binding drops `orderId`, keeps the fields that belong to `decision`, and the REST route validates the result as `DecideApprovalRequest`; a field that does not belong to the decision → 400.
 - No tool input has a customer, account, agent, password or passcode field.
-- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not in `HARD_CONSTRAINT_VALUES` for that attribute, → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` (`standingConstraints.hard`) and the `facts` route.
+- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not in `HARD_CONSTRAINT_VALUES` for that attribute, → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` and `draft_mandate` (`standingConstraints.hard`) and the `facts` route.
 - Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` and `GET /skills/trusted-trade-ordering/:file` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
 
 Verification: a contract test that `ROUTES` keys, tools, `TOOL_INPUT` and `TOOL_OUTPUT` match this table and that every `TOOL_INPUT` schema is a JSON object schema.
@@ -400,6 +403,8 @@ export interface Mandate { iss: string /* customer */; mandateId: string; versio
 export interface StoredMandate { mandate: Mandate; jws: string | null; status: "active" | "revoked"; registeredAt: string }
 export interface RegisterMandateRequest { operationId?: string; limits: MandateLimits;
   standingConstraints: { hard: HardConstraint[]; soft: SoftConstraint[] }; exp?: number }
+export type DraftMandateRequest = Omit<RegisterMandateRequest, "operationId">;
+export interface MandateDraft { draft: DraftMandateRequest; current: StoredMandate | null }
 // @app/contract/server
 export const signMandate: (m: Mandate, key: JsonWebKey) => Promise<string>;              // ES256 compact JWS, typ "mandate+jwt"
 export const verifyMandate: (jws: string, key: JsonWebKey) => Promise<Result<Mandate, "MANDATE_INVALID">>;
@@ -409,8 +414,9 @@ export const verifyMandate: (jws: string, key: JsonWebKey) => Promise<Result<Man
 - `operationId`: a repeated register with the same operationId returns the stored mandate with 200 and changes nothing.
 - Signature (simulated custody): the register handler signs the stored payload with `BUYER_SIGNING_JWK` and stores the JWS with it, in the same transaction. The stored JWS decodes to exactly the stored mandate. An externally signed JWS is out of scope.
 - The wholesaler uses the stored limits only to enforce them and returns them only to the customer's own principal.
+- Draft (`draft_mandate`, `POST /api/mandates/drafts`): the agent proposes terms; only a human registers them. The route checks the draft with the register rules and returns 200 `{ draft, current }`: the draft as sent and the current mandate, or null. It writes nothing, signs nothing and writes no audit entry. The mandate settings view shows the draft and registers it with `register_mandate` when the human presses Register (SPEC-013).
 
-Failure paths: a body with `iss`, `agent`, `signedBy`, `mandateId`, `version` or `iat` → 400. A new registration with `exp` less than or equal to the server time in epoch seconds → 400 `BAD_REQUEST`; the current mandate does not change. The `operationId` replay rule takes precedence, even when the original mandate has expired. No current mandate → 404. An expired mandate is not current.
+Failure paths: a body with `iss`, `agent`, `signedBy`, `mandateId`, `version` or `iat` → 400; a draft with `operationId` also → 400. A draft with `exp` less than or equal to the server time in epoch seconds → 400 `BAD_REQUEST`. A new registration with `exp` less than or equal to the server time in epoch seconds → 400 `BAD_REQUEST`; the current mandate does not change. The `operationId` replay rule takes precedence, even when the original mandate has expired. No current mandate → 404. An expired mandate is not current.
 
 ## SPEC-009 Rule checks and reason codes
 
@@ -649,6 +655,7 @@ export const TOOL_OUTPUT = {
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,
+  draft_mandate: MandateDraftSchema,
   list_pending_approvals: PendingListSchema,
   decide_approval: OrderSchema,
   register_mandate: StoredMandateSchema,
@@ -694,7 +701,7 @@ export const VIEWS = [
   {
     view: "mandate-settings",
     uri: "ui://trusted-trade/mandate-settings",
-    tools: ["get_mandate"],
+    tools: ["get_mandate", "draft_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
     plainList: null,
@@ -707,6 +714,7 @@ export const VIEWS = [
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
 - Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. Without the query, a view with a `plainList` route loads that list instead (`/views/approval-card` lists the open orders). The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
 - The approval card shows a link to `approvalUrl` in every pending state.
+- Mandate settings: a `get_mandate` result shows the limits in force. A `draft_mandate` result shows the proposed limits next to the current ones and a Register button. Register calls `register_mandate` with the draft and an `operationId` the view creates once per draft, so a retry after a failed or lost call returns the stored mandate (SPEC-008). The view then shows the registered mandate. A failed call keeps the draft and shows the error next to the button.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
 - Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
 - Language: a view shows English or Finnish. In a host it takes the tool input's `language`, else the host context `locale`, else the browser language; on the plain page and in the harness the browser language. Any other language gives English. `?lang=` on the view URL overrides both, for the harness and screenshots.

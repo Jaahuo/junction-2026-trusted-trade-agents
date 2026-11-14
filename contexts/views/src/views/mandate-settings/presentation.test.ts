@@ -1,11 +1,15 @@
 import { expect, test } from "bun:test";
-import type { StoredMandate } from "@app/contract";
+import { fixtures, type StoredMandate } from "@app/contract";
+import { setLang } from "../../shared/locale.ts";
 import {
   categoriesText,
+  draftRows,
   effectiveStatus,
   expiryDelay,
+  isDraft,
   isNoCurrentMandate,
   policyText,
+  registerInput,
   substitutionText,
   thresholdText,
 } from "./presentation.ts";
@@ -82,4 +86,38 @@ test("only the current mandate endpoint's 404 is empty", () => {
   expect(isNoCurrentMandate(new Error("GET /api/mandates/current answered 500."))).toBe(false);
   expect(isNoCurrentMandate(new Error("GET /other answered 404."))).toBe(false);
   expect(isNoCurrentMandate(null)).toBe(false);
+});
+
+test("a draft result is told apart from a stored mandate", () => {
+  expect(isDraft(fixtures.mandateDraft)).toBe(true);
+  expect(isDraft(fixtures.storedMandate)).toBe(false);
+});
+
+test("draft rows show the value in force only where it differs", () => {
+  setLang("en");
+  const rows = draftRows(fixtures.mandateDraft);
+  const limit = rows[0];
+  expect(limit?.proposed).toContain("500");
+  expect(limit?.current).toMatch(/^1\D000/);
+  expect(rows.find((row) => row.label === "Categories")).toEqual({
+    label: "Categories",
+    proposed: "All categories",
+    current: null,
+  });
+  expect(rows.find((row) => row.label === "Preferred")?.proposed).toBe("Country of origin: fi");
+  expect(rows.at(-1)).toMatchObject({ label: "Expires", proposed: "One year after registration" });
+  expect(rows.at(-1)?.current).not.toBeNull();
+});
+
+test("draft rows without a current mandate have no value in force", () => {
+  const rows = draftRows({ ...fixtures.mandateDraft, current: null });
+  expect(rows.every((row) => row.current === null)).toBe(true);
+  expect(rows).toHaveLength(12);
+});
+
+test("the register input is the draft with the operationId", () => {
+  expect(registerInput(fixtures.draftMandateRequest, "op_view_1")).toEqual({
+    ...fixtures.draftMandateRequest,
+    operationId: "op_view_1",
+  });
 });

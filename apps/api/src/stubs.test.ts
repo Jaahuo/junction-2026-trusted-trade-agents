@@ -22,6 +22,7 @@ const inputs: { [K in RouteKey]: RouteInput<K> } = {
   place: fixtures.placeOrderRequest,
   status: { orderId: fixtures.order.orderId },
   mandate: {},
+  draft: fixtures.draftMandateRequest,
   pending: {},
   decide: { orderId: fixtures.order.orderId, ...fixtures.decideApprovalRequest },
   register: fixtures.registerMandateRequest,

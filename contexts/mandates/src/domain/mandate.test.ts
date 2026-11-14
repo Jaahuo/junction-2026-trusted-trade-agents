@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { fixtures, type Principal } from "@app/contract";
-import { buildMandate, isCurrent } from "./mandate.ts";
+import { buildMandate, checkTerms, isCurrent } from "./mandate.ts";
 
 const principal: Principal = {
   accountId: "acct_test",
@@ -47,4 +47,12 @@ test("isCurrent is true only for an active mandate before its exp", () => {
   expect(isCurrent(stored, new Date((exp - 1) * 1000))).toBe(true);
   expect(isCurrent(stored, new Date(exp * 1000))).toBe(false);
   expect(isCurrent({ ...stored, status: "revoked" }, new Date((exp - 1) * 1000))).toBe(false);
+});
+
+test("checkTerms accepts no exp or an exp after now and refuses an exp at or before now", () => {
+  const { operationId: _operationId, ...draft } = fixtures.registerMandateRequest;
+  expect(checkTerms(draft, now)).toEqual({ ok: true, value: draft });
+  expect(checkTerms({ ...draft, exp: iat + 1 }, now).ok).toBe(true);
+  for (const exp of [iat, iat - 1])
+    expect(checkTerms({ ...draft, exp }, now)).toEqual({ ok: false, error: "expired" });
 });

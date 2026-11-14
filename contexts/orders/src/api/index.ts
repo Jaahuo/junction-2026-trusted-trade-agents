@@ -31,6 +31,7 @@ import { mandateClient } from "../infra/mandate-client.ts";
 import { offersClient } from "../infra/offers-client.ts";
 import { processOfferVerifier } from "../infra/offer-verifier.ts";
 import { postgresOrderStore } from "../infra/order-store.ts";
+import { envReceiptSigner } from "../infra/receipt-signer.ts";
 import { refusingPayment } from "../infra/payment/refusing-payment.ts";
 import { seed } from "./seed.ts";
 
@@ -97,6 +98,7 @@ const defaultDeps = (db: Db): ApiDeps => {
     },
     offers: offersClient,
     payment: refusingPayment,
+    signReceipt: envReceiptSigner,
     now: () => new Date(),
     publicBaseUrl,
   };

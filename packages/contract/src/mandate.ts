@@ -56,5 +56,15 @@ export const RegisterMandateRequestSchema = z.strictObject({
 });
 export type RegisterMandateRequest = z.infer<typeof RegisterMandateRequestSchema>;
 
+/** The terms of a mandate the agent proposes; only a human registers it (SPEC-008). */
+export const DraftMandateRequestSchema = RegisterMandateRequestSchema.omit({ operationId: true });
+export type DraftMandateRequest = z.infer<typeof DraftMandateRequestSchema>;
+
+export const MandateDraftSchema = z.strictObject({
+  draft: DraftMandateRequestSchema,
+  current: StoredMandateSchema.nullable(),
+});
+export type MandateDraft = z.infer<typeof MandateDraftSchema>;
+
 export const MandateRefSchema = z.strictObject({ mandateId: z.string() });
 export type MandateRef = z.infer<typeof MandateRefSchema>;

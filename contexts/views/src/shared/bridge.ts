@@ -1,5 +1,6 @@
 import {
   DecideApprovalInputSchema,
+  ErrorEnvelopeSchema,
   type Order,
   OrderSchema,
   PendingListSchema,
@@ -55,7 +56,7 @@ export type Host = {
   callServerTool: (request: {
     name: string;
     arguments: Record<string, unknown>;
-  }) => Promise<{ isError?: boolean; structuredContent?: unknown }>;
+  }) => Promise<{ isError?: boolean; structuredContent?: unknown; text?: string }>;
   /** Posts a user message to the chat; false when the host rejects it. */
   sendMessage: (text: string) => Promise<boolean>;
   /** Updates what the model knows about the view, without a chat message. */
@@ -84,7 +85,8 @@ export function hostSource(host: Host): Source {
     load: () => result,
     call: async (name, args) => {
       const response = await host.callServerTool({ name, arguments: args });
-      if (response.isError === true) throw new Error(`${name} failed.`);
+      // The server's reason ("OFFER_EXPIRED: …") is the error's text content.
+      if (response.isError === true) throw new Error(response.text ?? `${name} failed.`);
       return response.structuredContent;
     },
     message: async (text) => {
@@ -115,7 +117,14 @@ async function request(fetch: Fetch, baseUrl: string, route: Route, args: Record
           body: JSON.stringify(body),
         },
   );
-  if (!response.ok) throw new Error(`${route.method} ${path} answered ${response.status}.`);
+  if (!response.ok) {
+    const envelope = ErrorEnvelopeSchema.safeParse(await response.json().catch(() => null));
+    throw new Error(
+      envelope.success
+        ? `${envelope.data.error.code}: ${envelope.data.error.message}`
+        : `${route.method} ${path} answered ${response.status}.`,
+    );
+  }
   return response.json();
 }
 
@@ -135,9 +144,11 @@ export function plainSource(
   };
   return {
     load: async () => {
-      const route = routeOf((r) => r.key === entry.plainLoad, "loading");
-      const param = /:(\w+)/.exec(route.path)?.[1];
       const id = entry.plainQuery === null ? null : options.query.get(entry.plainQuery);
+      // Without the query, a view with a list route loads the list (the open orders).
+      const key = id === null && entry.plainList !== null ? entry.plainList : entry.plainLoad;
+      const route = routeOf((r) => r.key === key, "loading");
+      const param = /:(\w+)/.exec(route.path)?.[1];
       const args = param === undefined || id === null ? {} : { [param]: id };
       return request(options.fetch, options.baseUrl, route, args);
     },

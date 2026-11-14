@@ -18,7 +18,12 @@ function bridgeSource(view: ViewName): Source {
     callServerTool: async (request) => {
       await ready;
       const result = await app.callServerTool(request);
-      return { isError: result.isError === true, structuredContent: result.structuredContent };
+      const text = result.content.find((item) => item.type === "text")?.text;
+      return {
+        isError: result.isError === true,
+        structuredContent: result.structuredContent,
+        ...(text === undefined ? {} : { text }),
+      };
     },
     sendMessage: async (text) => {
       await ready;
@@ -53,7 +58,7 @@ export function sourceFor(view: ViewName): Source {
     });
     if (
       entry?.plainLoad != null &&
-      (entry.plainQuery === null || query.get(entry.plainQuery)?.trim())
+      (entry.plainQuery === null || query.get(entry.plainQuery)?.trim() || entry.plainList !== null)
     )
       return source;
     return Object.assign(source, { standaloneFallback: true });

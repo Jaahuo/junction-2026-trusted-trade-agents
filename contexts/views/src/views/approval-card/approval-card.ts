@@ -104,15 +104,6 @@ function reasonCopy(code: ReasonCode, order: Order, claims: OfferClaims | undefi
   }
 }
 
-/** The short title of the first reason, for list rows. */
-export function reasonTitle(order: Order) {
-  const first = order.reasons[0];
-  if (first === undefined) return "Needs approval";
-  return first === "SUBSTITUTION"
-    ? "Substitute needs approval"
-    : reasonCopy(first, order, order.lines[0]?.claims).title;
-}
-
 const isApproved = (o: Order) => o.status === "placed" || o.status === "awaiting_payment";
 const signed = (value: number) => `${value >= 0 ? "+" : "−"}${money(Math.abs(value))}`;
 /** The lines a check names for `reason` in the audit (its `productId`). */
@@ -140,6 +131,29 @@ const substitutionOf = (order: Order, c: OfferClaims): Substitution | null => {
 };
 const outOfStock = (c: OfferClaims) =>
   `out of stock${c.nextDeliveryDate === null ? "" : ` until ${day(c.nextDeliveryDate)}`}`;
+/**
+ * What needs a decision, one short line per reason, naming the product where there is one
+ * ("Out of stock: …", "New product: …"), for the list of open orders.
+ */
+export function reasonSummaries(order: Order): string[] {
+  const claims = order.lines.map((l) => l.claims);
+  return order.reasons.map((r) => {
+    if (r === "SUBSTITUTION") {
+      const names = claims.flatMap((c) => {
+        const sub = substitutionOf(order, c);
+        return sub === null ? [] : [(sub.original ?? c).product.name];
+      });
+      return `Out of stock: ${names.join(", ")}`;
+    }
+    if (r === "UNCONFIRMED_STOCK") {
+      const short = claims.find((c) => c.shortfall !== null);
+      if (short !== undefined) return `Not all arrives on time: ${short.product.name}`;
+    }
+    const title = reasonCopy(r, order, claims[0]).title;
+    const named = linesFor(order, r).map((c) => c.product.name);
+    return named.length === 0 ? title : `${title}: ${named.join(", ")}`;
+  });
+}
 /** The element id of a product line, the target of its to-do. */
 const lineId = (c: OfferClaims) => `line-${c.offerId}`;
 /** A product's 48 px (or 40 px in a choice) image tile; nothing when it has no image. */
@@ -174,6 +188,7 @@ export class ApprovalCard extends LitElement {
     detailsOpen: { state: true },
     allProducts: { state: true },
     orderLimit: { attribute: false },
+    error: { attribute: false },
     edits: { state: true },
     choicesOpen: { state: true },
     picked: { state: true },
@@ -472,6 +487,12 @@ export class ApprovalCard extends LitElement {
       }
       /* The over-limit Order total block: total, limit and the difference, then agent help. */
       /* Over the limit: a 2 px petrol box (border inside, 16 px padding); within: 1 px grey. */
+      /* A to-do link scrolls its target to the top, with a little room above it. */
+      #order-total,
+      #products,
+      .product {
+        scroll-margin-top: var(--spacing-lg);
+      }
       .total-block {
         display: flex;
         flex-direction: column;
@@ -668,6 +689,8 @@ export class ApprovalCard extends LitElement {
   declare private allProducts: boolean;
   /** The mandate's order limit (gross EUR), when the view could read it. */
   declare orderLimit: number | null;
+  /** Why the last decision failed, shown above the buttons; null when it did not. */
+  declare error: string | null;
   /** Changed quantities in sales units by offer id; 0 means removed. */
   declare private edits: Record<string, number>;
   declare private choicesOpen: boolean;
@@ -687,6 +710,7 @@ export class ApprovalCard extends LitElement {
     this.detailsOpen = false;
     this.allProducts = false;
     this.orderLimit = null;
+    this.error = null;
     this.edits = {};
     this.choicesOpen = false;
     this.picked = null;
@@ -696,6 +720,11 @@ export class ApprovalCard extends LitElement {
 
   /** A new order (or a new version of it) starts without changes or picks. */
   override willUpdate(changed: PropertyValues<this>) {
+    // A decision that came back without a new order failed: the buttons are ready again.
+    if (changed.has("busy") && !this.busy) {
+      this.requoting = false;
+      this.rejecting = false;
+    }
     if (changed.has("order")) {
       this.edits = {};
       this.picked = null;
@@ -829,7 +858,7 @@ export class ApprovalCard extends LitElement {
     if (index >= SHOWN) this.allProducts = true;
     await this.updateComplete;
     const element = this.renderRoot.querySelector<HTMLElement>(`#${CSS.escape(target)}`);
-    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    element?.scrollIntoView({ behavior: "smooth", block: "start" });
     element?.focus({ preventScroll: true });
   }
 
@@ -1235,6 +1264,11 @@ export class ApprovalCard extends LitElement {
         <span>Order total</span
         ><span class="value" aria-live="polite">${money(this.total(order, "net"))}</span>
       </p>
+      ${
+        this.error === null
+          ? nothing
+          : html`<p class="message danger" role="alert" part="decision-error">${this.error}</p>`
+      }
       <div class="actions" part="actions">
         <button
           part="button approve"

@@ -53,7 +53,8 @@ def _download(url):
             if error.code not in (301, 302, 303, 307, 308):
                 raise
             destination = error.headers.get("Location")
-            error.close()
+            if error.fp is not None:
+                error.close()
             if not destination:
                 raise ValueError("Recipe redirect has no destination") from None
             url = urljoin(url, destination)

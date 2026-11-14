@@ -67,6 +67,30 @@ export type Host = {
   onToolInput?: (listener: (args: Record<string, unknown>) => void) => void;
 };
 
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The data of a tool result: its `structuredContent`, else the JSON text item the server adds
+ * after the summary, for a host that passes the view only the text content.
+ */
+export function resultData(result: {
+  structuredContent?: unknown;
+  content?: readonly { type: string; text?: string }[];
+}): unknown {
+  if (result.structuredContent !== undefined) return result.structuredContent;
+  for (const item of (result.content ?? []).toReversed()) {
+    const data = item.type === "text" && item.text !== undefined ? parseJson(item.text) : undefined;
+    if (typeof data === "object" && data !== null) return data;
+  }
+  return undefined;
+}
+
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /** The VIEWS entry of a view. */

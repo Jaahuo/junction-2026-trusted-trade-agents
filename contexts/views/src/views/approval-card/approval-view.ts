@@ -10,6 +10,7 @@ import { css, html, nothing } from "lit";
 import {
   callAction,
   loadView,
+  plainPageUrl,
   type ViewData,
   type ViewEntryOf,
   viewEntry,
@@ -259,10 +260,24 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     });
   }
 
+  /** True on the plain page, where the view loads from REST rather than from a chat host. */
+  private get plain() {
+    return this.source !== null && this.source.message === undefined;
+  }
+
+  /**
+   * Try again: the plain page loads again. In a chat the tool result arrived once, so reading it
+   * again gives the same failure; the view asks the server for the open approvals instead.
+   */
   private reload() {
-    if (this.source === null) return;
+    const source = this.source;
+    if (source === null) return;
     this.state = { kind: "loading" };
-    void loadView(this.entry, this.source).then((state) => (this.state = state));
+    void (
+      this.plain
+        ? loadView(this.entry, source)
+        : callAction(source, "list_pending_approvals", {}, null)
+    ).then((state) => (this.state = state));
   }
 
   /**
@@ -428,22 +443,30 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     </article>`;
   }
 
+  /** The row above the list: on the plain page a link back to the app, else kept empty. */
+  private appRow() {
+    return this.plain
+      ? html`<div class="top-row"><a class="back" href="/">${pick(VIEW).backToApp}</a></div>`
+      : html`<div class="top-row" aria-hidden="true"></div>`;
+  }
+
   private empty() {
     const text = pick(VIEW);
-    return html`<article class="card" part="empty">
-      ${brandHeader(text.brandApprovals(brand.name), html`<h2 class="title">${text.approvals}</h2>`)}
-      <div class="body center">
-        ${icon(checkCircle)}
-        <p class="headline">${text.noneWaiting}</p>
-        <p class="secondary">${text.newRequests}</p>
-      </div>
-    </article>`;
+    return html`${this.plain ? this.appRow() : nothing}
+      <article class="card" part="empty">
+        ${brandHeader(text.brandApprovals(brand.name), html`<h2 class="title">${text.approvals}</h2>`)}
+        <div class="body center">
+          ${icon(checkCircle)}
+          <p class="headline">${text.noneWaiting}</p>
+          <p class="secondary">${text.newRequests}</p>
+        </div>
+      </article>`;
   }
 
   private list(orders: Order[]) {
     const pending = orders.filter((o) => o.status === "pending_approval").length;
     const text = pick(VIEW);
-    return html`<div class="top-row" aria-hidden="true"></div>
+    return html`${this.appRow()}
       <article class="card" part="list">
         ${brandHeader(
           text.brandApprovals(brand.name),
@@ -491,7 +514,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   override render() {
     const state = this.state;
     if (state.kind === "loading") return this.loading();
-    if (state.kind === "error") return errorCard(state.plainUrl, () => this.reload());
+    if (state.kind === "error")
+      return errorCard(state.plainUrl, () => this.reload(), state.message);
     if (state.kind === "empty") return this.empty();
     return this.renderDone(state.data);
   }
@@ -506,15 +530,19 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const open = this.selectedOrder(data);
     if (open === undefined) return orders.length === 0 ? this.empty() : this.list(orders);
     if (this.updatingId === open.orderId) return this.updating(open);
-    // The back link sits in a row the list keeps too, so the card does not move.
+    // The back link sits in a row the list keeps too, so the card does not move. One order on the
+    // plain page links to the list page.
+    const text = pick(VIEW);
     return html`${
         orders.length > 1
           ? html`<div class="top-row">
-              <button class="back" @click=${() => this.open(null)}>
-                ${pick(VIEW).allApprovals}
-              </button>
+              <button class="back" @click=${() => this.open(null)}>${text.allApprovals}</button>
             </div>`
-          : nothing
+          : this.plain
+            ? html`<div class="top-row">
+                <a class="back" href=${listPageUrl()}>${text.allApprovals}</a>
+              </div>`
+            : nothing
       }
       <tt-approval-card
         .order=${open}
@@ -556,8 +584,20 @@ export const decisionText = (order: Order) => {
   return order.decision?.next === "alternatives" ? decided.alternatives(name) : decided.stop(name);
 };
 
-/** The error state: the approval page when there is one, and Try again. */
-export const errorCard = (approvalUrl: string | null, retry: () => void) => {
+/** The list page of open approvals, on the server that served the view (relative without a DOM). */
+const listPageUrl = () => {
+  const server =
+    globalThis.document?.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ??
+    globalThis.location?.origin ??
+    "";
+  return plainPageUrl("approval-card", server) ?? "/views/approval-card";
+};
+
+/**
+ * The error state: the approval page when there is one, else the list of open approvals, and
+ * Try again. The reason is shown small, so a host that sends an unreadable result is visible.
+ */
+export const errorCard = (approvalUrl: string | null, retry: () => void, reason = "") => {
   const text = pick(VIEW);
   return html`<article class="card" part="error" role="alert">
     ${brandHeader(text.brandApprovals(brand.name))}
@@ -566,16 +606,13 @@ export const errorCard = (approvalUrl: string | null, retry: () => void) => {
       <p class="headline">${text.cantShowTitle}</p>
       <p class="secondary">${approvalUrl === null ? text.cantShowRetry : text.cantShowBody}</p>
       <div class="actions">
-        ${
-          approvalUrl === null
-            ? nothing
-            : html`<a class="btn primary" href=${approvalUrl} target="_blank" rel="noreferrer"
-                >${text.openApprovalPage}</a
-              >`
-        }
+        <a class="btn primary" href=${approvalUrl ?? listPageUrl()} target="_blank" rel="noreferrer"
+          >${approvalUrl === null ? text.openApprovals : text.openApprovalPage}</a
+        >
         <button class="btn ghost" @click=${retry}>${text.tryAgain}</button>
       </div>
-      ${approvalUrl === null ? nothing : html`<p class="label-small secondary">${text.opensNewTab}</p>`}
+      <p class="label-small secondary">${text.opensNewTab}</p>
+      ${reason === "" ? nothing : html`<p class="label-small secondary">${reason}</p>`}
     </div>
   </article>`;
 };

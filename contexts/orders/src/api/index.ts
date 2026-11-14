@@ -42,7 +42,7 @@ const principalFrom = async (request: Request): Promise<Principal> => {
 
 /** The approval page of a pending order, under the base URL of this read. */
 const approvalUrl = (baseUrl: string, orderId: string): string =>
-  `${baseUrl}/approvals?order=${encodeURIComponent(orderId)}`;
+  `${baseUrl}/approvals/${encodeURIComponent(orderId)}`;
 
 const toOrder = (
   { idempotencyKey: _key, requested: _requested, ...order }: StoredOrder,

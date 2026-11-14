@@ -113,6 +113,7 @@ export interface Chat {
   readonly secretKey: string;
   readonly adminEmail: string;
   readonly adminPassword: string;
+  readonly recipePermission: string;
 }
 
 /** The chat settings, or undefined when VERDA_INFERENCE_KEY is unset and the deploy skips the chat host. */
@@ -132,6 +133,8 @@ export const chatSettings = (
     secretKey: value("OPENWEBUI_SECRET_KEY"),
     adminEmail: value("OPENWEBUI_ADMIN_EMAIL"),
     adminPassword: value("OPENWEBUI_ADMIN_PASSWORD"),
+    recipePermission:
+      settings["VALIO_AIMO_RECIPE_PERMISSION"]?.toLowerCase() === "true" ? "True" : "False",
   };
 };
 
@@ -142,6 +145,10 @@ export const chatEnv = (outputs: Outputs, chat: Chat): Map<string, string> =>
     ["WEBUI_AUTH", "True"],
     ["ENABLE_SIGNUP", "False"],
     ["ENABLE_OLLAMA_API", "False"],
+    ["ENABLE_TITLE_GENERATION", "False"],
+    ["ENABLE_FOLLOW_UP_GENERATION", "False"],
+    ["ENABLE_TAGS_GENERATION", "False"],
+    ["VALIO_AIMO_RECIPE_PERMISSION", chat.recipePermission],
     ["WEBUI_SECRET_KEY", chat.secretKey],
     ["WEBUI_ADMIN_EMAIL", chat.adminEmail],
     ["WEBUI_ADMIN_PASSWORD", chat.adminPassword],
@@ -157,7 +164,7 @@ Requires=docker.service
 ConditionPathExists=/etc/trusted-trade-chat.env
 
 [Service]
-ExecStart=/usr/bin/docker run --rm --name trusted-trade-chat --pull=never --env-file /etc/trusted-trade-chat.env -p 127.0.0.1:${CHAT_PORT}:8080 -v trusted-trade-chat:/app/backend/data ${CHAT_IMAGE}
+ExecStart=/usr/bin/docker run --rm --name trusted-trade-chat --pull=never --env-file /etc/trusted-trade-chat.env -p 127.0.0.1:${CHAT_PORT}:8080 -v trusted-trade-chat:/app/backend/data -v /opt/trusted-trade-chat/branding/custom.css:/app/backend/open_webui/static/custom.css:ro -v /opt/trusted-trade-chat/branding:/app/backend/open_webui/static/acme:ro ${CHAT_IMAGE}
 ExecStop=/usr/bin/docker stop --time 30 trusted-trade-chat
 TimeoutStopSec=40
 Restart=on-failure
@@ -312,6 +319,8 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   // Everything slow or network-bound for the chat host happens before the app stops.
   if (chat) {
     await $`ssh ${SSH} ${host} docker pull --quiet ${CHAT_IMAGE}`;
+    await $`ssh ${SSH} ${host} mkdir -p /opt/trusted-trade-chat`;
+    await $`rsync -az --exclude=.env --exclude=.env.* --exclude=__pycache__ --exclude=*.pyc -e ${remoteShell} hosts/openwebui/agent hosts/openwebui/branding hosts/openwebui/scripts ${`${host}:/opt/trusted-trade-chat/`}`;
     await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat.env < ${new Response(renderEnvFile(chatEnv(outputs, chat)))}`;
     await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade-chat.service < ${new Response(CHAT_SERVICE)}`;
   }
@@ -345,6 +354,7 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
       openaiUrl: CHAT_MODEL_URL,
       openaiKey: chat.inferenceKey,
       baseModel: CHAT_BASE_MODEL,
+      recipePermission: chat.recipePermission,
     });
   } else console.log("chat host: skipped, VERDA_INFERENCE_KEY is not set");
 };
@@ -354,6 +364,33 @@ const reset = async (outputs: Outputs): Promise<void> => {
     throw new Error("reset replaces the hosted demo data. Re-run with reset --yes.");
   const hosted = await loadDeployEnv(outputs);
   await $`bun apps/api/src/remote-reset.ts --yes`.env(resetEnv(hosted, process.env, process.cwd()));
+};
+
+const failedConclusions = new Set(["failure", "timed_out", "startup_failure"]);
+
+/** A warning when the latest completed deploy of main failed, from `gh run list --json`. */
+export const deployWarning = (runs: unknown): string | undefined => {
+  const run: unknown = Array.isArray(runs) ? runs[0] : undefined;
+  if (!run || typeof run !== "object") return undefined;
+  const conclusion = "conclusion" in run ? run.conclusion : undefined;
+  if (typeof conclusion !== "string" || !failedConclusions.has(conclusion)) return undefined;
+  const sha = "headSha" in run && typeof run.headSha === "string" ? run.headSha.slice(0, 7) : "?";
+  const url = "url" in run && typeof run.url === "string" ? run.url : "the deploy workflow";
+  return `Warning: the latest deploy of main (${sha}) ended in ${conclusion}, so the hosted demo may be stale. See ${url}.`;
+};
+
+/** Looks up the latest completed deploy of main; never fails, because the warning is advisory. */
+export const latestDeployWarning = async (): Promise<string | undefined> => {
+  const result =
+    await $`gh run list --workflow deploy.yml --branch main --status completed --limit 1 --json conclusion,headSha,url`
+      .nothrow()
+      .quiet();
+  if (result.exitCode !== 0) return "Warning: could not read the latest deploy of main.";
+  try {
+    return deployWarning(JSON.parse(result.stdout.toString()));
+  } catch {
+    return "Warning: could not read the latest deploy of main.";
+  }
 };
 
 if (import.meta.main) {

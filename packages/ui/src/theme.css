@@ -16,9 +16,15 @@
   --color-success: var(--color-text-success);
   --color-warning: var(--color-text-warning);
   --font-sans: var(--font-family-sans);
-  --font-weight-medium: 600;
-  --font-weight-semibold: 600;
-  --font-weight-bold: 700;
+  --font-weight-medium: var(--font-weight-semibold);
+  --text-xs: var(--font-size-2xs);
+  --text-sm: var(--font-size-xs);
+  --text-base: var(--font-size-sm);
+  --text-lg: var(--font-size-md);
+  --text-xl: var(--font-size-lg);
+  --text-2xl: var(--font-size-xl);
+  --text-3xl: var(--font-size-2xl);
+  --spacing: var(--spacing-xs);
   --radius-md: var(--border-radius-md);
   --radius-xl: var(--border-radius-square);
 }

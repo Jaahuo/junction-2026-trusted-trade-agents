@@ -5,6 +5,8 @@ The source of truth is `packages/ui/src/skin.css`.
 `parts.css` defines shared buttons and status pills.
 `fonts.css` loads the bundled fonts.
 `theme.css` imports these files and maps skin tokens to Tailwind utilities.
+Its `--text-xs` through `--text-3xl` utilities reference the shared 12–32px type scale.
+Its `--spacing` unit references `--spacing-xs`; medium text uses the shared semibold weight.
 React components live in `packages/ui/src`; Lit views use the same skin and parts inside shadow DOM.
 
 ## Colors

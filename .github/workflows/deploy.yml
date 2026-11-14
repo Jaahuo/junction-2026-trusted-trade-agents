@@ -96,6 +96,10 @@ jobs:
           DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          VERDA_INFERENCE_KEY: ${{ secrets.VERDA_INFERENCE_KEY }}
+          OPENWEBUI_SECRET_KEY: ${{ secrets.OPENWEBUI_SECRET_KEY }}
+          OPENWEBUI_ADMIN_EMAIL: ${{ secrets.OPENWEBUI_ADMIN_EMAIL }}
+          OPENWEBUI_ADMIN_PASSWORD: ${{ secrets.OPENWEBUI_ADMIN_PASSWORD }}
           DEPLOY_IMAGE: ghcr.io/jaahuo/junction-2026-trusted-trade-agents:${{ steps.target.outputs.sha }}
           DEPLOY_REGISTRY_USER: ${{ github.actor }}
           DEPLOY_REGISTRY_TOKEN: ${{ github.token }}

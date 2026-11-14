@@ -1,0 +1,181 @@
+{
+  "source": "Live wholesaler mock API, recorded through mockWholesaler; the customer id is invented.",
+  "recordedAt": "2026-11-14T16:04:10.024Z",
+  "calls": [
+    {
+      "path": "/api/availability",
+      "request": {
+        "customer": "cust_fixture_01",
+        "requestedDate": "2026-11-16",
+        "products": ["464201", "464306"]
+      },
+      "response": {
+        "timeNow": "2026-11-14T18:04:09+0200",
+        "requestedDate": "2026-11-16T00:00:00+0200",
+        "products": [
+          {
+            "productId": "464201",
+            "closingTime": "2026-11-15T17:00:00+0200",
+            "salesBlock": false,
+            "logisticModel": "Stock",
+            "scheduleLines": [
+              {
+                "salesBlock": false,
+                "availableAmount": 9999999999,
+                "availableDate": "2026-11-16",
+                "salesUnit": "ST"
+              }
+            ]
+          },
+          {
+            "productId": "464306",
+            "closingTime": "2026-11-15T17:00:00+0200",
+            "salesBlock": false,
+            "logisticModel": "Stock",
+            "scheduleLines": [
+              {
+                "salesBlock": false,
+                "availableAmount": 9999999999,
+                "availableDate": "2026-11-16",
+                "salesUnit": "ST"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/availability",
+      "request": {
+        "customer": "cust_fixture_01",
+        "requestedDate": "2026-11-17",
+        "products": ["464201", "464306"]
+      },
+      "response": {
+        "timeNow": "2026-11-14T18:04:09+0200",
+        "requestedDate": "2026-11-17T00:00:00+0200",
+        "products": [
+          {
+            "productId": "464201",
+            "closingTime": "2026-11-15T17:00:00+0200",
+            "salesBlock": false,
+            "logisticModel": "Stock",
+            "scheduleLines": [
+              {
+                "salesBlock": false,
+                "availableAmount": 9999999999,
+                "availableDate": "2026-11-16",
+                "salesUnit": "ST"
+              }
+            ]
+          },
+          {
+            "productId": "464306",
+            "closingTime": "2026-11-15T17:00:00+0200",
+            "salesBlock": false,
+            "logisticModel": "Stock",
+            "scheduleLines": [
+              {
+                "salesBlock": false,
+                "availableAmount": 9999999999,
+                "availableDate": "2026-11-16",
+                "salesUnit": "ST"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/price",
+      "request": {
+        "customer": "cust_fixture_01",
+        "requestedDate": "2026-11-16",
+        "products": ["464201", "464306"]
+      },
+      "response": {
+        "customerId": "cust_fixture_01",
+        "currency": "EUR",
+        "pricingDate": "2026-11-16T00:00:00+0200",
+        "products": [
+          {
+            "productId": "464201",
+            "quantity": 1,
+            "catalogPrice": {
+              "value": 1.56,
+              "valueWithTax": 1.77,
+              "validFrom": "2026-09-01T00:00:00+0300",
+              "validTo": "9999-12-31T00:00:00+0200",
+              "currency": "EUR"
+            },
+            "priceWithTax": {
+              "value": 1.77,
+              "validFrom": "2026-09-01T00:00:00+0300",
+              "validTo": "9999-12-31T00:00:00+0200",
+              "currency": "EUR"
+            },
+            "comparisonPrice": {
+              "value": 1.56,
+              "valueWithTax": 1.77,
+              "validFrom": "2026-09-01T00:00:00+0300",
+              "validTo": "9999-12-31T00:00:00+0200",
+              "currency": "EUR"
+            },
+            "comparisonUnit": "L",
+            "tax": {
+              "taxRate": 13.5,
+              "taxValue": 0.21
+            },
+            "listPrice": {
+              "value": 1.83,
+              "valueWithTax": 2.08,
+              "validFrom": "2026-09-01T00:00:00+0300",
+              "validTo": "9999-12-31T00:00:00+0200",
+              "currency": "EUR"
+            },
+            "netPriceFound": false,
+            "error": false
+          },
+          {
+            "productId": "464306",
+            "quantity": 1,
+            "catalogPrice": {
+              "value": 1.01,
+              "valueWithTax": 1.15,
+              "validFrom": "2026-09-01T00:00:00+0300",
+              "validTo": "2026-12-31T00:00:00+0200",
+              "currency": "EUR"
+            },
+            "priceWithTax": {
+              "value": 1.15,
+              "validFrom": "2026-09-01T00:00:00+0300",
+              "validTo": "2026-12-31T00:00:00+0200",
+              "currency": "EUR"
+            },
+            "comparisonPrice": {
+              "value": 1.01,
+              "valueWithTax": 1.15,
+              "validFrom": "2026-09-01T00:00:00+0300",
+              "validTo": "2026-12-31T00:00:00+0200",
+              "currency": "EUR"
+            },
+            "comparisonUnit": "L",
+            "tax": {
+              "taxRate": 13.5,
+              "taxValue": 0.14
+            },
+            "listPrice": {
+              "value": 1.44,
+              "valueWithTax": 1.63,
+              "validFrom": "2025-01-02T00:00:00+0200",
+              "validTo": "9999-12-31T00:00:00+0200",
+              "currency": "EUR"
+            },
+            "netPriceFound": true,
+            "error": false
+          }
+        ]
+      }
+    }
+  ]
+}

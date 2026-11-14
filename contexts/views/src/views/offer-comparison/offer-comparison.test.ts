@@ -1,22 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { type OfferLine, type OffersResult, OffersResultSchema } from "@app/contract";
+import { fixtures, type OfferLine, type OffersResult, OffersResultSchema } from "@app/contract";
 import {
   accessibleName,
   closed,
   details,
   explain,
   failed,
+  limitFor,
   linkState,
   type OfferedRow,
   orderNote,
   pricePerStdUnit,
+  retryText,
   rowsOf,
   SEND_FAILED,
   sending,
   sent,
   shortReason,
   show,
+  steerStatus,
   toggle,
   type Ui,
   useText,
@@ -80,6 +83,8 @@ const openAt = (key: string, panel: "summary" | "options" | "details" = "summary
   offerId: null,
 });
 const BUTTER = "Test butter 500 g";
+/** Intl puts a no-break space before the € and the % in Finnish. */
+const plain = (value: string | undefined) => value?.replace(/\s/g, " ");
 
 describe("price per standard unit", () => {
   test("is total net / (quantity × perSalesUnit), per litre or kilogram", async () => {
@@ -104,6 +109,15 @@ describe("price per standard unit", () => {
     expect(visible(renderOfferComparison({ offers: [noPack], omitted: [] }))).toContain("—");
     expect(accessibleName(row)).toContain("price per unit unknown");
     expect(details(row.pick)).toContainEqual(["Price per l/kg", "No data"]);
+  });
+
+  test("is only given per litre or kilogram", async () => {
+    const line = lineOf(await fixture("offers"), "prod_test_cooking_cream");
+    const pieces = {
+      ...line.claims,
+      product: { ...line.claims.product, perSalesUnit: { value: 6, unit: "PCE" } },
+    };
+    expect(pricePerStdUnit(pieces)).toBeNull();
   });
 });
 
@@ -163,15 +177,35 @@ describe("the glance", () => {
 
   test("a pre-check that asks for approval or rejects without a reason never shows the check", async () => {
     const line = first((await fixture("offers")).offers);
-    for (const [decision, reason, approval] of [
-      ["needs_approval", "Needs approval", "Needed"],
-      ["rejected", "Would be rejected", "Would be rejected"],
+    for (const [decision, reason, approval, sentence] of [
+      ["needs_approval", "Needs approval", "Needed", "Needs your approval."],
+      ["rejected", "Would be rejected", "Would be rejected", "Would be rejected."],
     ] as const) {
       const bare = { ...line, precheck: { decision, reasons: [] } };
       const row = first(offeredRows({ offers: [bare], omitted: [] }));
       expect([row.status, row.reason]).toEqual(["attention", reason]);
       expect(Object.fromEntries(details(bare))["Approval"]).toBe(approval);
+      expect(explain(bare)).toBe(sentence);
     }
+  });
+
+  test("a late or partial offer says what differs, not only that availability changed", async () => {
+    const data = await fixture("offers");
+    const cheese = lineOf(data, "prod_test_cheese_slices");
+    expect(cheese.precheck).toEqual({
+      decision: "needs_approval",
+      reasons: ["AVAILABILITY_DIFFERS"],
+    });
+    expect(shortReason(cheese)).toBe("2 days late");
+    expect(explain(cheese)).toBe(
+      "Needs your approval: arrives Wed 25 Nov, 2 days late for the request.",
+    );
+    const milk = first((await fixture("substitutes")).offers);
+    expect(shortReason(milk)).toBe("64 of 80 l");
+    expect(explain(milk)).toBe("Needs your approval: only 64 of 80 l can be delivered.");
+    // Whole and on time, the reason code's own words remain.
+    const whole = { ...milk, claims: { ...milk.claims, shortfall: null } };
+    expect(shortReason(whole)).toBe("Availability changed");
   });
 
   test("an automatic product claims no more than itself; the note says the order is checked again", async () => {
@@ -184,18 +218,56 @@ describe("the glance", () => {
     );
   });
 
-  test("names the amount the whole order is over the limit when the limit is known", async () => {
+  test("the row names its own amount over the limit, the note the whole order's", async () => {
     const data = await fixture("offers");
     const butter = named(data, BUTTER);
-    // The picks add up to 1,936.01 gross against a 1,700 limit.
+    // Butter alone is 1,714.10 gross against a 1,700 limit, as its own pre-check measured;
+    // the picks add up to 1,936.01.
     const output = visible(
       renderOfferComparison(data, inHost({ open: openAt(butter.key) }), undefined, 1700),
     );
-    expect(output).toContain("Needs your approval: €236.01 over your order limit.");
+    expect(output).toContain(
+      "Needs your approval: €14.10 over your order limit. Only 179 of 200 kg can be delivered.",
+    );
+    expect(output).not.toContain("€236.01 over your order limit.");
     expect(output).toContain("Together €236.01 over your €1,700 order limit");
     const unknown = visible(renderOfferComparison(data, inHost({ open: openAt(butter.key) })));
     expect(unknown).toContain(
       "Needs your approval: the order total is above the mandate's spending limit.",
+    );
+  });
+
+  test("under the limit no amount over it is named, never a negative one", async () => {
+    const data = await fixture("offers");
+    const butter = named(data, BUTTER);
+    const output = visible(
+      renderOfferComparison(data, inHost({ open: openAt(butter.key) }), undefined, 5000),
+    );
+    expect(output).not.toContain("over your order limit.");
+    expect(output).not.toMatch(/€-/);
+    expect(orderNote(rowsOf(data), 5000)).toBe(
+      "Each product is checked on its own. The whole order is checked again when it is placed.",
+    );
+  });
+
+  test("only an offer over the limit itself names an amount over it", async () => {
+    const data = await fixture("offers");
+    const unsalted = lineOf(data, "prod_test_butter_unsalted");
+    expect(explain(unsalted, 100)).toBe(
+      "Needs your approval: the order includes a substitute product.",
+    );
+  });
+
+  test("picks that would be rejected are left out of the order total, and the note says so", async () => {
+    const data = await fixture("offers");
+    const offers = data.offers.map((o) =>
+      o.offerId === "off_test_3"
+        ? { ...o, precheck: { decision: "rejected" as const, reasons: [] } }
+        : o,
+    );
+    // Without butter the picks add up to 221.91, under the limit.
+    expect(orderNote(rowsOf({ ...data, offers }), 200)).toBe(
+      "Together €21.91 over your €200 order limit, so the order needs your approval. 1 product would be rejected and is not counted. The whole order is checked again when it is placed.",
     );
   });
 
@@ -236,7 +308,7 @@ describe("substitutes", () => {
     const output = visible(
       renderOfferComparison(data, inHost({ open: openAt(row.key, "options") })),
     );
-    expect(output).toContain("Only 64 of 80 l can be delivered.");
+    expect(output).toContain("Needs your approval: only 64 of 80 l can be delivered.");
     expect(output).toContain("Pick");
     expect(output).toContain("Best substitute");
     expect(output).toContain("Ask for something else");
@@ -244,10 +316,25 @@ describe("substitutes", () => {
 
   test("an option shows how it differs from the product it replaces", async () => {
     const butter = named(await fixture("offers"), BUTTER);
-    expect(butter.options.map((o) => o.differs)).toEqual([
+    expect(butter.options.map((o) => o.differs)).toEqual([null, "€0.20/kg dearer"]);
+    const milk = first(offeredRows(await fixture("substitutes")));
+    expect(milk.options.map((o) => o.differs)).toEqual([
       null,
-      "+2 pts reliability · €0.20/kg dearer",
+      "−2 pts reliability",
+      "−7 pts reliability · €0.10/L dearer",
     ]);
+  });
+
+  test("a difference that rounds to nothing is not shown", async () => {
+    const data = await fixture("substitutes");
+    const organic = data.offers[1];
+    if (organic?.comparison == null) throw new Error("Expected a compared substitute");
+    const tiny = {
+      ...organic,
+      comparison: { ...organic.comparison, reliabilityDelta: 0.004, pricePerStdUnitDelta: 0.004 },
+    };
+    const row = first(offeredRows({ ...data, offers: [first(data.offers), tiny] }));
+    expect(row.options[1]?.differs).toBeNull();
   });
 
   test("an option's name opens its own details", async () => {
@@ -260,15 +347,29 @@ describe("substitutes", () => {
     expect(output).toContain("Reliability 99%");
   });
 
+  test("a substitute covers the shortfall of its own line, not a whole line", async () => {
+    const data = await fixture("substitutes");
+    const [milk, organic] = data.offers;
+    if (milk === undefined || organic === undefined) throw new Error("Expected offers");
+    const whole = { ...milk, offerId: "off_test_9", claims: { ...milk.claims, shortfall: null } };
+    // Two lines of milk; only the second is short, so the substitute belongs to it.
+    const rows = offeredRows({ offers: [whole, milk, organic], omitted: [] });
+    expect(rows.map((r) => [r.pick.offerId, r.options.length])).toEqual([
+      ["off_test_9", 1],
+      [milk.offerId, 2],
+    ]);
+  });
+
   test("an option that would be rejected has no Use", async () => {
     const data = await fixture("substitutes");
-    const [original, farm, ...rest] = data.offers;
-    if (original === undefined || farm === undefined) throw new Error("Expected offers");
+    const [original, organic, farm] = data.offers;
+    if (original === undefined || organic === undefined || farm === undefined)
+      throw new Error("Expected offers");
     const rejected = { ...farm, precheck: { decision: "rejected" as const, reasons: [] } };
-    const row = first(offeredRows({ ...data, offers: [original, rejected, ...rest] }));
+    const row = first(offeredRows({ ...data, offers: [original, organic, rejected] }));
     expect(row.options.map((o) => [o.line.offerId, o.action])).toEqual([
       [original.offerId, "pick"],
-      ["off_test_6", "use"],
+      [organic.offerId, "use"],
       [farm.offerId, null],
     ]);
   });
@@ -283,24 +384,32 @@ describe("substitutes", () => {
     expect(output).not.toContain("Ask for something else");
   });
 
-  test("the chat text of a Use names the requested and the chosen product", async () => {
+  test("the chat text of a Use asks the substitute for the missing amount only", async () => {
     const data = await fixture("substitutes");
     const row = first(offeredRows(data));
     const organic = row.options[1];
     if (organic === undefined) throw new Error("Expected a second option");
-    expect(useText(row, organic)).toBe("For Test milk 1 l, use Test organic milk 1 l instead.");
+    expect(useText(row, organic)).toBe(
+      "For the missing 16 l of Test milk 1 l, use Test organic milk 1 l.",
+    );
+    const whole = {
+      ...row,
+      pick: { ...row.pick, claims: { ...row.pick.claims, shortfall: null } },
+    };
+    expect(useText(whole, organic)).toBe("For Test milk 1 l, use Test organic milk 1 l instead.");
+    expect(retryText(row)).toBe("Check the offer for Test milk 1 l again.");
   });
 });
 
 describe("one row per requested line", () => {
   test("two lines of one product are two rows, each with its own substitutes", async () => {
     const data = await fixture("substitutes");
-    const [milk, farm, organic] = data.offers;
-    if (milk === undefined || farm === undefined || organic === undefined)
+    const [milk, organic, farm] = data.offers;
+    if (milk === undefined || organic === undefined || farm === undefined)
       throw new Error("Expected offers");
     const again = { ...milk, offerId: "off_test_7" };
     const organic2 = { ...organic, offerId: "off_test_8" };
-    // get-offers lists the originals first, then one block per original, best first.
+    // get-offers lists the originals first, then one block per short original, best first.
     const rows = offeredRows({ offers: [milk, again, organic, farm, organic2], omitted: [] });
     expect(rows.map((r) => [r.pick.offerId, r.options.length])).toEqual([
       [milk.offerId, 3],
@@ -308,6 +417,12 @@ describe("one row per requested line", () => {
     ]);
     // Each row opens on its own.
     expect(new Set(rows.map((r) => r.key)).size).toBe(2);
+    // Two blocks that each hold only a best substitute are still two blocks.
+    const twoBest = offeredRows({ offers: [milk, again, organic, organic2], omitted: [] });
+    expect(twoBest.map((r) => r.options.map((o) => o.line.offerId))).toEqual([
+      [milk.offerId, organic.offerId],
+      ["off_test_7", "off_test_8"],
+    ]);
   });
 
   test("a line left out is kept even when another line of the same product is offered", async () => {
@@ -334,10 +449,15 @@ describe("one row per requested line", () => {
       omitted: [{ productId: "prod_test_milk", reason: "INSUFFICIENT_STOCK", detail: "None." }],
     });
     expect(rows).toHaveLength(1);
-    const row = first(offeredRows({ offers: [organic], omitted: [] }));
+    const row = first(rows);
     expect(row.name).toBe("Product prod_test_milk");
-    expect(first(rows).reason).toBe("Not available");
-    expect(row.pick.offerId).toBe(organic.offerId);
+    expect([row.status, row.reason]).toEqual(["attention", "Not available"]);
+    expect(accessibleName(row)).toContain("only a substitute is offered");
+    // With several substitutes, the best one is the pick, wherever it is listed.
+    const farm = data.offers.find((o) => o.rank === "better");
+    if (farm === undefined) throw new Error("Expected a better substitute");
+    const several = first(offeredRows({ offers: [farm, organic], omitted: [] }));
+    expect(several.pick.offerId).toBe(organic.offerId);
   });
 });
 
@@ -355,24 +475,45 @@ describe("steering", () => {
   });
 
   test("a message the chat did not take frees its link and shows why under its product", async () => {
+    const data = await fixture("offers");
+    const butter = named(data, BUTTER);
+    const unsalted = butter.options[1];
+    if (unsalted === undefined) throw new Error("Expected a second option");
+    const asking = sending(
+      inHost({ open: openAt(butter.key, "options") }),
+      unsalted.line.offerId,
+      butter.key,
+    );
+    if (asking === null) throw new Error("Expected the message to start");
+    // Another product is opened while the message is on its way, then the send fails.
+    const milkKey = first(rowsOf(data)).key;
+    const lost = failed(toggle(asking, milkKey));
+    expect(lost.error).toEqual({ key: butter.key });
+    expect(linkState(unsalted.line.offerId, lost)).toBe("enabled");
+    const output = visible(renderOfferComparison(data, lost));
+    expect(count(output, SEND_FAILED)).toBe(1);
+    expect(output.indexOf(SEND_FAILED)).toBeGreaterThan(output.indexOf(BUTTER));
+    expect(output.indexOf(SEND_FAILED)).toBeLessThan(output.indexOf("Test cheese slices 1 kg"));
+    expect(output).not.toContain("Asked ✓");
+  });
+
+  test("after a failed send the status never says it was sent", async () => {
     const data = await fixture("substitutes");
     const row = first(offeredRows(data));
-    const organic = row.options[1];
-    if (organic === undefined) throw new Error("Expected a second option");
-    const asking = sending(
+    const [, organic, farm] = row.options;
+    if (organic === undefined || farm === undefined) throw new Error("Expected options");
+    const opened = sending(
       inHost({ open: openAt(row.key, "options") }),
       organic.line.offerId,
       row.key,
     );
-    if (asking === null) throw new Error("Expected the message to start");
-    const lost = failed(asking);
-    expect(lost.error).toEqual({ key: row.key, message: SEND_FAILED });
-    expect(linkState(organic.line.offerId, lost)).toBe("enabled");
-    const output = visible(renderOfferComparison(data, lost));
-    expect(output).toContain(SEND_FAILED);
-    expect(output).not.toContain("Asked ✓");
-    // Closed, the product still shows the error.
-    expect(visible(renderOfferComparison(data, toggle(lost, row.key)))).toContain(SEND_FAILED);
+    if (opened === null) throw new Error("Expected the message to start");
+    const done = sent(opened);
+    expect(steerStatus(row, done)).toBe("sent");
+    const second = sending(done, farm.line.offerId, row.key);
+    if (second === null) throw new Error("Expected the message to start");
+    expect(steerStatus(row, second)).toBe("sending");
+    expect(steerStatus(row, failed(second))).toBeNull();
   });
 
   test("Asked replaces the label on the same Use button", async () => {
@@ -396,6 +537,23 @@ describe("steering", () => {
     const done = sent(asking);
     expect(visible(renderOfferComparison(data, done))).toContain("Asked ✓");
     expect(sending(done, retry, row.key)).toBeNull();
+  });
+
+  test("Try again shows only for an unanswered pre-check, and only in a chat", async () => {
+    const data = await fixture("offers");
+    const line = first(data.offers);
+    const unchecked = { offers: [{ ...line, precheck: null }], omitted: [] };
+    const key = first(offeredRows(unchecked)).key;
+    expect(visible(renderOfferComparison(unchecked, inHost({ open: openAt(key) })))).toContain(
+      "Try again",
+    );
+    expect(
+      visible(renderOfferComparison(unchecked, { ...closed, open: openAt(key) })),
+    ).not.toContain("Try again");
+    const checked = { offers: [line], omitted: [] };
+    expect(visible(renderOfferComparison(checked, inHost({ open: openAt(key) })))).not.toContain(
+      "Try again",
+    );
   });
 
   test("one product is open at a time, and a panel closes when asked for again", () => {
@@ -439,14 +597,24 @@ describe("language", () => {
     try {
       const row = first(rowsOf(data).filter((r) => r.name === BUTTER));
       expect(row.reason).toBe("Yli rajan");
+      expect(plain(row.kind === "offered" ? row.price?.shown : undefined)).toBe("8,40 €/kg");
       const output = visible(
         renderOfferComparison(data, inHost({ open: openAt(butter.key) }), undefined, 1700),
       );
       expect(output).toContain("5 tuotetta");
-      expect(output).toContain("Vaatii hyväksyntäsi: 236,01 € yli tilausrajasi.");
+      expect(output).toContain("Vaatii hyväksyntäsi: 14,10 € yli tilausrajasi.");
       expect(output).toContain("Tiedot");
       expect(output).toContain("Muut vaihtoehdot (1)");
       expect(output).not.toContain("Needs your approval");
+      const milk = Object.fromEntries(details(lineOf(data, "prod_test_milk_drink")));
+      expect(plain(milk["Toimitusvarmuus"])).toBe("97 %");
+      expect(milk["Toimitus"]).not.toMatch(/Mon|Nov/);
+      const subs = first(offeredRows(await fixture("substitutes")));
+      const organic = subs.options[1];
+      if (organic === undefined) throw new Error("Expected a second option");
+      expect(useText(subs, organic)).toBe(
+        "Täydennä tuotteen Test milk 1 l puuttuvat 16 l tuotteella Test organic milk 1 l.",
+      );
     } finally {
       setLang("en");
     }
@@ -475,9 +643,13 @@ describe("details", () => {
 
   test("the gross total says when it includes deposits", async () => {
     const line = lineOf(await fixture("offers"), "prod_test_milk_drink");
-    const withDeposits = { ...line, claims: { ...line.claims, deposits: 4.8 } };
+    // 58.56 net + 14 % VAT = 66.76, plus 4.80 deposits = 71.56 gross.
+    const withDeposits = {
+      ...line,
+      claims: { ...line.claims, deposits: 4.8, total: { net: 58.56, gross: 71.56 } },
+    };
     const facts = Object.fromEntries(details(withDeposits));
-    expect(facts["Total"]).toBe("€58.56 net, €66.76 incl. VAT and deposits");
+    expect(facts["Total"]).toBe("€58.56 net, €71.56 incl. VAT and deposits");
     expect(facts["Deposits"]).toBe("€4.80, in the total");
     const unknown = { ...line, claims: { ...line.claims, depositsIncluded: false } };
     expect(Object.fromEntries(details(unknown))["Deposits"]).toBe(
@@ -490,4 +662,30 @@ test("loading shows the branded frame with three placeholder rows", () => {
   const output = text(renderLoading());
   expect(visible(renderLoading())).toContain("Getting offers…");
   expect(count(output, "skeleton shimmer")).toBe(3);
+});
+
+describe("the order limit", () => {
+  test("is the mandate's limit only for the mandate the offers were made under", async () => {
+    const { offers } = await fixture("offers");
+    const { storedMandate } = fixtures;
+    const active = {
+      ...storedMandate,
+      mandate: {
+        ...storedMandate.mandate,
+        mandateId: "mnd_test_1",
+        version: 1,
+        limits: {
+          ...storedMandate.mandate.limits,
+          maxOrderTotal: { value: 1700, currency: "EUR" as const, basis: "gross" as const },
+        },
+      },
+    };
+    expect(limitFor(offers, active)).toBe(1700);
+    expect(limitFor(offers, { ...active, mandate: { ...active.mandate, version: 2 } })).toBeNull();
+    expect(
+      limitFor(offers, { ...active, mandate: { ...active.mandate, mandateId: "mnd_other" } }),
+    ).toBeNull();
+    expect(limitFor(offers, { ...active, status: "revoked" })).toBeNull();
+    expect(limitFor(offers, null)).toBeNull();
+  });
 });

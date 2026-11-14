@@ -1,4 +1,4 @@
-import type { OfferClaims, OfferLine, OffersResult } from "@app/contract";
+import type { OfferClaims, OfferLine, OffersResult, StoredMandate } from "@app/contract";
 import { formatDeliveryDate, formatQuantity, formatTimestamp } from "@app/ui/format";
 import { intlLocale, lang, pick } from "../../shared/locale.ts";
 import { CARD } from "../approval-card/card-strings.ts";
@@ -22,7 +22,8 @@ import { OFFERS } from "./strings.ts";
  * look; none (dash): not offered. */
 export type Status = "auto" | "attention" | "none";
 
-/** What a steering link does: the agent's pick is marked, a rejected offer has nothing. */
+/** What an option offers: the agent's pick carries a "Pick" tag, another offer a "Use" link,
+ * an offer that would be rejected nothing. */
 type OptionAction = "pick" | "use" | null;
 
 /** A price per litre or kilogram: "€8.40/kg" on screen, "€8.40 per kg" when read out. */
@@ -74,19 +75,23 @@ const twoDecimals = (value: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
-/** "L" and "kg", as the design writes a price per standard unit. */
-const STD_UNIT: Record<string, string> = { LTR: "L", KGM: "kg", KG: "kg" };
-const perStd = (code: string) => STD_UNIT[code] ?? unit(code);
+const cents = (value: number) => Math.round(value * 100) / 100;
 
-/** Total net / (quantity × perSalesUnit): "€1.20/L"; null when the pack size is unknown. */
+/** The standard units a price per unit is given in, as the design writes them ("L", "kg"). */
+const STD_UNIT = { LTR: "L", KGM: "kg", KG: "kg" } as const;
+type StdUnit = keyof typeof STD_UNIT;
+const isStd = (code: string): code is StdUnit => Object.hasOwn(STD_UNIT, code);
+const perStd = (code: string) => (isStd(code) ? STD_UNIT[code] : unit(code));
+
+/** Total net / (quantity × perSalesUnit): "€1.20/L". Null when the pack size is unknown, is
+ * not in litres or kilograms, or the amount is not positive. */
 export function pricePerStdUnit(claims: OfferClaims): Price | null {
   const pack = claims.product.perSalesUnit;
-  const std = pack === null ? 0 : claims.quantity.value * pack.value;
-  if (pack === null || !(std > 0)) return null;
+  const std = stdUnits(claims).value;
+  if (pack === null || !isStd(pack.unit) || !(std > 0)) return null;
   const value = twoDecimals(claims.total.net / std);
-  const text = pick(OFFERS);
-  const per = text.perSpoken[pack.unit] ?? text.perOther(unit(pack.unit));
-  return { shown: `${value}/${perStd(pack.unit)}`, spoken: `${value} ${per}` };
+  const spoken = pick(OFFERS).perSpoken[pack.unit];
+  return { shown: `${value}/${STD_UNIT[pack.unit]}`, spoken: `${value} ${spoken}` };
 }
 
 /** Days the delivery comes after the requested date; 0 when on time, early or unreadable. */
@@ -105,21 +110,27 @@ function partly(claims: OfferClaims): string | null {
 
 const lateText = (days: number) => pick(OFFERS).late(days);
 
+/** What AVAILABILITY_DIFFERS means for this offer in a few words: "64 of 80 l" or
+ * "2 days late"; null when the offer is whole and on time. */
+function availability(claims: OfferClaims): string | null {
+  const part = partly(claims);
+  if (part !== null) return part;
+  const late = daysLate(claims);
+  return late > 0 ? lateText(late) : null;
+}
+
 /** The short reason a row shows, or null when nothing needs a look. Never null when the
- * pre-check asks for approval or rejects, even without a reason code. */
+ * pre-check asks for approval or rejects, even without a reason code. AVAILABILITY_DIFFERS
+ * reads as what differs ("64 of 80 l", "2 days late"). */
 export function shortReason(line: OfferLine): string | null {
   const check = line.precheck;
   const text = pick(OFFERS);
   if (check === null) return text.notChecked;
-  if (check.decision !== "auto") {
-    const first = check.reasons[0];
-    if (first !== undefined) return text.short[first];
-    return check.decision === "rejected" ? text.wouldBeRejected : text.needsApproval;
-  }
-  const part = partly(line.claims);
-  if (part !== null) return part;
-  const late = daysLate(line.claims);
-  return late > 0 ? lateText(late) : null;
+  if (check.decision === "auto") return availability(line.claims);
+  const first = check.reasons[0];
+  if (first === "AVAILABILITY_DIFFERS") return availability(line.claims) ?? text.short[first];
+  if (first !== undefined) return text.short[first];
+  return check.decision === "rejected" ? text.wouldBeRejected : text.needsApproval;
 }
 
 /** auto only when nothing needs a look: shortReason is null only for an automatic pre-check
@@ -140,82 +151,96 @@ function statusWords(line: OfferLine): string {
 
 const lowerFirst = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 
-/** The gross total of the agent's picks: what the order would cost. */
-function picksTotal(rows: Row[]): number {
-  return rows.reduce(
-    (sum, row) => (row.kind === "offered" ? sum + row.pick.claims.total.gross : sum),
-    0,
-  );
-}
-
-/** How far the whole order (the agent's picks) is over the mandate's gross limit; null when
- * the limit is unknown or the order is within it. */
-export function overLimit(rows: Row[], limit: number | null): number | null {
+/** How far one offer alone is over the gross order limit, as its own pre-check measured it;
+ * null when the limit is unknown or the offer is within it. */
+function ownOverage(line: OfferLine, limit: number | null): number | null {
   if (limit === null) return null;
-  const over = Math.round((picksTotal(rows) - limit) * 100) / 100;
+  const over = cents(line.claims.total.gross - limit);
   return over > 0 ? over : null;
 }
 
-/**
- * What would happen if the agent ordered this offer: the pre-check, then a partial delivery
- * and a late date when they apply. An order over the limit names the amount when `over` is
- * known.
- */
-export function explain(line: OfferLine, over: number | null = null): string {
-  const check = line.precheck;
-  const text = pick(OFFERS);
-  const reasonText = pick(CARD).reason;
-  const sentences: string[] = [];
-  if (check === null) sentences.push(text.noAnswer);
-  else if (check.decision === "auto") sentences.push(text.autoSentence);
-  else {
-    const head = check.decision === "rejected" ? text.wouldBeRejected : text.needsYourApproval;
-    const [only, ...more] = check.reasons;
-    sentences.push(
-      only === undefined
-        ? `${head}.`
-        : more.length > 0
-          ? `${head}. ${check.reasons.map((r) => reasonText[r]).join(" ")}`
-          : only === "SPEND_OVER_LIMIT" && over !== null
-            ? text.overYourLimit(head, money(over))
-            : `${head}: ${lowerFirst(reasonText[only])}`,
-    );
-  }
-  const part = partly(line.claims);
-  if (part !== null) sentences.push(text.onlyPart(part));
-  const late = daysLate(line.claims);
-  if (late > 0) sentences.push(text.arrives(day(line.claims.deliveryDate), lateText(late)));
-  return sentences.join(" ");
+/** The offers the order would contain: the agent's picks, except those that would be
+ * rejected. */
+function orderedPicks(rows: Row[]): OfferLine[] {
+  return rows.flatMap((row) =>
+    row.kind === "offered" && row.pick.precheck?.decision !== "rejected" ? [row.pick] : [],
+  );
 }
 
-/** "+5 pts reliability · €0.10/L cheaper · other origin", or null without a comparison. */
+/** How far the whole order (the picks that would be ordered) is over the mandate's gross
+ * limit; null when the limit is unknown or the order is within it. */
+function overLimit(rows: Row[], limit: number | null): number | null {
+  if (limit === null) return null;
+  const total = orderedPicks(rows).reduce((sum, line) => sum + line.claims.total.gross, 0);
+  const over = cents(total - limit);
+  return over > 0 ? over : null;
+}
+
+/** The sentences on what differs for AVAILABILITY_DIFFERS: "Only 64 of 80 l can be
+ * delivered." and "Arrives Wed 25 Nov, 2 days late for the request." */
+function availabilitySentences(claims: OfferClaims): string[] {
+  const text = pick(OFFERS);
+  const part = partly(claims);
+  const late = daysLate(claims);
+  return [
+    ...(part === null ? [] : [text.onlyPart(part)]),
+    ...(late > 0 ? [text.arrives(day(claims.deliveryDate), lateText(late))] : []),
+  ];
+}
+
+/**
+ * What would happen if the agent ordered this offer, as its own pre-check says: "Needs your
+ * approval: €14.10 over your order limit." The amount is this offer's own, the way the
+ * pre-check measured it; the order note gives the whole order's. AVAILABILITY_DIFFERS reads
+ * as what differs.
+ */
+export function explain(line: OfferLine, limit: number | null = null): string {
+  const check = line.precheck;
+  const text = pick(OFFERS);
+  const differs = availabilitySentences(line.claims);
+  if (check === null) return [text.noAnswer, ...differs].join(" ");
+  if (check.decision === "auto") return [text.autoSentence, ...differs].join(" ");
+  const head = check.decision === "rejected" ? text.wouldBeRejected : text.needsYourApproval;
+  const reasonText = pick(CARD).reason;
+  const own = ownOverage(line, limit);
+  const sentences = check.reasons.flatMap((reason) => {
+    if (reason === "SPEND_OVER_LIMIT" && own !== null) return [text.overYourLimit(money(own))];
+    if (reason === "AVAILABILITY_DIFFERS" && differs.length > 0) return differs;
+    return [reasonText[reason]];
+  });
+  const [first, ...rest] = sentences;
+  const covered = check.reasons.includes("AVAILABILITY_DIFFERS") ? [] : differs;
+  return first === undefined
+    ? [`${head}.`, ...covered].join(" ")
+    : [`${head}: ${lowerFirst(first)}`, ...rest, ...covered].join(" ");
+}
+
+/** "+5 pts reliability · €0.10/L cheaper · other origin", or null without a comparison. A
+ * difference that rounds to nothing is left out. */
 function differsText(line: OfferLine): string | null {
   const c = line.comparison;
   if (c === null) return null;
   const pack = line.claims.product.perSalesUnit;
   const per = pack === null ? "" : `/${perStd(pack.unit)}`;
-  const reliability = c.reliabilityDelta;
-  const price = c.pricePerStdUnitDelta;
+  const points = c.reliabilityDelta === null ? 0 : Math.round(c.reliabilityDelta * 100);
+  const price = c.pricePerStdUnitDelta === null ? 0 : cents(c.pricePerStdUnitDelta);
   const text = pick(OFFERS);
   const parts = [
-    reliability === null || reliability === 0
-      ? null
-      : text.reliabilityDelta(reliability > 0 ? "+" : "−", Math.round(Math.abs(reliability) * 100)),
-    price === null || price === 0
-      ? null
-      : text.priceDelta(`${twoDecimals(Math.abs(price))}${per}`, price > 0),
+    points === 0 ? null : text.reliabilityDelta(points > 0 ? "+" : "−", Math.abs(points)),
+    price === 0 ? null : text.priceDelta(`${twoDecimals(Math.abs(price))}${per}`, price > 0),
     c.originDiffers === true ? text.otherOrigin : null,
   ].filter((part) => part !== null);
   return parts.length === 0 ? null : parts.join(" · ");
 }
 
-/** A substitute that needs approval only for being a substitute shows its rank in words. */
+/** A substitute with no reason other than being a substitute (or none) shows its rank in
+ * words instead of its short reason. */
 function optionReason(line: OfferLine): string | null {
   const onlySubstitution =
     line.precheck !== null &&
     line.precheck.decision !== "rejected" &&
     line.precheck.reasons.every((r) => r === "SUBSTITUTION");
-  return line.rank !== null && onlySubstitution && partly(line.claims) === null
+  return line.rank !== null && onlySubstitution && availability(line.claims) === null
     ? pick(OFFERS).rank[line.rank]
     : shortReason(line);
 }
@@ -240,8 +265,10 @@ type Group = {
 
 /**
  * One group per requested line. get-offers lists every original first, in request order, and
- * then one ranked block of substitutes per original, each block starting again at its best.
- * Two lines of the same product are two groups.
+ * then a ranked block of substitutes for each original with a shortfall, each block starting
+ * again at its best. Only those short originals own a block. A short line whose block came
+ * out empty cannot be told apart, so the next block then goes to it. Two lines of the same
+ * product are two groups.
  */
 function groupsOf(offers: OfferLine[]): Group[] {
   const groups: Group[] = [];
@@ -257,7 +284,9 @@ function groupsOf(offers: OfferLine[]): Group[] {
       });
       continue;
     }
-    const owners = groups.filter((g) => g.original !== null && g.productId === replaces);
+    const originals = groups.filter((g) => g.original !== null && g.productId === replaces);
+    const short = originals.filter((g) => g.original?.claims.shortfall !== null);
+    const owners = short.length > 0 ? short : originals;
     const rank = RANK[line.rank ?? "good"];
     const seen = blocks.get(replaces);
     // A rank that does not come after the previous one starts the next line's block.
@@ -368,15 +397,35 @@ export function heading(result: OffersResult, rows: Row[], now = new Date()) {
   };
 }
 
+/**
+ * The order limit the pre-checks used: the mandate's gross maxOrderTotal, only while that
+ * mandate is active and is the one (id and version) every offer was made under. A revoked or
+ * changed mandate gives null: the view then names no amount rather than a wrong one.
+ */
+export function limitFor(offers: OfferLine[], stored: StoredMandate | null): number | null {
+  if (stored === null || stored.status === "revoked" || offers.length === 0) return null;
+  const { mandateId, version } = stored.mandate;
+  const same = offers.every(
+    (o) => o.claims.mandateId === mandateId && o.claims.mandateVersion === version,
+  );
+  return same ? stored.mandate.limits.maxOrderTotal.value : null;
+}
+
 /** The line under the products: each row is checked on its own, so say that the whole
- * order is checked again, and by how much it is over the limit when that is known. */
+ * order is checked again, by how much it is over the limit when that is known, and that
+ * picks that would be rejected are not counted. */
 export function orderNote(rows: Row[], limit: number | null): string | null {
   if (!rows.some((row) => row.kind === "offered")) return null;
   const over = overLimit(rows, limit);
   const text = pick(OFFERS);
-  return over === null || limit === null
-    ? `${text.eachOnItsOwn} ${text.checkedAgain}`
-    : `${text.together(money(over), money(limit))} ${text.checkedAgain}`;
+  const rejected = rows.filter(
+    (row) => row.kind === "offered" && row.pick.precheck?.decision === "rejected",
+  ).length;
+  return [
+    over === null || limit === null ? text.eachOnItsOwn : text.together(money(over), money(limit)),
+    ...(rejected === 0 ? [] : [text.rejectedNotCounted(rejected)]),
+    text.checkedAgain,
+  ].join(" ");
 }
 
 function approvalText(line: OfferLine): string {
@@ -433,9 +482,19 @@ export function details(line: OfferLine): [string, string][] {
   ];
 }
 
-/** The chat text of a "Use": "For Test milk 1 l, use Test organic milk 1 l instead." */
-export const useText = (row: Row, option: Option) =>
-  pick(OFFERS).useText(row.name, option.line.claims.product.name);
+/**
+ * The chat text of a "Use". A substitute covers the shortfall, not the whole line: "For the
+ * missing 16 l of Test milk 1 l, use Test organic milk 1 l." Without a shortfall on the row's
+ * pick: "For Test milk 1 l, use Test organic milk 1 l instead."
+ */
+export function useText(row: Row, option: Option): string {
+  const text = pick(OFFERS);
+  const product = option.line.claims.product.name;
+  const short = row.kind === "offered" ? row.pick.claims.shortfall : null;
+  return option.line.claims.replaces !== null && short !== null
+    ? text.useForMissing(amount(short), row.name, product)
+    : text.useText(row.name, product);
+}
 export const askElseText = (row: Row) => pick(OFFERS).askElseText(row.name);
 export const retryText = (row: Row) => pick(OFFERS).retryText(row.name);
 
@@ -450,9 +509,9 @@ export type Ui = {
   asked: readonly string[];
   /** The link whose message is on its way; every other steering link waits. */
   sending: { id: string; key: string } | null;
-  /** A message that did not reach the chat, shown under the product it was about. */
-  error: { key: string; message: string } | null;
-  /** Messages reach a chat only inside a host. */
+  /** The product whose message did not reach the chat; its text is read at render time. */
+  error: { key: string } | null;
+  /** True when the source can post a chat message (`source.message`). */
   canSteer: boolean;
 };
 
@@ -488,13 +547,24 @@ export const sent = (ui: Ui): Ui =>
 
 /** The chat did not take it: the link is free again and its product shows why. */
 export const failed = (ui: Ui): Ui =>
-  ui.sending === null
-    ? ui
-    : { ...ui, sending: null, error: { key: ui.sending.key, message: pick(OFFERS).sendFailed } };
+  ui.sending === null ? ui : { ...ui, sending: null, error: { key: ui.sending.key } };
+
+/** A steering link's state, also its CSS class. */
+export type LinkState = "asked" | "sending" | "enabled" | "disabled";
 
 /** A steering link: asked (✓), on its way, waiting while another message is, or enabled. */
-export function linkState(id: string, ui: Pick<Ui, "asked" | "sending">) {
-  if (ui.asked.includes(id)) return "asked" as const;
-  if (ui.sending?.id === id) return "sending" as const;
-  return ui.sending === null ? ("enabled" as const) : ("disabled" as const);
+export function linkState(id: string, ui: Pick<Ui, "asked" | "sending">): LinkState {
+  if (ui.asked.includes(id)) return "asked";
+  if (ui.sending?.id === id) return "sending";
+  return ui.sending === null ? "enabled" : "disabled";
+}
+
+/** What the screen reader hears after a steering link of a product: on its way, sent, or
+ * nothing after a failure (the error alert says it). */
+export function steerStatus(row: OfferedRow, ui: Ui): "sending" | "sent" | null {
+  if (ui.sending?.key === row.key) return "sending";
+  if (ui.error?.key === row.key) return null;
+  const ids = [...row.options.map((o) => o.line.offerId), `else:${row.key}`, `retry:${row.key}`];
+  const latest = ui.asked.at(-1);
+  return latest !== undefined && ids.includes(latest) ? "sent" : null;
 }

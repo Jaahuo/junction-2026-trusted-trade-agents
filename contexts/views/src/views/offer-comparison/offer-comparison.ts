@@ -1,4 +1,4 @@
-import { type OffersResult, OffersResultSchema } from "@app/contract";
+import { type OffersResult, OffersResultSchema, type StoredMandate } from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { callAction, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
@@ -18,12 +18,13 @@ import {
   explain,
   failed,
   heading,
+  limitFor,
   linkState,
   type OfferedRow,
   type Option,
   orderNote,
-  overLimit,
   type Panel,
+  type Price,
   retryText,
   type Row,
   rowsOf,
@@ -31,6 +32,7 @@ import {
   sent,
   show,
   type Status,
+  steerStatus,
   toggle,
   type Ui,
   useText,
@@ -50,6 +52,15 @@ export type Handlers = {
 const idle: Handlers = { toggle: () => {}, show: () => {}, steer: () => {} };
 
 const ICONS: Record<Status, string> = { auto: checkCircle, attention: warning16, none: minus16 };
+
+/** A price per litre or kilogram, or a dash that a screen reader reads as "price unknown". */
+const priceCell = (price: Price | null) =>
+  price === null
+    ? html`<span class="price"
+        ><span aria-hidden="true">—</span
+        ><span class="visually-hidden">${pick(OFFERS).priceUnknown}</span></span
+      >`
+    : html`<span class="price">${price.shown}</span>`;
 
 const linkButton = (label: string, onClick: () => void, expanded?: boolean) =>
   html`<button
@@ -106,8 +117,7 @@ function options(row: OfferedRow, ui: Ui, on: Handlers) {
               ${option.differs === null ? nothing : html`<span class="differs secondary">${option.differs}</span>`}
             </span>
             <span class="reason">${option.reason ?? nothing}</span>
-            <span class="price">${option.price?.shown ?? "—"}</span>
-            ${action(row, option, ui, on)}
+            ${priceCell(option.price)} ${action(row, option, ui, on)}
           </li>`,
       )}
     </ul>
@@ -134,16 +144,7 @@ function detailList(row: OfferedRow, offerId: string | null) {
   </dl>`;
 }
 
-/** What the screen reader hears after a steering link: on its way, or sent. */
-function steerStatus(row: OfferedRow, ui: Ui) {
-  const ids = [...row.options.map((o) => o.line.offerId), `else:${row.key}`, `retry:${row.key}`];
-  const latest = ui.asked.at(-1);
-  const text = pick(OFFERS);
-  if (ui.sending?.key === row.key) return text.sendingStatus;
-  return latest !== undefined && ids.includes(latest) ? text.sentStatus : "";
-}
-
-function opened(row: Row, ui: Ui, on: Handlers, over: number | null): TemplateResult {
+function opened(row: Row, ui: Ui, on: Handlers, limit: number | null): TemplateResult {
   if (row.kind === "omitted")
     return html`<div class="panel" id=${`panel-${row.key}`}>
       <p class="body-small">${row.detail}</p>
@@ -153,9 +154,10 @@ function opened(row: Row, ui: Ui, on: Handlers, over: number | null): TemplateRe
   const catalogue = row.pick.claims.product.name;
   const retryId = `retry:${row.key}`;
   const text = pick(OFFERS);
+  const status = steerStatus(row, ui);
   return html`<div class="panel" id=${`panel-${row.key}`}>
     ${catalogue === row.name ? nothing : html`<p class="catalogue">${catalogue}</p>`}
-    <p class="sentence ${row.status}">${explain(row.pick, over)}</p>
+    <p class="sentence ${row.status}">${explain(row.pick, limit)}</p>
     ${
       row.pick.precheck === null && ui.canSteer
         ? steerButton(text.tryAgain, retryId, ui, () => on.steer(retryId, row.key, retryText(row)))
@@ -171,13 +173,15 @@ function opened(row: Row, ui: Ui, on: Handlers, over: number | null): TemplateRe
     </div>
     ${panel === "options" ? options(row, ui, on) : nothing}
     ${panel === "details" ? detailList(row, ui.open?.offerId ?? null) : nothing}
-    <p class="visually-hidden" role="status">${steerStatus(row, ui)}</p>
+    <p class="visually-hidden" role="status">
+      ${status === "sending" ? text.sendingStatus : status === "sent" ? text.sentStatus : ""}
+    </p>
   </div>`;
 }
 
-function productRow(item: Row, ui: Ui, on: Handlers, over: number | null) {
+function productRow(item: Row, ui: Ui, on: Handlers, limit: number | null) {
   const open = ui.open?.key === item.key;
-  const error = ui.error?.key === item.key ? ui.error.message : null;
+  const error = ui.error?.key === item.key ? pick(OFFERS).sendFailed : null;
   return html`<li class="product ${item.status}">
     <button
       type="button"
@@ -190,10 +194,10 @@ function productRow(item: Row, ui: Ui, on: Handlers, over: number | null) {
       ${icon(ICONS[item.status])}
       <span class="name">${item.name}</span>
       <span class="reason">${item.reason ?? nothing}</span>
-      ${item.kind === "offered" ? html`<span class="price">${item.price?.shown ?? "—"}</span>` : nothing}
+      ${item.kind === "offered" ? priceCell(item.price) : nothing}
       <span class="chevron">${icon(chevronDown)}</span>
     </button>
-    ${open ? opened(item, ui, on, over) : nothing}
+    ${open ? opened(item, ui, on, limit) : nothing}
     ${error === null ? nothing : html`<p class="error body-small" role="alert">${error}</p>`}
   </li>`;
 }
@@ -212,7 +216,8 @@ const brandHead = (title: string, until: string | null) =>
 
 /**
  * The glance: one row per requested line; the open product's levels follow its row. `limit`
- * is the mandate's gross order limit, when known, for the amount over it.
+ * is the gross order limit the pre-checks used (see limitFor), when known, for the amounts
+ * over it.
  */
 export function renderOfferComparison(
   data: OffersResult,
@@ -222,7 +227,6 @@ export function renderOfferComparison(
 ): TemplateResult {
   const rows = rowsOf(data);
   const head = heading(data, rows);
-  const over = overLimit(rows, limit);
   const note = orderNote(rows, limit);
   return html`<section class="card" part="done">
     ${brandHead(head.title, head.until)}
@@ -232,7 +236,7 @@ export function renderOfferComparison(
         : nothing
     }
     <ul class="products">
-      ${rows.map((item) => productRow(item, ui, on, over))}
+      ${rows.map((item) => productRow(item, ui, on, limit))}
     </ul>
     ${note === null ? nothing : html`<p class="note body-small secondary">${note}</p>`}
   </section>`;
@@ -453,26 +457,30 @@ const styles = css`
   }
 `;
 
+/** How long a steering message may wait for the host before its link is free again. */
+const SEND_TIMEOUT_MS = 10_000;
+
 class OfferComparison extends ViewElement<ViewEntryOf<"offer-comparison">> {
   static override properties = {
     ...ViewElement.properties,
     ui: { state: true },
     omitted: { state: true },
-    limit: { state: true },
+    mandate: { state: true },
   };
   static override styles = [base, cardStyles, styles];
   readonly entry = viewEntry("offer-comparison");
   declare private ui: Ui;
   /** The products left out, kept for a result with no offers (the shell shows it as empty). */
   declare private omitted: OffersResult["omitted"];
-  /** The mandate's gross order limit, for the amount an order is over it; null until read. */
-  declare private limit: number | null;
+  /** The current mandate, for the order limit (see limitFor); null until read or when it
+   * could not be read. */
+  declare private mandate: StoredMandate | null;
 
   constructor() {
     super();
     this.ui = closed;
     this.omitted = [];
-    this.limit = null;
+    this.mandate = null;
   }
 
   override connectedCallback() {
@@ -489,10 +497,15 @@ class OfferComparison extends ViewElement<ViewEntryOf<"offer-comparison">> {
       },
       () => undefined,
     );
-    // Without the mandate the sentence names no amount; the view still shows everything else.
+    // Without the mandate the sentences name no amount; the view still shows everything else.
+    // A revoked mandate is kept, and limitFor gives no limit for it.
     void callAction(source, "get_mandate", {}, null).then((result) => {
-      if (result.kind === "done" && result.data.status === "active")
-        this.limit = result.data.mandate.limits.maxOrderTotal.value;
+      if (result.kind === "done") this.mandate = result.data;
+      else
+        console.error("The offer comparison could not read the mandate.", {
+          tool: "get_mandate",
+          message: result.kind === "error" ? result.message : result.kind,
+        });
     });
   }
 
@@ -507,28 +520,37 @@ class OfferComparison extends ViewElement<ViewEntryOf<"offer-comparison">> {
     const next = message === undefined ? null : sending(this.ui, id, key);
     if (message === undefined || next === null) return;
     this.ui = next;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`No answer from the chat in ${SEND_TIMEOUT_MS / 1000} s.`)),
+        SEND_TIMEOUT_MS,
+      );
+    });
     try {
-      await message(text);
+      await Promise.race([message(text), timeout]);
       this.ui = sent(this.ui);
-    } catch {
+    } catch (cause) {
+      console.error("A steering message did not reach the chat.", {
+        id,
+        key,
+        cause: cause instanceof Error ? cause.message : String(cause),
+      });
       this.ui = failed(this.ui);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   override render() {
     if (this.state.kind === "loading") return renderLoading();
     if (this.state.kind === "empty" && this.omitted.length > 0)
-      return renderOfferComparison(
-        { offers: [], omitted: this.omitted },
-        this.ui,
-        this.on,
-        this.limit,
-      );
+      return renderOfferComparison({ offers: [], omitted: this.omitted }, this.ui, this.on, null);
     return super.render();
   }
 
   protected override renderDone(data: OffersResult) {
-    return renderOfferComparison(data, this.ui, this.on, this.limit);
+    return renderOfferComparison(data, this.ui, this.on, limitFor(data.offers, this.mandate));
   }
 }
 

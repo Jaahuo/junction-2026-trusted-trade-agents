@@ -168,7 +168,10 @@
         "paymentTerms": "invoice",
         "cutoffAt": "2026-11-20T10:00:00+02:00",
         "replaces": null,
-        "shortfall": null,
+        "shortfall": {
+          "value": 21,
+          "unit": "KGM"
+        },
         "mandateId": "mnd_test_1",
         "mandateVersion": 1,
         "constraints": {
@@ -202,7 +205,7 @@
       },
       "precheck": {
         "decision": "needs_approval",
-        "reasons": ["SPEND_OVER_LIMIT"]
+        "reasons": ["SPEND_OVER_LIMIT", "AVAILABILITY_DIFFERS"]
       },
       "rank": null,
       "comparison": null
@@ -270,8 +273,8 @@
         "exp": 1794903600
       },
       "precheck": {
-        "decision": "auto",
-        "reasons": []
+        "decision": "needs_approval",
+        "reasons": ["AVAILABILITY_DIFFERS"]
       },
       "rank": null,
       "comparison": null
@@ -286,7 +289,7 @@
         "agentId": "agent_demo",
         "productId": "prod_test_butter_unsalted",
         "quantity": {
-          "value": 358,
+          "value": 42,
           "unit": "CT"
         },
         "unitPrice": {
@@ -296,8 +299,8 @@
         },
         "deposits": 0,
         "total": {
-          "net": 1539.4,
-          "gross": 1754.92
+          "net": 180.6,
+          "gross": 205.88
         },
         "deliveryDate": "2026-11-23",
         "requestedDate": "2026-11-23",
@@ -340,14 +343,14 @@
       },
       "precheck": {
         "decision": "needs_approval",
-        "reasons": ["SPEND_OVER_LIMIT", "SUBSTITUTION"]
+        "reasons": ["SUBSTITUTION"]
       },
       "rank": "best",
       "comparison": {
         "replaces": "prod_test_butter",
         "pricePerStdUnitDelta": 0.2,
-        "reliabilityDelta": 0.02,
-        "originDiffers": false
+        "reliabilityDelta": null,
+        "originDiffers": null
       }
     }
   ],

@@ -28,20 +28,17 @@ function App() {
   }, [isHome, activeScreen]);
   return (
     <div className="min-h-screen">
-      <header className="border-b border-border bg-surface">
+      <header className="bg-primary text-primary-foreground">
         <nav className="mx-auto flex max-w-4xl items-center gap-1 whitespace-nowrap px-6 py-3">
-          <span className="mr-2 inline-flex items-center gap-2 font-semibold tracking-tight">
-            <span className="inline-flex bg-primary p-2">
-              <img src={brand.logo} alt="" width="56" height="19" />
-            </span>
-            {brand.name}
+          <span className="mr-2 inline-flex p-2">
+            <img src={brand.logo} alt={brand.name} width="56" height="19" />
           </span>
           <Link
             href="/"
             className={(active) =>
               active
-                ? "rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary"
-                : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
+                ? "rounded-md bg-primary-foreground/15 px-3 py-1.5 text-sm font-medium"
+                : "rounded-md px-3 py-1.5 text-sm text-primary-foreground/80 hover:text-primary-foreground"
             }
           >
             Home
@@ -52,8 +49,8 @@ function App() {
               href={screen.href ?? screen.path}
               className={(active) =>
                 active
-                  ? "rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary"
-                  : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
+                  ? "rounded-md bg-primary-foreground/15 px-3 py-1.5 text-sm font-medium"
+                  : "rounded-md px-3 py-1.5 text-sm text-primary-foreground/80 hover:text-primary-foreground"
               }
             >
               {screen.title}

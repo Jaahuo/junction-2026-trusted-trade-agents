@@ -50,3 +50,12 @@ test("source paths must be absolute, outside Git and cannot escape through a fil
     }
   });
 });
+
+test("every catalogue source file is required; missing enrichment cannot become empty facts", async () =>
+  withSource(async (dir) => {
+    for (const key of ["products", "schema", "reliability", "co2"] as const) {
+      await writeFictionalSources(dir);
+      await rm(join(dir, DATA_FILES[key]));
+      expect(await failureOf(readSource(dir))).toContain(DATA_FILES[key]);
+    }
+  }));

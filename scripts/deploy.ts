@@ -156,6 +156,11 @@ export const chatEnv = (outputs: Outputs, chat: Chat): Map<string, string> =>
     ["OPENAI_API_KEY", chat.inferenceKey],
   ]);
 
+// Interpolated so Bun shell passes the patterns to rsync instead of expanding them as globs.
+export const CHAT_SYNC_EXCLUDES = [".env", ".env.*", "__pycache__", "*.pyc"].map(
+  (pattern) => `--exclude=${pattern}`,
+);
+
 export const CHAT_SERVICE = `[Unit]
 Description=Trusted trade chat host (Open WebUI)
 After=docker.service network-online.target
@@ -320,7 +325,7 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   if (chat) {
     await $`ssh ${SSH} ${host} docker pull --quiet ${CHAT_IMAGE}`;
     await $`ssh ${SSH} ${host} mkdir -p /opt/trusted-trade-chat`;
-    await $`rsync -az --exclude=.env --exclude=.env.* --exclude=__pycache__ --exclude=*.pyc -e ${remoteShell} hosts/openwebui/agent hosts/openwebui/branding hosts/openwebui/scripts ${`${host}:/opt/trusted-trade-chat/`}`;
+    await $`rsync -az ${CHAT_SYNC_EXCLUDES} -e ${remoteShell} hosts/openwebui/agent hosts/openwebui/branding hosts/openwebui/scripts ${`${host}:/opt/trusted-trade-chat/`}`;
     await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat.env < ${new Response(renderEnvFile(chatEnv(outputs, chat)))}`;
     await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade-chat.service < ${new Response(CHAT_SERVICE)}`;
   }

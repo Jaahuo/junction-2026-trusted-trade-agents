@@ -11,6 +11,7 @@ import {
   viewEntry,
 } from "../../shared/bridge.ts";
 import { lang, pick } from "../../shared/locale.ts";
+import { required } from "../../shared/constraints.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { loadMandate } from "./loader.ts";
@@ -411,7 +412,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
             hard.length === 0
               ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${hard.map(() => html`<li>${text.freeFromLactose}</li>`)}
+                  ${hard.map((item) => html`<li>${required(item.attribute)}</li>`)}
                 </ul>`
           }
           <p class="strong">${text.preferred}</p>

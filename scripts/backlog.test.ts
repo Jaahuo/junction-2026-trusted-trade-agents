@@ -5,7 +5,10 @@ import {
   blockers,
   canonicalPath,
   dependencies,
+  isStale,
+  loopClaim,
   ownedPaths,
+  overlapping,
   overlaps,
   plan,
 } from "./backlog.ts";
@@ -181,5 +184,51 @@ describe("plan", () => {
       issue(2, { labels: ["wave:2"], body: body("`b`") }),
     ];
     expect(plan(board(issues)).ready.map((entry) => entry.number)).toEqual([4, 3, 2, 5]);
+  });
+});
+
+describe("unreadable ownership", () => {
+  test("ownedPaths reads comma-separated paths without backticks", () => {
+    expect(
+      ownedPaths("## Owns\n\nhosts/openwebui/**, scripts/openwebui.ts, DESIGN.md (one part).\n"),
+    ).toEqual(["hosts/openwebui", "scripts/openwebui.ts", "DESIGN.md"]);
+  });
+
+  test("an active issue with unreadable Owns blocks issues of its area, not others", () => {
+    const vague = issue(9, {
+      assignees: ["someone"],
+      labels: ["area:demo"],
+      body: "## Owns\n\nthe host lane\n",
+    });
+    const sameArea = issue(1, { labels: ["area:demo"] });
+    const otherArea = issue(2, { labels: ["area:offers"] });
+    const all = board([vague, sameArea, otherArea]);
+    expect(overlapping(sameArea, ["x"], all).map((other) => other.number)).toEqual([9]);
+    expect(overlapping(otherArea, ["x"], all)).toEqual([]);
+  });
+});
+
+const note = (login: string, createdAt: string) => ({
+  body: `Claimed by agent for @${login} through the backlog loop (remote branch \`task/1\`).`,
+  createdAt,
+});
+
+describe("stale claims", () => {
+  test("loopClaim reads the latest loop claim note and ignores other comments", () => {
+    expect(
+      loopClaim([
+        note("first", "2026-11-14T10:00:00Z"),
+        { body: "looks good", createdAt: "2026-11-14T11:00:00Z" },
+        note("second", "2026-11-14T12:00:00Z"),
+      ]),
+    ).toEqual({ login: "second", at: Date.parse("2026-11-14T12:00:00Z") });
+    expect(loopClaim([{ body: "manual branch", createdAt: "2026-11-14T10:00:00Z" }])).toBeNull();
+  });
+
+  test("a claim is stale after 90 minutes only when nothing was pushed", () => {
+    const at = Date.parse("2026-11-14T10:00:00Z");
+    expect(isStale(at, at + 89 * 60_000, false)).toBe(false);
+    expect(isStale(at, at + 90 * 60_000, false)).toBe(true);
+    expect(isStale(at, at + 300 * 60_000, true)).toBe(false);
   });
 });

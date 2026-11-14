@@ -3,6 +3,7 @@ import { fail } from "./lib.ts";
 import { command, ghJson, option, repository } from "./workflow.ts";
 import {
   decodeBacklogIssues,
+  decodeIssueComments,
   decodeIssueStates,
   decodeOpenPrs,
   decodeProjectTitles,
@@ -19,6 +20,9 @@ const BLOCKING_LABELS = new Set([
 ]);
 /** Titles of issues that only a person can close: mentor questions and team decisions. */
 const PERSON_ONLY_TITLE = /^(mentor question|decide|decision|ask the mentors|status:)/i;
+/** A loop claim with no pushed commit for this long may be expired by any agent. */
+const STALE_MS = 90 * 60_000;
+const CLAIM_NOTE = /^Claimed by .* for @([\w-]+) through the backlog loop/;
 /** Exit code of `claim` when another agent holds the issue: pick the next one. */
 export const TAKEN_EXIT = 3;
 
@@ -82,6 +86,8 @@ export function canonicalPath(raw: string): string | null {
   return segments.length > 0 ? segments.join("/") : null;
 }
 
+const looksLikePath = (word: string) => /^[\w.@*-]+\/|^[\w@-]+\.[a-z]{1,5}[.,;:]?$/i.test(word);
+
 /**
  * The backticked paths the "Owns" section owns: its "Owned paths:" line and the bullets under it,
  * not the "Keep out of" line or its bullets. Null when the section is missing or owns no path,
@@ -97,8 +103,11 @@ export function ownedPaths(body: string): string[] | null {
     else if (/^\W*owned paths\b/i.test(line)) owning = true;
     else if (!/^\s*[-*]\s/.test(line) && line.trim() !== "") owning = true;
     if (!owning) continue;
-    for (const match of line.matchAll(/`([^`]+)`/g)) {
-      const path = canonicalPath(match[1] ?? "");
+    const quoted = [...line.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? "");
+    // Without backticks, take the comma-separated words that look like paths.
+    const tokens = quoted.length > 0 ? quoted : line.split(/[,;]\s*|\s+/).filter(looksLikePath);
+    for (const token of tokens) {
+      const path = canonicalPath(token.replace(/^[-*:]+|[.,;:]+$/g, ""));
       if (path !== null) paths.push(path);
     }
   }
@@ -153,14 +162,23 @@ export function blockers(issue: BacklogIssue, board: Board): string[] {
   return reasons;
 }
 
-/** Active issues whose owned paths overlap these paths. */
-function overlapping(issue: BacklogIssue, paths: readonly string[], board: Board): BacklogIssue[] {
-  return board.open.filter(
-    (other) =>
-      other.number !== issue.number &&
-      active(other, board) &&
-      overlaps(paths, ownedPaths(other.body) ?? []),
-  );
+const areas = (issue: BacklogIssue) => issue.labels.filter((label) => label.startsWith("area:"));
+
+/**
+ * Active issues that may touch the same files: their owned paths overlap these paths, or, when
+ * their Owns section cannot be read, they share an `area:` label (fail closed within the area).
+ */
+export function overlapping(
+  issue: BacklogIssue,
+  paths: readonly string[],
+  board: Board,
+): BacklogIssue[] {
+  return board.open.filter((other) => {
+    if (other.number === issue.number || !active(other, board)) return false;
+    const theirs = ownedPaths(other.body);
+    if (theirs === null) return areas(other).some((area) => areas(issue).includes(area));
+    return overlaps(paths, theirs);
+  });
 }
 
 const waveOf = (issue: BacklogIssue) =>
@@ -427,6 +445,72 @@ async function release(number: number, args: string[]) {
   console.log(`Released #${number}. Remove the local worktree with: wt remove task/${number}`);
 }
 
+/**
+ * The loop claim behind an issue's remote branch: who it is for and when it was made; null when the
+ * branch was not made by the loop.
+ */
+export function loopClaim(comments: readonly { body: string; createdAt: string }[]) {
+  for (const comment of comments.toReversed()) {
+    const match = CLAIM_NOTE.exec(comment.body);
+    if (match?.[1]) return { login: match[1], at: Date.parse(comment.createdAt) };
+  }
+  return null;
+}
+
+/** True when a loop claim is older than the stale limit and its branch holds no pushed commit. */
+export const isStale = (claimedAt: number, now: number, pushed: boolean) =>
+  !pushed && now - claimedAt >= STALE_MS;
+
+async function stale(args: string[]) {
+  const expire = args.includes("--expire");
+  const [repo, board] = await Promise.all([repository(), loadBoard()]);
+  await command("git", "fetch", "origin", "main");
+  const now = Date.now();
+  let found = 0;
+  for (const issue of board.open) {
+    if (!board.claimed.has(issue.number) || prFor(board, issue.number)) continue;
+    const comments = await ghJson(
+      decodeIssueComments,
+      "issue",
+      "view",
+      String(issue.number),
+      "--json",
+      "comments",
+    );
+    const claimed = loopClaim(comments);
+    if (claimed === null) continue;
+    const ref = `refs/heads/task/${issue.number}`;
+    const head = (await command("git", "ls-remote", "origin", ref)).split(/\s/)[0];
+    if (!head) continue;
+    await command("git", "fetch", "origin", head);
+    const pushed =
+      (await run("git", "merge-base", "--is-ancestor", head, "origin/main")).code !== 0;
+    if (!isStale(claimed.at, now, pushed)) continue;
+    found++;
+    const minutes = Math.round((now - claimed.at) / 60_000);
+    console.log(
+      `#${issue.number} claimed for @${claimed.login} ${minutes} min ago, nothing pushed`,
+    );
+    if (!expire) continue;
+    if (!(await dropClaim(issue.number, head))) {
+      console.log(`  task/${issue.number} moved; left as is.`);
+      continue;
+    }
+    await run("gh", "issue", "edit", String(issue.number), "--remove-assignee", claimed.login);
+    await projectStatus(repo, issue.number, "Todo", true);
+    await run(
+      "gh",
+      "issue",
+      "comment",
+      String(issue.number),
+      "--body",
+      `Backlog loop: the claim for @${claimed.login} expired after ${minutes} minutes with nothing pushed. The issue is free again.`,
+    );
+    console.log("  expired");
+  }
+  if (found === 0) console.log("No stale loop claims.");
+}
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const action = args[0];
@@ -435,6 +519,7 @@ if (import.meta.main) {
   bun scripts/backlog.ts next [--all] [--json]
   bun scripts/backlog.ts claim <issue> [--agent <label>]
   bun scripts/backlog.ts release <issue> --reason <text> [--blocked]
+  bun scripts/backlog.ts stale [--expire]
 
 next lists the open issues an agent can finish start to end now, in pick order:
 unassigned, Todo or off the board, no remote task/<n> branch, no open PR, no
@@ -448,11 +533,14 @@ rare tie both give way, never both proceed. The winner is assigned. Then run: bu
 release gives back your claim with no pushed work: it deletes the remote branch
 only while it holds no new commits, unassigns you, moves the issue to Todo and
 comments the reason. --blocked also labels it blocked, so no agent picks it until a
-person removes the label.`);
+person removes the label.
+stale lists loop claims older than 90 minutes whose branch holds no pushed commit;
+--expire frees them: deletes the branch with a lease, unassigns, sets Todo, comments.`);
     process.exit(0);
   }
   if (action === "next") await next(args);
   else if (action === "claim") await claim(numberArg(args[1]), args);
   else if (action === "release") await release(numberArg(args[1]), args);
+  else if (action === "stale") await stale(args);
   else fail("Unknown backlog command; see --help.");
 }

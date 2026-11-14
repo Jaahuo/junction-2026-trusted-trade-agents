@@ -162,3 +162,8 @@ export const decodeProjectTitles = (value: unknown) =>
   list(field(field(field(field(value, "data"), "repository"), "projectsV2"), "nodes"), (node) =>
     text(field(node, "title")),
   );
+export const decodeIssueComments = (value: unknown) =>
+  list(field(value, "comments"), (comment) => ({
+    body: text(field(comment, "body")),
+    createdAt: text(field(comment, "createdAt")),
+  }));

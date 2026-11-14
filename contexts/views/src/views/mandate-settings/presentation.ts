@@ -6,7 +6,7 @@ import type {
   StoredMandate,
 } from "@app/contract";
 import { formatMoney, formatQuantity, formatTimestamp, ORDER_WORDING } from "@app/ui/format";
-import { preferred } from "../../shared/constraints.ts";
+import { preferred, required } from "../../shared/constraints.ts";
 import { lang, pick } from "../../shared/locale.ts";
 import { MANDATE } from "./strings.ts";
 
@@ -95,7 +95,7 @@ function termValues(terms: DraftMandateRequest) {
     [text.missingAllergen, policyText(limits.allergenData.ifNoData)],
     [text.invoice, policyText(limits.paymentTerms.invoice)],
     [pick(ORDER_WORDING).terms.paymentOnOrder, policyText(limits.paymentTerms.pay_on_order)],
-    [text.required, list(standing.hard.map(() => text.freeFromLactose))],
+    [text.required, list(standing.hard.map((item) => required(item.attribute)))],
     [text.preferred, list(standing.soft.map(softText))],
     [text.expires, terms.exp === undefined ? text.oneYear : epochText(terms.exp)],
   ] as const;

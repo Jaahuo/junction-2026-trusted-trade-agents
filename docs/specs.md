@@ -162,7 +162,7 @@ export const TOOL_INPUT = {
 
 - `DecideApprovalInput` is flat because a tool input schema is one object. The MCP binding drops `orderId`, keeps the fields that belong to `decision`, and the REST route validates the result as `DecideApprovalRequest`; a field that does not belong to the decision → 400.
 - No tool input has a customer, account, agent, password or passcode field.
-- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not in `HARD_CONSTRAINT_VALUES` for that attribute, → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` and `draft_mandate` (`standingConstraints.hard`) and the `facts` route.
+- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not the one for that attribute (`yes` for `vegan`, `free_from` for every other), → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` and `draft_mandate` (`standingConstraints.hard`) and the `facts` route.
 - Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` and `GET /skills/trusted-trade-ordering/:file` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
 
 Verification: a contract test that `ROUTES` keys, tools, `TOOL_INPUT` and `TOOL_OUTPUT` match this table and that every `TOOL_INPUT` schema is a JSON object schema.
@@ -177,16 +177,21 @@ export interface Quantity {
   unit: string;
 }
 export type MatchState = "confirmed" | "contradicted" | "unknown";
-export const HARD_CONSTRAINT_ATTRIBUTES = ["lactose"] as const; // attributes with a data mapping below
+// Data mapping per free_from attribute: GS1 allergen type code, included allergen codes, nutritionalClaim code, contradicting claim.
+export const FREE_FROM_DATA = {
+  egg: { allergen: "AE", claim: "FREE_FROM_EGGS" },
+  gluten: { allergen: "AW", includes: ["UW", "NR", "GB", "GS", "GK"], claim: "FREE_FROM_GLUTEN" },
+  lactose: { allergen: "ML", claim: "FREE_FROM_LACTOSE", low: "LOW_LACTOSE" },
+  peanut: { allergen: "AP" },
+  fat: { claim: "FREE_FROM_FAT", low: "LOW_FAT" },
+  // … every GS1 allergen code and FREE_FROM_* claim in the product data; the full table is in @app/contract
+} as const;
+type FreeFromAttribute = keyof typeof FREE_FROM_DATA;
+export const HARD_CONSTRAINT_ATTRIBUTES: readonly [...FreeFromAttribute[], "vegan"]; // attributes with a data mapping below
 export type HardConstraintAttribute = (typeof HARD_CONSTRAINT_ATTRIBUTES)[number];
-export const HARD_CONSTRAINT_VALUES = { lactose: ["free_from"] } as const satisfies Record<
-  HardConstraintAttribute,
-  readonly string[]
->;
-export interface HardConstraint {
-  attribute: HardConstraintAttribute;
-  is: (typeof HARD_CONSTRAINT_VALUES)[HardConstraintAttribute][number];
-} // { attribute: "lactose", is: "free_from" }
+export type HardConstraint =
+  | { attribute: FreeFromAttribute; is: "free_from" } // { attribute: "gluten", is: "free_from" }
+  | { attribute: "vegan"; is: "yes" };
 export interface SoftConstraint {
   attribute: string;
   prefer: string;
@@ -240,12 +245,14 @@ export interface FactsResult {
   products: ProductFacts[];
   unknown: string[];
 }
-export const ALLERGEN_ATTRIBUTES = ["lactose"] as const; // hard constraint attributes gated by allergenData
+export const ALLERGEN_ATTRIBUTES: FreeFromAttribute[]; // the FREE_FROM_DATA keys with a GS1 allergen code; gated by allergenData
 ```
 
 - The server merges the mandate's standing constraints into the request: hard = request ∪ mandate, soft = request ∪ mandate. `SearchResult.constraints` returns the merged set.
-- Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the values in `HARD_CONSTRAINT_VALUES`. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
-- Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. Missing data is never `confirmed`.
+- Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the `is` value of their `HardConstraint` branch. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
+- `free_from`, from `FREE_FROM_DATA`: the allergen code or a code in its `includes` (wheat, rye, barley, spelt and khorasan wheat for gluten) with unit `CONTAINS` or `MAY_CONTAIN` in classification `allergen`, or the `low` claim in `nutritionalClaim` → `contradicted`; else the allergen code with unit `FREE_FROM` in `nonAllergen`, or the `claim` in `nutritionalClaim` → `confirmed`; else `unknown`, including `UNDECLARED` and allergen data on other codes only. Contradiction wins over a free-from claim. Attribute names are camelCase English; GS1 codes such as `AW` and other cases are refused.
+- `vegan` `yes`: `CONTAINS` of an allergen of animal origin (`AC`, `AE`, `AF`, `AM`, `BF`, `CM`, `ML`, `PO`, `UM`, `UN`, `ABD`, `ADQ`) → `contradicted`; else `nutritionalClaim` `VEGAN` → `confirmed`; else `unknown`. `MAY_CONTAIN` traces do not contradict vegan.
+- Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
 - Search matches Unicode words after case and hyphen normalization. The whole words `maito` and `milk` are equivalent; no other translation aliases apply. Every word of a term must match one name in one language. Terms are alternatives. Compound words do not match their substrings. A negated occurrence, such as `milk-free` or `free from milk`, does not match `milk`; `lactose-free milk` does.
 - A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, soft matches, name relevance, successful quantity conversion, matched terms, reliability, then product id. A head noun ranks above a modifier; milk chocolate and milk powder rank below milk.
@@ -445,7 +452,7 @@ Precedence for `place_order` (one list; the first matching step R1-R7 ends the r
 - R1. The body fails its schema, or holds 0 or more than 20 tokens → `400 BAD_REQUEST`. No record.
 - R2. The idempotency key is known: same tokens → `200` with the stored order; other tokens → `409 CONFLICT`.
 - R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
-- R4. Tokens differ in `customer` or `paymentTerms`, or the customer is not the principal's → `400 BAD_REQUEST`.
+- R4. Tokens differ in `customer` or `paymentTerms`, a token's `paymentTerms` is not the account's (alternatives included), or the customer is not the principal's → `400 BAD_REQUEST`.
 - R5. A current mandate exists and a token's `agentId`, `mandateId` or `mandateVersion` differs from it → `409 STALE_OFFER` ("request new offers").
 - R6. `validate` reports a live amount below the summed quantity of a product → `409 STALE_OFFER` (live-amount rule, SPEC-006).
 - R7. After validation and the transactional idempotency-key recheck, a selected offer ID already belongs to an order for this customer → `400 OFFER_INVALID`. This check runs under the customer's placement lock, before placement side effects.

@@ -145,6 +145,13 @@ After a decision, the approval card sends a context update with the outcome and 
 
 In Open WebUI a decision on the card takes two clicks: the card's own confirmation, then the host's "Tool call" dialog for `decide_approval`.
 
+### Troubleshooting
+
+These symptoms were observed in Open WebUI 0.13.3:
+
+- **The tool server points to another worktree.** `OPENWEBUI_MCP_URL` can override this worktree's API URL. Setup prints the connected URL even when the tool server is unchanged, and warns if it differs from this worktree's API. Compare the printed URL with the intended API. If the override is not intended, empty `OPENWEBUI_MCP_URL` in `hosts/openwebui/.env` and run `bun scripts/openwebui.ts setup` from this worktree.
+- **`Model '' was not found`.** The model endpoint can be down or busy, but other causes are possible. Check that the configured endpoint is reachable and serving the selected model. Restart the endpoint if it is down, or wait for it to become available if it is busy. Retry the chat.
+
 ### Measured results
 
 The [voice spike report](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44#issuecomment-6876603612) records a local run on November 14, 2026. It used Open WebUI 0.13.3, image `ghcr.io/open-webui/open-webui:main` built November 8, and server commit `be38e0b`. The no-auth MCP connection worked. A typed request and a simulated microphone recording called `search_products`; the search view rendered after a build. ElevenLabs read the reply. The approval link was not tested because offers were a stub.

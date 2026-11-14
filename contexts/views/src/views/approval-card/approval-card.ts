@@ -347,29 +347,25 @@ export class ApprovalCard extends LitElement {
     return "Needs your approval";
   }
 
+  /** v15: the order is named by its delivery day; the product moves into the facts. */
   private header(order: Order) {
     const first = order.lines[0]?.claims;
-    const single = order.lines.length === 1 && first !== undefined;
+    const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     const title = html`<div class="headline">
-      <h2 class="name">
-        ${single ? first.product.name : `Order of ${order.lines.length} products`}
-      </h2>
+      <h2 class="name">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</h2>
       <p>${money(order.total.net)}</p>
     </div>`;
     if (first === undefined) return brandHeader(this.eyebrow(order), title);
     const std = stdUnits(first);
     const pack = first.product.perSalesUnit;
-    const earliest =
-      order.lines.map((l) => l.claims.deliveryDate).toSorted()[0] ?? first.deliveryDate;
-    const facts = !single
-      ? html`${fact("Products", String(order.lines.length))} ${fact("Delivery", day(earliest))}`
-      : order.reasons.includes("SUBSTITUTION")
-        ? html`${fact("Quantity", amount(std))}
-          ${fact("Unit price", `${price(first.total.net / std.value)} / ${unit(std.unit)}`)}
-          ${fact("Delivery", day(first.deliveryDate))}`
-        : html`${fact("Quantity", amount(std))}
-          ${pack === null ? nothing : fact("Packs", `${number(first.quantity.value)} × ${amount(pack)}`)}
-          ${fact("Delivery", day(first.deliveryDate))}`;
+    const facts =
+      order.lines.length > 1
+        ? fact("Products", String(order.lines.length))
+        : order.reasons.includes("SUBSTITUTION")
+          ? html`${fact("Product", first.product.name)} ${fact("Quantity", amount(std))}
+            ${fact("Unit price", `${price(first.total.net / std.value)} / ${unit(std.unit)}`)}`
+          : html`${fact("Product", first.product.name)} ${fact("Quantity", amount(std))}
+            ${pack === null ? nothing : fact("Packs", `${number(first.quantity.value)} × ${amount(pack)}`)}`;
     return brandHeader(this.eyebrow(order), title, html`<dl class="facts">${facts}</dl>`);
   }
 

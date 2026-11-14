@@ -19,6 +19,8 @@ const CANDIDATES = [
   "466238",
   "462626",
   "464768",
+  "465147",
+  "471762",
 ];
 const BASE_URL = "https://junction26.valioaimo.fi";
 
@@ -36,12 +38,30 @@ type Price = {
 };
 type Product = {
   id: string;
+  salesUnit?: string;
   substitutions?: { substituteProduct: string }[];
   synkkaData?: {
     classifications?: { name?: string; values?: { id?: string }[] }[];
     unitConversions?: { synkkaPackagingType?: string; volume?: { unit: string; value: number } }[];
   };
 };
+
+const USAGE = "Usage: check-demo-data.ts --date YYYY-MM-DD [--ids id1,id2,...]";
+
+/** `--ids` replaces the shortlist for one exploratory run; without it the demo products are checked. */
+export function parseArgs(args: readonly string[]): { date: string; ids: readonly string[] } {
+  let date: string | undefined;
+  let ids: readonly string[] = CANDIDATES;
+  for (let index = 0; index < args.length; index += 2) {
+    const value = args[index + 1];
+    if (value === undefined) throw new Error(USAGE);
+    if (args[index] === "--date") date = value;
+    else if (args[index] === "--ids") ids = value.split(",").filter((id) => id !== "");
+    else throw new Error(USAGE);
+  }
+  if (date === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(USAGE);
+  return { date, ids };
+}
 
 export function validateCandidates(ids: readonly string[]) {
   if (ids.length === 0 || ids.length > 40) throw new Error("Expected 1 to 40 candidate ids");
@@ -65,6 +85,60 @@ export function mapRow(id: string, availability: Availability[], prices: Price[]
   };
 }
 
+type Row = ReturnType<typeof mapRow> & { volume: number | null; substitutes: string[] };
+
+/** The mock reports unlimited stock as 999999 (unconfirmed) or as a very large confirmed amount. */
+const UNLIMITED = 999999;
+const CREDIT_LIMIT_GROSS = 5000;
+
+/** A requested quantity in sales units: the sales unit itself, or litres through the consumer-unit volume. */
+export function salesUnits(
+  quantity: { value: number; unit: string },
+  row: Pick<Row, "volume">,
+  salesUnit: string | undefined,
+): number {
+  if (quantity.unit === salesUnit) return quantity.value;
+  if (quantity.unit === "LTR" && row.volume) return quantity.value / row.volume;
+  return Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Scenario 3 (#83): confirmed stock below the request, a gross total under the credit limit,
+ * and at least one listed substitute that is priced, deliverable by the date and not blocked.
+ */
+export function isShortWithSubstitute(input: {
+  row: Row;
+  units: number;
+  substitutes: readonly Row[];
+  date: string;
+}): boolean {
+  const { row, units, substitutes, date } = input;
+  const finite = row.stock === "confirmed" && row.amount !== null && row.amount < UNLIMITED;
+  const gross = row.gross === null ? null : units * row.gross;
+  const orderable = substitutes.some(
+    (s) =>
+      s.stock !== "unavailable" &&
+      s.gross !== null &&
+      s.date !== null &&
+      s.date.slice(0, 10) <= date,
+  );
+  return (
+    finite &&
+    row.amount !== null &&
+    Number.isFinite(units) &&
+    units > row.amount &&
+    gross !== null &&
+    gross < CREDIT_LIMIT_GROSS &&
+    row.substitutes.length > 0 &&
+    orderable
+  );
+}
+
+/** The late clip (#83): the first open schedule line is after the requested date. */
+export function isLate(row: Pick<Row, "date">, date: string): boolean {
+  return row.date !== null && row.date.slice(0, 10) > date;
+}
+
 const csv = async (path: string) =>
   new Map(
     (await Bun.file(path).text())
@@ -85,16 +159,8 @@ async function main() {
     return;
   }
   const apiKey: string = key;
-  const args = process.argv.slice(2);
-  const date = args[1];
-  if (
-    args.length !== 2 ||
-    args[0] !== "--date" ||
-    date === undefined ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(date)
-  )
-    throw new Error("Usage: check-demo-data.ts --date YYYY-MM-DD");
-  validateCandidates(CANDIDATES);
+  const { date, ids } = parseArgs(process.argv.slice(2));
+  validateCandidates(ids);
   const products: Product[] = await Bun.file("data/valio_aimo_junction26_product_data.json").json();
   const demoFile = Bun.file("data/demo-products.json");
   const demo = (await demoFile.exists()) ? DemoProductsSchema.parse(await demoFile.json()) : null;
@@ -111,7 +177,7 @@ async function main() {
         body: JSON.stringify({
           customer: "cust_invoice_01",
           requestedDate: date,
-          products: CANDIDATES,
+          products: ids,
         }),
       },
     );
@@ -120,7 +186,7 @@ async function main() {
   }
   const availability: { products: Availability[] } = await post("/api/availability");
   const prices: { products: Price[] } = await post("/api/price");
-  const rows = CANDIDATES.map((id) => {
+  const rows = ids.map((id) => {
     const product = products.find((item) => item.id === id);
     const lactose =
       product?.synkkaData?.classifications?.some(
@@ -161,6 +227,28 @@ async function main() {
         gross !== null &&
         (label === "S1" ? gross < 1000 : gross > 1000);
       console.log(`${label} ${ok ? "ok" : "not ok"}`);
+      if (!ok) process.exitCode = 1;
+    }
+    if (demo.s3) {
+      const s3 = demo.s3;
+      const product = products.find((item) => item.id === s3.productId);
+      const row = rows.find((r) => r.productId === s3.productId);
+      const ok =
+        row !== undefined &&
+        isShortWithSubstitute({
+          row,
+          units: salesUnits(s3.quantity, row, product?.salesUnit),
+          substitutes: rows.filter((r) => row.substitutes.includes(r.productId)),
+          date,
+        });
+      console.log(`S3 ${ok ? "ok" : "not ok"}`);
+      if (!ok) process.exitCode = 1;
+    }
+    if (demo.late) {
+      const late = demo.late;
+      const row = rows.find((r) => r.productId === late.productId);
+      const ok = row !== undefined && isLate(row, date);
+      console.log(`LATE ${ok ? "ok" : "not ok"}`);
       if (!ok) process.exitCode = 1;
     }
   }

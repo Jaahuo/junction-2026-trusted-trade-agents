@@ -1,0 +1,25 @@
+{
+  "mandate": {
+    "iss": "cust_fixture_revoked",
+    "mandateId": "mnd_fixture_revoked",
+    "version": 1,
+    "agent": "agent_fixture_buyer",
+    "signedBy": "acct_fixture_owner",
+    "limits": {
+      "maxOrderTotal": { "value": 1000, "currency": "EUR", "basis": "gross" },
+      "categories": null,
+      "substitutions": "ask",
+      "newProducts": "ask",
+      "minDeliveryReliability": null,
+      "maxCo2PerKg": null,
+      "allergenData": { "ifNoData": "ask" },
+      "paymentTerms": { "invoice": "auto", "pay_on_order": "ask" }
+    },
+    "standingConstraints": { "hard": [], "soft": [] },
+    "iat": 1794650400,
+    "exp": 4102444800
+  },
+  "jws": null,
+  "status": "revoked",
+  "registeredAt": "2026-11-14T10:00:00+00:00"
+}

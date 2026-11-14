@@ -1,4 +1,12 @@
-import type { AuditEvent, Mandate, OfferClaims, Order, SubstitutePair } from "@app/contract";
+import type {
+  AuditEvent,
+  Mandate,
+  OfferClaims,
+  OffersResult,
+  Order,
+  RequoteRequest,
+  SubstitutePair,
+} from "@app/contract";
 import type { Result } from "@app/kernel";
 import type { HistoryRow } from "../domain/evaluate.ts";
 
@@ -21,6 +29,13 @@ export interface MandatePort {
   current(agentId: string): Promise<Result<Mandate | null, "UPSTREAM_FAILED">>;
 }
 
+export interface RequotePort {
+  /** New signed offers for the tokens with the changes applied (SPEC-006 `requote`). */
+  requote(
+    request: RequoteRequest,
+  ): Promise<Result<OffersResult, "BAD_REQUEST" | "UPSTREAM_FAILED">>;
+}
+
 export interface PaymentPort {
   /** The pay-on-order step of placement. */
   authorize(order: StoredOrder): Promise<Result<void, "PAYMENT_FAILED">>;
@@ -36,8 +51,9 @@ export interface OrderTx {
   approvedWithPair(customer: string, pair: SubstitutePair): Promise<StoredOrder[]>;
   insert(order: StoredOrder): Promise<void>;
   /**
-   * Writes a decided order over the pending one it was read as. False when the stored order is no
-   * longer pending at `proposalVersion`, so only one decision wins.
+   * Writes the next state of a pending order (a decision, or the approver's next proposal) over the
+   * one read at `proposalVersion`. False when the stored order is no longer pending at
+   * `proposalVersion`, so only one write wins.
    */
   decide(order: StoredOrder, proposalVersion: number): Promise<boolean>;
   /** Gross total of the customer's placed invoice orders, EUR. */

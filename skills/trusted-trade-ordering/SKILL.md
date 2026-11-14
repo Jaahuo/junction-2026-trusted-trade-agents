@@ -1,6 +1,6 @@
 ---
 name: trusted-trade-ordering
-description: Use when you buy goods for a user from a wholesaler through the trusted-trade tools (search_products, get_offers, place_order). Covers the order flow, quantity units, approval, rejection and reason codes.
+description: Use when you buy goods for a user from a wholesaler through the trusted-trade tools (find_products, quote_offers, place_order; search_products and get_offers to show options). Covers the order flow, quantity units, approval, rejection and reason codes.
 ---
 
 # Trusted-trade ordering
@@ -11,12 +11,15 @@ The wholesaler's server checks every order against the buyer's mandate. This ski
 
 Do the steps in order. Each step ends when its output is in hand.
 
+When the user asks you to order, use the quiet tools `find_products` and `quote_offers`: they open no view, so the chat shows only the order. Use `search_products` and `get_offers` only when the user asks to see the products or compare offers; those open a view in the chat. Both pairs take the same input and return the same result.
+
 1. **Read the mandate.** Call `get_mandate`. Done when you know the limits in force: spend per order (EUR, gross), allowed categories, substitution policy, payment terms. A 404 means no mandate exists. Draft one with the user (see [Mandate](#mandate)), and stop until `get_mandate` shows it.
-2. **Search.** Call `search_products` with the user's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words). Done when you hold a shortlist of candidates.
+2. **Search.** Call `find_products` (or `search_products` when the user asks to see the products) with the user's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words). Done when you hold a shortlist of candidates.
    - Put a requirement the user cannot waive in `hard`. Supported: `{ attribute: <allergen or free-from claim>, is: "free_from" }`, for example `gluten`, `egg`, `lactose`, `peanut`, and `{ attribute: "vegan", is: "yes" }`. The tool input schema lists every attribute. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
    - Put a preference in `soft`. It only changes the ranking.
+   - If the search comes back empty, adjust the terms and call `find_products` again. Do not show an empty result to the user.
    - Read `match` on each candidate: `confirmed`, `contradicted` or `unknown`. Missing data is `unknown`, never `confirmed`. An `unknown` match sends the order to approval, unless the constraint is an allergen and the mandate allows missing allergen data (`allergenData.ifNoData: auto`). Vegan and the other free-from claims always go to approval when unknown.
-3. **Request offers.** Call `get_offers` for the shortlist only. Done when every candidate is an offer or is listed in `omitted` with a reason.
+3. **Request offers.** Call `quote_offers` (or `get_offers` when the user asks to compare offers) for the shortlist only. Done when every candidate is an offer or is listed in `omitted` with a reason.
    - Read `precheck` on each offer. It is guidance: `place_order` runs the checks again.
    - Read `claims.deliveryDate`, `claims.shortfall` and `claims.replaces`. A later date or a shortfall adds `AVAILABILITY_DIFFERS`. A substitute names the product it replaces.
 4. **Choose.** Among the offers that meet the user's need, prefer one whose `precheck.decision` is `auto`. When none is `auto`, take the best offer that meets the need: the human then decides. Done when you hold one offer token per line. Keep the unchosen offers: pass them as `alternatives`.
@@ -65,6 +68,6 @@ Pass `language` on every tool call that has it: the language the user writes in,
 
 ## Conduct
 
-Never reshape an order to get around a limit. Splitting an order, lowering a quantity, moving a date, swapping a product or changing payment terms to get under a limit all count as reshaping. Refuse it even when the user asks. Tell the user the limit and let the human approve instead.
+Never reshape an order to get around a limit. Splitting an order, lowering a quantity, moving a date, swapping a product or changing payment terms to get under a limit all count as reshaping. Refuse it even when the user asks. Tell the user the limit and let the human approve instead. If the user asks you to reduce a pending order, do not place a new order: tell them to use "Reduce to fit the limit" on the approval card, where they confirm the new amounts themselves.
 
 Choosing among offers that meet the user's need, before you place the order, is not reshaping. Request new offers when the decision says `alternatives` or a code in [reason-codes.md](reason-codes.md) says so. A changed order is a new request: it faces every check again.

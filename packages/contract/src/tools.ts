@@ -16,10 +16,12 @@ import {
 } from "./orders.ts";
 import { SearchRequestSchema, SearchResultSchema } from "./search.ts";
 
-/** The model sees these. */
+/** The model sees these. `find_products` and `quote_offers` are `search_products` and `get_offers` without a view (SPEC-012). */
 export const MODEL_TOOLS = [
   "search_products",
+  "find_products",
   "get_offers",
+  "quote_offers",
   "place_order",
   "get_order_status",
   "get_mandate",
@@ -32,7 +34,9 @@ export type ToolName = (typeof MODEL_TOOLS)[number] | (typeof VIEW_TOOLS)[number
 
 export const TOOL_INPUT = {
   search_products: SearchRequestSchema,
+  find_products: SearchRequestSchema,
   get_offers: OffersRequestSchema,
+  quote_offers: OffersRequestSchema,
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
@@ -45,7 +49,9 @@ export const TOOL_INPUT = {
 
 export const TOOL_OUTPUT = {
   search_products: SearchResultSchema,
+  find_products: SearchResultSchema,
   get_offers: OffersResultSchema,
+  quote_offers: OffersResultSchema,
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,

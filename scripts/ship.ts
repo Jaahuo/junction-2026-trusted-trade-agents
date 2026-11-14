@@ -22,7 +22,7 @@ import {
 
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
-  console.log(`Usage: bun scripts/ship.ts --risk ordinary|impact|lock-in [--review-file report.json] [--merge]
+  console.log(`Usage: bun scripts/ship.ts --risk ordinary|impact|lock-in [--review-file report.json] [--merge | --auto]
 Push the branch and create or update its PR. --review-file posts a durable
 independent agent report: JSON with head, taskOwnerAgent, reviewerAgent, method,
 findings and verdict ("approved"). The head must be the full current commit SHA.
@@ -36,10 +36,18 @@ Impact accepts an independent agent report or GitHub approval; lock-in requires
 independent human GitHub approval. Agent independence is a convention, not
 cryptographically verified or enforced by branch protection. Without strict
 branch protection, checks are client-side and main may move between the base
-check and merge; GitHub still checks the exact PR head during merge.`);
+check and merge; GitHub still checks the exact PR head during merge.
+--auto (ordinary only) returns at once and leaves a detached ship --merge that waits
+for the gate, merges with every check above and finishes the task; it prints the
+path of its log. The repository has no required checks, so GitHub auto-merge
+would merge before CI; --auto is the safe replacement.`);
   process.exit(0);
 }
 const risk = parseRisk(`Risk: ${option(args, "--risk") ?? ""}`);
+const auto = args.includes("--auto");
+if (auto && args.includes("--merge")) fail("Use --auto or --merge, not both.");
+if (auto && risk !== "ordinary")
+  fail("--auto merges ordinary PRs only; impact and lock-in keep their review and approval flow.");
 const deployWarningText = await latestDeployWarning();
 if (deployWarningText) console.error(deployWarningText);
 if ((await git("status", "--porcelain")).out) fail("Commit all changes before shipping.");
@@ -156,6 +164,27 @@ if (reviewFile) {
   );
 }
 console.log(`PR #${pr.number} updated at ${head}; risk: ${risk}.`);
+if (auto) {
+  const gitDir = await command("git", "rev-parse", "--absolute-git-dir");
+  const log = `${gitDir}/ship-auto-${branch.replaceAll(/[^\w.-]/g, "-")}.log`;
+  // nohup and a backgrounded shell detach the watcher, so it outlives this terminal.
+  const watcher = Bun.spawn(
+    [
+      "sh",
+      "-c",
+      'nohup bun "$1" --risk ordinary --merge > "$2" 2>&1 &',
+      "sh",
+      `${import.meta.dir}/ship.ts`,
+      log,
+    ],
+    { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+  );
+  if ((await watcher.exited) !== 0) fail("Could not start the auto-merge watcher.");
+  console.log(
+    `Auto-merge armed for PR #${pr.number}: it merges once the gate is green and finishes the task.\nLog: ${log}`,
+  );
+  process.exit(0);
+}
 if (!args.includes("--merge")) process.exit(0);
 
 async function waitForGate(sha: string): Promise<void> {
@@ -180,6 +209,22 @@ async function readPull() {
   }
 }
 
+/**
+ * A teammate's "Update branch" on GitHub pushes a merge of main onto the PR. Adopt that head when it
+ * only adds main on top of ours, keeping the PR's own change identical; anything else stops ship.
+ */
+async function adoptRemoteMerge(remote: string): Promise<boolean> {
+  await command("git", "fetch", "origin", "main", `refs/heads/${branch}`);
+  const descends = (await git("merge-base", "--is-ancestor", head, remote)).ok;
+  if (!descends) return false;
+  const main = await command("git", "rev-parse", "origin/main");
+  if (!(await equivalentHeads({ head: remote, main, reviewed: [head] })).length) return false;
+  await command("git", "merge", "--ff-only", remote);
+  head = remote;
+  console.log(`Adopted ${head.slice(0, 7)}: GitHub merged main into the branch.`);
+  return true;
+}
+
 let pull = await readPull();
 for (let attempt = 1; ; attempt++) {
   if (attempt > 6)
@@ -193,6 +238,7 @@ for (let attempt = 1; ; attempt++) {
   }
   await waitForGate(head);
   pull = await readPull();
+  if (pull.head.sha !== head && (await adoptRemoteMerge(pull.head.sha))) continue;
   if (pull.head.sha === head) {
     await command("git", "fetch", "origin", "main");
     if (risk === "ordinary") break;

@@ -173,7 +173,7 @@ const replayOrConflict = (
 const auditOf = (
   evaluation: Evaluation,
   byProduct: Map<string, ReasonCode[]>,
-  checked: Checked,
+  checked: Pick<Checked, "lines" | "mandate">,
   at: string,
 ): AuditEvent[] => {
   const standing: AuditEvent[] = checked.lines.flatMap(({ claims }) => {
@@ -340,3 +340,6 @@ export const findOrder = (
   principal: Principal,
   orderId: string,
 ): Promise<StoredOrder | null> => store.find(principal.customer, orderId);
+
+// Shared with approvals: edit and pick_alternative run these checks again (SPEC-011).
+export { auditOf, checkTokens, evaluateChecked, type Evaluated };

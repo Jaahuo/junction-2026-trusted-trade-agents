@@ -173,8 +173,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     void loadView(this.entry, this.source).then((state) => (this.state = state));
   }
 
-  /** Sends a decision; `thenApprove` approves the new offer an edit returns ("Save and order"). */
-  private async decide(order: Order, request: DecideApprovalRequest, thenApprove = false) {
+  private async decide(order: Order, request: DecideApprovalRequest) {
     if (this.source === null) return;
     this.busyId = order.orderId;
     const result = await callAction(
@@ -191,19 +190,13 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const state = this.state;
     if (state.kind === "done")
       this.state = { kind: "done", data: replace(state.data, result.data) };
-    const updated = result.data;
-    if (thenApprove && updated.status === "pending_approval")
-      await this.decide(updated, {
-        decision: "approve",
-        proposalVersion: updated.proposalVersion,
-      });
   }
 
-  /** Sends the card's message to the agent in the chat; the card then waits for the update. */
-  private async ask(order: Order, text: string) {
+  /** Sends the card's message to the agent in the chat; with `update` the card waits for it. */
+  private async ask(order: Order, text: string, update: boolean) {
     const message = this.source?.message;
     if (message === undefined) return;
-    this.updatingId = order.orderId;
+    if (update) this.updatingId = order.orderId;
     try {
       await message(text);
     } catch (cause) {
@@ -359,9 +352,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         ?busy=${this.busyId === open.orderId}
         ?can-ask=${this.source?.message !== undefined}
         @tt-decide=${(e: CustomEvent<DecideApprovalRequest>) => this.decide(open, e.detail)}
-        @tt-edit-and-order=${(e: CustomEvent<DecideApprovalRequest>) =>
-          this.decide(open, e.detail, true)}
-        @tt-ask-agent=${(e: CustomEvent<string>) => this.ask(open, e.detail)}
+        @tt-ask-agent=${(e: CustomEvent<string>) => this.ask(open, e.detail, true)}
+        @tt-talk=${(e: CustomEvent<string>) => this.ask(open, e.detail, false)}
       ></tt-approval-card>`;
   }
 }

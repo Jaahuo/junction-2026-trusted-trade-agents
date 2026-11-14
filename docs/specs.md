@@ -11,7 +11,7 @@ Host rule: every section uses only standard MCP, the MCP Apps extension and the 
 PRD: [Open contract and adapters](prd.md#open-contract-and-adapters).
 
 - `@app/contract` (root entry `packages/contract/src/index.ts`, browser-safe): types, zod schemas (`<Type>Schema`, the type is `z.infer` of it), constants, `ROUTES`, `VIEWS`, `TOOL_INPUT`, `TOOL_OUTPUT`, `REASON_TEXT`, `DEMO_ACCOUNT`, `fixtures`. It imports only `zod` and `@app/kernel`. Domain, application, infra, api and ui code may import it.
-- `@app/contract/server` (entry `packages/contract/src/server/index.ts`): helpers that need `jose` or the environment: `principalOf`, offer and mandate tokens, offer keys, `callRoute`. Server layers only (infra, api).
+- `@app/contract/server` (entry `packages/contract/src/server/index.ts`): helpers that need `jose` or the environment: `principalOf`, offer and mandate tokens, offer keys, order integrity, `callRoute`. Server layers only (infra, api).
 - Foundation: every context exists with its full route table of SPEC-003 as typed stubs. A stub validates its input with the route's schema, declares the 2xx response schema and the error envelope, and answers `501 NOT_IMPLEMENTED`. A context issue replaces its own stubs. So every peer call typechecks from the start.
 - Cross-context calls: an application port, implemented in infra with Eden ``treaty<Api>(`${selfBaseUrl()}/api`, { parseDate: false })`` from `import type { Api } from "@ctx/<peer>/api"`. `parseDate: false` is required on every Eden client: without it Eden turns ISO dates and `YYYY-MM-DD` strings into `Date` objects and the JSON contract breaks. Where the import would create a workspace cycle (orders calling offers), the infra adapter uses `callRoute(routeKey, input)`, which validates the request and the response with the route's schemas.
 - Base URLs (`@app/server-kit`): `selfBaseUrl()` = `INTERNAL_BASE_URL` or `http://127.0.0.1:$PORT`; `publicBaseUrl()` = `PUBLIC_BASE_URL` or `selfBaseUrl()`. A context may serve root routes through `ContextModule.root`, mounted after `/api` and before the web fallback.
@@ -506,6 +506,8 @@ export interface AuditEvent {
   rule?: string;
   reason?: ReasonCode;
   detail?: string;
+  hash?: string; // lowercase SHA-256 hex
+  previousHash?: string | null; // null at genesis
   productId?: string; // the product a check applies to, for a reason about one product
   integrityOk?: boolean; // false when the entry no longer matches its signature
 }
@@ -556,6 +558,8 @@ export interface Order {
   nextDeliveryDate: string | null;
   audit: AuditEvent[];
   createdAt: string;
+  receipt?: string;
+  auditAnchor?: { hash: string; count: number };
   purpose?: string; // what the order is for, written by the agent from the buyer's request
   offerSignature?: { state: "verified" | "expired" | "invalid"; validUntil: string };
   receiptSignature?: { state: "verified" | "pending" | "invalid"; signedAt: string | null };
@@ -583,6 +587,16 @@ export interface PrecheckRequest {
 - Placement operation `commitPlacement(orderId)`: every move to `placed` goes through it, from `place_order` and from approval. In one transaction with a per-customer lock: re-validate the offers (SPEC-006 `validate`, with its live-amount rule; until that route exists, skipped); invoice: remaining credit = principal's `creditLimit` − gross of placed invoice orders, total above it → `rejected CREDIT_LIMIT`; pay-on-order: a `PaymentPort` step, `awaiting_payment`, then simulated authorization that fails above `paymentFailAbove` → `rejected PAYMENT_FAILED`, else `payment_authorized`; then `placed`. Each step writes its audit event in the same transaction.
 - First build: only invoice terms reach `commitPlacement` (SPEC-002); the `PaymentPort` adapter for pay-on-order arrives with the second account.
 - Order, lines and audit are written in one transaction. `order_refused` records have no order id and appear in no `Order.audit`.
+
+Order integrity: each new audit event contains `previousHash` and `hash`. The genesis predecessor is null. The hash is SHA-256 over recursively key-sorted JSON containing `scope`, zero-based `index`, `previousHash`, and `event`. The event contains every event property except `hash` and `previousHash`. Non-JSON values are invalid. The order scope is `order:${orderId}`; refusal records use `refusals:${customer}`. The shared hash code has no event field allowlist. Issue #125 can add rule or value properties to `AuditEventSchema`; the hash will include them automatically.
+
+`auditAnchor` records the chain head and event count. An unsigned stored anchor detects audit-only modification, not a change to both the audit and its anchor. A placed order also has a durable ES256 `receipt+jwt`, signed with the offer key and verifiable with the published JWKS. The receipt signs the final selected lines, offer IDs, customer, agent, account, mandate, payment terms, total, decision, creation and placement times, status, and audit anchor. It has no expiry. Verification checks the signature, the complete signed projection, and every audit event, including the signed prefix. Signing must succeed before placement history is written: returning `Result.err` does not roll back prior writes.
+
+Each customer has a separate unsigned refusal anchor with the chain head and event count. Before appending a refusal, the store verifies the complete chain against this anchor. Missing or truncated rows fail verification. Existing refusal rows without an anchor are rejected as legacy data; they are not silently rechained. The refusal and its anchor update are written in the same transaction. An attacker who can change both the rows and the unsigned anchor remains outside this protection without an external signed anchor.
+
+The integrity fields are optional in the schemas so old fixtures still parse. Verification does not accept an unsigned legacy order as verified, and decisions must fail for an unchained legacy order rather than silently rechain it. Orders API and UI, MCP tools, approval and timeline views, the view harness, discovery OpenAPI, and demo scripts consume the shared schemas.
+
+The browser-safe entry exports `OrderReceiptClaimsSchema` and `OrderReceiptClaims`. The server entry exports `appendAudit`, `verifyAuditChain`, `signOrderReceipt`, `verifyOrderReceipt`, and `verifyOrderIntegrity`. Append and chain verification return `AUDIT_INVALID` on invalid input. Receipt signing returns `UPSTREAM_FAILED` on failure. Receipt verification returns `RECEIPT_INVALID`; order integrity verification can also return `AUDIT_INVALID`.
 
 Failure paths: `validate` unreachable → 502 `UPSTREAM_FAILED`; on `place_order` no order is stored, on approval the order stays pending.
 

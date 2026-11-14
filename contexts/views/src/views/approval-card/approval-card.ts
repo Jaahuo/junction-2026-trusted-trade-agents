@@ -23,6 +23,7 @@ import { intlLocale, LocaleController, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import {
   allergenChips,
+  allergenName,
   allergenText,
   brokenRule,
   seal,
@@ -855,7 +856,10 @@ export class ApprovalCard extends LitElement {
               where: c.product.name,
               target: lineId(c),
               reason: allergenText(a),
-              action: a.status === "error" ? brokenRule(a) : text.checkAllergenRule(a.allergen),
+              action:
+                a.status === "error"
+                  ? brokenRule(a)
+                  : text.checkAllergenRule(allergenName(a.allergen)),
             })),
     );
   }

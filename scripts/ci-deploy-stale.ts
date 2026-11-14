@@ -20,14 +20,30 @@ export const laterRuns = (runs: unknown, own: number): number[] | undefined => {
   return decoded.filter((run) => run.number > own).map((run) => run.id);
 };
 
-/** Whether any attempt of a run has a deploy job that is queued, running or successful. */
+const DEPLOY_STEP = "Deploy verified digest";
+
+/**
+ * Whether any attempt of a run may have changed the host. Only a deploy job that completed with
+ * its deploy step skipped or absent proves it did not; a full page may hide an attempt, so it counts.
+ */
 export const reachedDeploy = (jobs: unknown): boolean => {
   if (!Array.isArray(jobs)) throw new Error("Invalid workflow job list");
+  if (jobs.length >= 100) return true;
   return jobs.some((job: unknown) => {
     if (!job || typeof job !== "object" || !("name" in job) || !("status" in job))
       throw new Error("Invalid workflow job");
     if (job.name !== "deploy") return false;
-    return job.status !== "completed" || ("conclusion" in job && job.conclusion === "success");
+    if (job.status !== "completed") return true;
+    const steps: unknown = "steps" in job ? job.steps : undefined;
+    if (!Array.isArray(steps)) return false;
+    return steps.some(
+      (step: unknown) =>
+        step !== null &&
+        typeof step === "object" &&
+        "name" in step &&
+        step.name === DEPLOY_STEP &&
+        !("conclusion" in step && step.conclusion === "skipped"),
+    );
   });
 };
 

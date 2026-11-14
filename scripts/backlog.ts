@@ -142,9 +142,12 @@ function active(issue: BacklogIssue, board: Board): boolean {
 }
 
 /** Why an agent cannot take the issue now and finish it start to end; empty when it can. */
-export function blockers(issue: BacklogIssue, board: Board): string[] {
+export function blockers(issue: BacklogIssue, board: Board, claimant?: string): string[] {
   const reasons: string[] = [];
-  if (issue.assignees.length > 0) reasons.push(`assigned to ${issue.assignees.join(", ")}`);
+  const otherAssignees = issue.assignees.filter(
+    (login) => claimant === undefined || login.toLowerCase() !== claimant.toLowerCase(),
+  );
+  if (otherAssignees.length > 0) reasons.push(`assigned to ${otherAssignees.join(", ")}`);
   if (issue.status !== null && issue.status !== "Todo") reasons.push(`board ${issue.status}`);
   if (board.claimed.has(issue.number)) reasons.push(`claimed: task/${issue.number} exists`);
   const pr = prFor(board, issue.number);
@@ -371,7 +374,7 @@ async function claim(number: number, args: string[]) {
   ]);
   const issue = board.open.find((entry) => entry.number === number);
   if (!issue) fail(`#${number} is not an open issue.`);
-  const reasons = blockers(issue, board);
+  const reasons = blockers(issue, board, user.login);
   if (reasons.length) {
     console.error(`#${number} is not ready: ${reasons.join("; ")}`);
     process.exit(TAKEN_EXIT);

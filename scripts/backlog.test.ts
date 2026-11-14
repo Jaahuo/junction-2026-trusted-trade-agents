@@ -139,6 +139,24 @@ describe("blockers", () => {
     ]);
   });
 
+  test("an explicit claim accepts only its own assignee, without exposing it in the pool", () => {
+    const mine = issue(1, { assignees: ["Jaahuo"] });
+    expect(blockers(mine, board([mine]), "jaahuo")).toEqual([]);
+    expect(plan(board([mine])).ready).toEqual([]);
+    const shared = issue(1, { assignees: ["Jaahuo", "someone"] });
+    expect(blockers(shared, board([shared]), "Jaahuo")).toEqual(["assigned to someone"]);
+    expect(blockers(mine, board([mine]), "someone")).toEqual(["assigned to Jaahuo"]);
+  });
+
+  test("a self-assigned claim still respects reservations and overlapping owners", () => {
+    const mine = issue(1, { assignees: ["Jaahuo"] });
+    const other = issue(2, { assignees: ["someone"] });
+    expect(blockers(mine, board([mine, other], { claimed: new Set([1]) }), "Jaahuo")).toEqual([
+      "claimed: task/1 exists",
+      "owned paths overlap active #2",
+    ]);
+  });
+
   test("owned paths that overlap an active issue block; a Done or idle issue does not", () => {
     const mine = issue(1, { body: body("`contexts/offers/src/domain`") });
     const active = issue(2, { assignees: ["someone"] });

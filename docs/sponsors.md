@@ -1,5 +1,7 @@
 # Sponsor integrations
 
+This page is guidance from before the build. [Implementation and partner technologies](implementation.md#partner-technologies) says what the project uses.
+
 Start with a product problem and a demonstrable user benefit, not a sponsor count. The [Junction prize listing](https://www.mlh.com/events/junction-40/prizes) names the categories; check current event rules, challenge requirements, deadlines and submission terms. A listing or an integration does not guarantee eligibility, credit or a prize. Keep evidence of what was actually built and exercised, with links to the relevant PR, demo and configuration. Never put credentials or private user data in that evidence.
 
 | Sponsor    | Useful product direction                                                                        | Boundary and first reference                                                                                                                                 |
@@ -8,7 +10,7 @@ Start with a product problem and a demonstrable user benefit, not a sponsor coun
 | Vultr      | Host a selected app when local hosting is no longer sufficient.                                 | Check [partner credit eligibility and terms](https://www.mlh.com/partners/vultr). A person approves each plan, cost and cleanup before provisioning.         |
 | Tiger Data | Managed PostgreSQL when a selected product needs it; time-series features only for a real need. | Evaluate [Tiger Cloud quickstart](https://www.tigerdata.com/docs/get-started/quickstart/quickstart-5-minutes); no hosted database is provisioned by default. |
 | Solana     | A product feature that genuinely requires a chain transaction.                                  | Start with [Devnet](https://solana.com/docs/intro/quick-start) and explicit signing. No wallet, funding or real-money action by default.                     |
-| ElevenLabs | Speech output, for example with a library voice, when it improves the experience.               | Follow the [API quickstart](https://elevenlabs.io/docs/eleven-api/quickstart). No recording, cloning or conversational agent by default.                     |
+| ElevenLabs | Speech output with a premade voice; free plans cannot use library voices (HTTP 402).            | Follow the [API quickstart](https://elevenlabs.io/docs/eleven-api/quickstart). No recording, cloning or conversational agent by default.                     |
 
 Install provider SDKs only for the selected feature. Use application ports and infrastructure adapters, test with fakes, and keep secrets out of Git. A person approves each cloud plan, including access, spending, data location and teardown. Do not provision cloud resources or shared credentials without approval.
 

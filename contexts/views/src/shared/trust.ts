@@ -7,7 +7,7 @@ import checkCircle from "./icons/check-circle.svg?raw";
 import clockCircle from "./icons/clock-circle.svg?raw";
 import warning16 from "./icons/warning-16.svg?raw";
 import xCircle from "./icons/x-circle.svg?raw";
-import { pick } from "./locale.ts";
+import { lang, pick } from "./locale.ts";
 
 // Trust and rationale parts (#74): allergen chips, the signature seal and the status disc of
 // the order log. Figma: Junction 2026 › Components › "Allergen chip", "Signature seal".
@@ -28,12 +28,46 @@ const TEXT = {
   },
 };
 
+/**
+ * Finnish allergen names in the partitive, which follows every relation ("Sisältää kananmunaa",
+ * "ei laktoosia"): the EU's 14 allergens and lactose, under the English names the server sends.
+ */
+const FI_ALLERGENS: Record<string, string> = {
+  gluten: "gluteenia",
+  crustaceans: "äyriäisiä",
+  egg: "kananmunaa",
+  eggs: "kananmunaa",
+  fish: "kalaa",
+  peanut: "maapähkinää",
+  peanuts: "maapähkinää",
+  soy: "soijaa",
+  soya: "soijaa",
+  soybeans: "soijaa",
+  milk: "maitoa",
+  lactose: "laktoosia",
+  nuts: "pähkinöitä",
+  tree_nuts: "pähkinöitä",
+  celery: "selleriä",
+  mustard: "sinappia",
+  sesame: "seesaminsiemeniä",
+  sulphites: "sulfiitteja",
+  sulfites: "sulfiitteja",
+  lupin: "lupiinia",
+  molluscs: "nilviäisiä",
+};
+/** The allergen in the view's language; an allergen without a Finnish name keeps the server's word. */
+export const allergenName = (allergen: string) =>
+  pick({ en: undefined, fi: FI_ALLERGENS[allergen.toLowerCase()] }) ?? allergen;
+
 /** "Contains egg": the chip's phrase. */
-export const allergenText = (a: LineAllergen) => `${pick(TEXT).relation[a.type]} ${a.allergen}`;
+export const allergenText = (a: LineAllergen) =>
+  `${pick(TEXT).relation[a.type]} ${allergenName(a.allergen)}`;
 /** "Breaks your rule: no egg": the action of a broken rule's to-do. */
 export const brokenRule = (a: LineAllergen) => {
   const text = pick(TEXT);
-  return text.brokenRule(a.rule ?? text.noAllergen(a.allergen));
+  // The server writes its rule in English, so another language names the allergen itself.
+  const rule = lang() === "en" ? a.rule : undefined;
+  return text.brokenRule(rule ?? text.noAllergen(allergenName(a.allergen)));
 };
 
 /** Breaks a rule, then a trace risk, then meets a free-from rule, then information only. */

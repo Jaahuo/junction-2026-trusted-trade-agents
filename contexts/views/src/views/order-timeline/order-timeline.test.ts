@@ -75,6 +75,34 @@ test("audit events expose shared actors, UTC time and readable reason", async ()
     if (event.rule) expect(output).not.toContain(event.rule);
   }
 });
+
+test("audit event shows a reason only once when its detail repeats it", async () => {
+  const order = OrderSchema.parse(await fixture("pending"));
+  const event = order.audit.find((entry) => entry.reason === "NEW_PRODUCT");
+  if (!event) throw new Error("Pending fixture must include a new product audit event");
+  const reason = "The product has not been ordered before.";
+  const withDetail = OrderSchema.parse({
+    ...order,
+    audit: [{ ...event, detail: reason }],
+  });
+  const output = visible(renderOrderTimeline(withDetail));
+  expect(output.split(reason).length - 1).toBe(1);
+});
+
+test("audit event shows distinct reason and detail once each", async () => {
+  const order = OrderSchema.parse(await fixture("pending"));
+  const event = order.audit.find((entry) => entry.reason === "NEW_PRODUCT");
+  if (!event) throw new Error("Pending fixture must include a new product audit event");
+  const reason = "The product has not been ordered before.";
+  const detail = "Review this product with the customer.";
+  const withDetail = OrderSchema.parse({
+    ...order,
+    audit: [{ ...event, detail }],
+  });
+  const output = visible(renderOrderTimeline(withDetail));
+  expect(output.split(reason).length - 1).toBe(1);
+  expect(output.split(detail).length - 1).toBe(1);
+});
 test("declined decisions show the chosen next step and note", async () => {
   const order = OrderSchema.parse(await fixture("declined"));
   const stop = visible(renderOrderTimeline(order));

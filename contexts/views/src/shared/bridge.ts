@@ -9,6 +9,7 @@ import {
   type ToolName,
   VIEWS,
 } from "@app/contract";
+import { pick } from "./locale.ts";
 import { HARNESS_MANDATE, harnessDecide } from "./harness-decide.ts";
 
 /** The orders in a loaded tool result: a pending list or one order. */
@@ -233,7 +234,13 @@ export function parseResult<E extends ViewEntry>(
   value: unknown,
 ): ViewState<EntryData<E>> {
   const data = parse<E["tools"][number]>(entry.tools, value);
-  if (data === null) return error("The tool result does not match the contract.");
+  if (data === null)
+    return error(
+      pick({
+        en: "The tool result does not match the contract.",
+        fi: "Työkalun tulos ei ole sovitussa muodossa.",
+      }),
+    );
   return isEmpty(data) ? { kind: "empty" } : { kind: "done", data };
 }
 

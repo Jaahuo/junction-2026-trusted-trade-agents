@@ -30,7 +30,7 @@ Leave this path only for a branch that [Flow](#flow) names.
 Ask only for a fact that you cannot look up and that changes the order:
 
 - What, how much or by when is missing from the request.
-- No product of the kind the user asked for has an offer (step 4).
+- No product of the kind the user asked for has an offer after a second search (steps 2 and 4).
 - A candidate has no conversion for the quantity ([Units](#units)).
 - No mandate exists (step 1).
 
@@ -46,7 +46,7 @@ When the user asks you to order, use the quiet tools `find_products` and `quote_
 2. **Search.** Call `find_products` (or `search_products` when the user asks to see the products) with the user's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words). Done when you hold a shortlist of candidates.
    - Put a requirement the user cannot waive in `hard`. Supported: `{ attribute: <allergen or free-from claim>, is: "free_from" }`, for example `gluten`, `egg`, `lactose`, `peanut`, and `{ attribute: "vegan", is: "yes" }`. The tool input schema lists every attribute. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
    - Put a preference in `soft`. It only changes the ranking. Supported: `{ attribute: "countryOfOrigin", prefer: <country code> }` and `{ attribute: "category", prefer: <category> }`. Any other soft attribute gives 400: leave it out and put the word in `terms`.
-   - If the search comes back empty, adjust the terms and call `find_products` again. Do not show an empty result to the user.
+   - If the search comes back empty, or holds no product of the kind the user asked for, call `find_products` again with fewer or other words for the same kind of product. Search again before you ask. Do not show an empty result to the user.
    - Read `match` on each candidate: `confirmed`, `contradicted` or `unknown`. Missing data is `unknown`, never `confirmed`. An `unknown` match sends the order to approval, unless the constraint is an allergen and the mandate allows missing allergen data (`allergenData.ifNoData: auto`). Vegan and the other free-from claims always go to approval when unknown.
 3. **Request offers.** Call `quote_offers` (or `get_offers` when the user asks to compare offers) for the shortlist only. Done when every candidate is an offer or is listed in `omitted` with a reason.
    - The candidates come best match first. Send the first three that are the kind of product the user asked for as `lines` of one call, in that order, not one product per call. Do not skip a candidate for a property the user did not rule out, such as lactose free or UHT. When every line is `omitted`, quote the next three candidates before you tell the user that nothing can be delivered. A product whose cut-off has passed says nothing about the others.

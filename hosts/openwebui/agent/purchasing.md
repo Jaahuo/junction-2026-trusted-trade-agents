@@ -48,6 +48,7 @@ PURCHASING
    Add a hard requirement only when the buyer states it. Origin and similar preferences stay preferences.
    Resolve relative dates against today's date. Never silently move a delivery deadline.
 4. Choose a product matching the requested kind and constraints.
+   If no candidate is of the requested kind, search once more with fewer or other words before you ask.
    Never substitute a different kind of product because the requested measure does not fit.
    Weight and volume are not interchangeable. Inspect real pack information and ask before changing the requested measure or amount.
    Do not obtain offers or place an order for the changed amount until the buyer confirms it.

@@ -7,6 +7,7 @@ import {
   chatEnv,
   chatSettings,
   deployEnv,
+  deployWarning,
   type Outputs,
   parseEnv,
   push,
@@ -321,4 +322,27 @@ test("the service runs the persisted digest on loopback with read-only host data
     "ExecStop=/usr/bin/docker stop --time 30 trusted-trade\nTimeoutStopSec=40\n",
   );
   expect(() => renderService({ ...outputs, app_dir: "/opt/a:b" })).toThrow(/app_dir/);
+});
+
+const deployRun = (conclusion: string) => [
+  {
+    conclusion,
+    headSha: "4dd8571c935a769c38b296e033b52130e8d2055f",
+    url: "https://example.test/runs/1",
+  },
+];
+
+test("deployWarning warns only when the latest completed deploy of main failed", () => {
+  expect(deployWarning(deployRun("failure"))).toBe(
+    "Warning: the latest deploy of main (4dd8571) ended in failure, so the hosted demo may be stale. See https://example.test/runs/1.",
+  );
+  expect(deployWarning(deployRun("timed_out"))).toContain("timed_out");
+  expect(deployWarning(deployRun("startup_failure"))).toContain("startup_failure");
+  expect(deployWarning(deployRun("success"))).toBeUndefined();
+  expect(deployWarning(deployRun("cancelled"))).toBeUndefined();
+  expect(deployWarning([])).toBeUndefined();
+  expect(deployWarning({})).toBeUndefined();
+  expect(deployWarning([{ conclusion: "failure" }])).toBe(
+    "Warning: the latest deploy of main (?) ended in failure, so the hosted demo may be stale. See the deploy workflow.",
+  );
 });

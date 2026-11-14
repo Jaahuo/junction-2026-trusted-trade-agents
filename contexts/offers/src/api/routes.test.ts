@@ -1,0 +1,185 @@
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
+import {
+  DEMO_ACCOUNT,
+  ErrorEnvelopeSchema,
+  OffersResultSchema,
+  type OffersRequest,
+} from "@app/contract";
+import type { OfferSigningKey } from "@app/contract/server";
+import { err } from "@app/kernel";
+import { closeDb, openDb } from "@app/server-kit";
+import type { AnyElysia } from "elysia";
+import {
+  fakeAvailability,
+  fakeOffersDeps,
+  fakePrice,
+  fakeProduct,
+  type FakeOffers,
+} from "../application/fakes.ts";
+import { envOfferSigner } from "../infra/offer-signer.ts";
+import { context } from "./index.ts";
+import { createApi, createRoot } from "./routes.ts";
+
+// Invented products only (team rules R-23).
+const OAT = "prod_test_oat";
+
+const request = (patch: Record<string, unknown> = {}): OffersRequest & Record<string, unknown> => ({
+  lines: [{ productId: OAT, quantity: { value: 4, unit: "CT" } }],
+  deliverBy: "2026-11-20",
+  paymentTerms: DEMO_ACCOUNT.paymentTerms,
+  hard: [],
+  soft: [],
+  ...patch,
+});
+
+const offers = (): FakeOffers =>
+  fakeOffersDeps({
+    products: [fakeProduct(OAT)],
+    live: {
+      [OAT]: { availability: { "*": fakeAvailability(OAT) }, prices: { "*": fakePrice(OAT) } },
+    },
+  });
+
+const post = (app: AnyElysia, body: object) =>
+  app.handle(
+    new Request("http://localhost/offers", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+
+const errorOf = async (response: Response) => ({
+  status: response.status,
+  body: ErrorEnvelopeSchema.parse(await response.json()),
+});
+
+const makeKey = async (): Promise<OfferSigningKey> => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ]);
+  return {
+    kid: "test-kid",
+    privateKey: pair.privateKey,
+    publicJwk: await crypto.subtle.exportKey("jwk", pair.publicKey),
+  };
+};
+
+describe("POST /offers", () => {
+  test("paymentTerms other than the principal's gives 400", async () => {
+    const fake = offers();
+    const response = await post(createApi(fake.deps), request({ paymentTerms: "pay_on_order" }));
+    const { status, body } = await errorOf(response);
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(fake.live.calls).toEqual([]);
+  });
+
+  test("upstream failure gives 502", async () => {
+    const failingLive = offers();
+    failingLive.live.failWith(true);
+    const failingCatalog = offers();
+    failingCatalog.catalog.fail(true);
+    for (const fake of [failingLive, failingCatalog]) {
+      const { status, body } = await errorOf(await post(createApi(fake.deps), request()));
+      expect(status).toBe(502);
+      expect(body.error.code).toBe("UPSTREAM_FAILED");
+    }
+  });
+
+  test("a body field customer gives 400", async () => {
+    const fake = offers();
+    const response = await post(createApi(fake.deps), request({ customer: DEMO_ACCOUNT.customer }));
+    const { status, body } = await errorOf(response);
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("customer");
+    expect(fake.catalog.requests).toEqual([]);
+  });
+
+  test("an unsupported hard constraint gives 400", async () => {
+    const fake = offers();
+    const response = await post(
+      createApi(fake.deps),
+      request({ hard: [{ attribute: "gluten", is: "free_from" }] }),
+    );
+    const { status, body } = await errorOf(response);
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(fake.catalog.requests).toEqual([]);
+  });
+
+  test("a 200 body parses with OffersResultSchema and precheck is null when orders fails", async () => {
+    const fake = offers();
+    fake.orders.answerWith(err("UNAVAILABLE"));
+    const response = await post(createApi(fake.deps), request());
+    expect(response.status).toBe(200);
+    const result = OffersResultSchema.parse(await response.json());
+    expect(result.offers).toHaveLength(1);
+    expect(result.offers.map((offer) => offer.precheck)).toEqual([null]);
+    expect(fake.orders.calls).toHaveLength(1);
+  });
+
+  test("requote and validate still answer 501 NOT_IMPLEMENTED", async () => {
+    const app = createApi(offers().deps);
+    for (const path of ["requote", "validate"]) {
+      const response = await app.handle(
+        new Request(`http://localhost/offers/${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ tokens: ["a.b.c"] }),
+        }),
+      );
+      const { status, body } = await errorOf(response);
+      expect({ path, status, code: body.error.code }).toEqual({
+        path,
+        status: 501,
+        code: "NOT_IMPLEMENTED",
+      });
+    }
+  });
+});
+
+test("GET /.well-known/jwks.json returns the public key only", async () => {
+  const key = await makeKey();
+  const deps = { ...offers().deps, signer: envOfferSigner(async () => key) };
+  const response = await createRoot(deps).handle(
+    new Request("http://localhost/.well-known/jwks.json"),
+  );
+  expect(response.status).toBe(200);
+  const body: unknown = await response.json();
+  expect(body).toEqual({
+    keys: [
+      {
+        kty: "EC",
+        crv: "P-256",
+        x: key.publicJwk.x,
+        y: key.publicJwk.y,
+        kid: "test-kid",
+        alg: "ES256",
+        use: "sig",
+      },
+    ],
+  });
+});
+
+describe("context wiring", () => {
+  const db = openDb("postgres://127.0.0.1:1/unused");
+  afterAll(async () => {
+    await closeDb(db);
+  });
+
+  test("building context.api and context.root does not throw and calls no peer", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch");
+    try {
+      expect(context.root).toBeDefined();
+      expect(() => context.api(db)).not.toThrow();
+      expect(() => context.root?.(db)).not.toThrow();
+      await Bun.sleep(0);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});

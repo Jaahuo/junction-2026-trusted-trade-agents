@@ -31,6 +31,7 @@ const inputs: { [K in RouteKey]: RouteInput<K> } = {
   account: {},
   openapi: {},
 };
+const implemented = new Set<RouteKey>(["offers"]);
 
 // The stub contexts have no migrations, so the database is never contacted.
 const db = openDb("postgres://127.0.0.1:1/unused");
@@ -64,8 +65,9 @@ const inProcessFetch = Object.assign(
   { preconnect: fetch.preconnect },
 );
 
-test("every ROUTES entry answers 501 NOT_IMPLEMENTED with the error envelope, except GET /api/accounts/current, which returns DEMO_ACCOUNT", async () => {
+test("every ROUTES entry except the implemented routes answers 501 NOT_IMPLEMENTED with the error envelope, and GET /api/accounts/current returns DEMO_ACCOUNT", async () => {
   for (const route of ROUTES) {
+    if (implemented.has(route.key)) continue;
     const response = await app.handle(toRequest(route, inputs[route.key]));
     const body: unknown = await response.json();
     if (route.key === "account") {

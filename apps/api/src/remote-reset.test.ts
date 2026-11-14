@@ -17,14 +17,27 @@ const withDatabase = async (run: (db: Db) => Promise<void>): Promise<void> => {
   if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.search !== "")
     throw new Error("TEST_DATABASE_URL must use a local PostgreSQL server");
   const name = `test_remote_reset_${crypto.randomUUID().replaceAll("-", "")}`;
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ]);
+  const jwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
   const admin = new SQL(value);
   try {
     await admin.unsafe(`CREATE DATABASE "${name}"`);
     url.pathname = `/${name}`;
     const db = openDb(url.toString());
+    const previousJwk = process.env["OFFER_SIGNING_JWK"];
+    const previousKid = process.env["OFFER_SIGNING_KID"];
+    process.env["OFFER_SIGNING_JWK"] = JSON.stringify({ ...jwk, alg: "ES256" });
+    process.env["OFFER_SIGNING_KID"] = "remote-reset-test";
     try {
       await run(db);
     } finally {
+      if (previousJwk === undefined) delete process.env["OFFER_SIGNING_JWK"];
+      else process.env["OFFER_SIGNING_JWK"] = previousJwk;
+      if (previousKid === undefined) delete process.env["OFFER_SIGNING_KID"];
+      else process.env["OFFER_SIGNING_KID"] = previousKid;
       try {
         await closeDb(db);
       } finally {

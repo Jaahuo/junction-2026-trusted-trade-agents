@@ -8,7 +8,7 @@ import {
   verifyOfferToken,
   verifyOrderIntegrity,
 } from "@app/contract/server";
-import { type Db, mountContext } from "@app/server-kit";
+import { type Db, env, mountContext } from "@app/server-kit";
 import { context as mandatesContext, createApi as createMandatesApi } from "@ctx/mandates/api";
 import { mandateClient } from "../infra/mandate-client.ts";
 import { postgresOrderStore } from "../infra/order-store.ts";
@@ -17,8 +17,28 @@ import { context, createApi } from "./index.ts";
 import { seed, seedHistory } from "./seed.ts";
 import { withDatabase } from "./test-database.ts";
 
+const withSigningDatabase = async (run: (db: Db) => Promise<void>) => {
+  const jwk = env("OFFER_SIGNING_JWK");
+  const kid = env("OFFER_SIGNING_KID");
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ]);
+  const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+  try {
+    Bun.env["OFFER_SIGNING_JWK"] = JSON.stringify(privateJwk);
+    Bun.env["OFFER_SIGNING_KID"] = "seed-test";
+    await withDatabase(run);
+  } finally {
+    if (jwk === undefined) delete Bun.env["OFFER_SIGNING_JWK"];
+    else Bun.env["OFFER_SIGNING_JWK"] = jwk;
+    if (kid === undefined) delete Bun.env["OFFER_SIGNING_KID"];
+    else Bun.env["OFFER_SIGNING_KID"] = kid;
+  }
+};
+
 const withSeedDatabase = (run: (db: Db) => Promise<void>) =>
-  withDatabase(async (db) => {
+  withSigningDatabase(async (db) => {
     await mountContext(db, context);
     await run(db);
   });
@@ -97,7 +117,7 @@ test("with a scenario 3 substitute the seed adds two approvals of the pair and i
   }));
 
 test("the reset seed creates signed, current demo activity with intact audit chains", async () =>
-  withDatabase(async (db) => {
+  withSigningDatabase(async (db) => {
     await mountContext(db, mandatesContext);
     await mandatesContext.seed?.(db);
     await mountContext(db, context);
@@ -206,7 +226,7 @@ test("the reset seed creates signed, current demo activity with intact audit cha
   }));
 
 test("the reset seed keeps imported scenario history and approvals alongside demo activity", async () =>
-  withDatabase(async (db) => {
+  withSigningDatabase(async (db) => {
     await mountContext(db, mandatesContext);
     await mandatesContext.seed?.(db);
     await mountContext(db, context);

@@ -29,7 +29,7 @@ function App() {
   return (
     <div className="min-h-screen">
       <header className="bg-primary text-primary-foreground">
-        <nav className="mx-auto flex max-w-4xl items-center gap-1 whitespace-nowrap px-6 py-3">
+        <nav className="mx-auto flex max-w-4xl flex-wrap items-center gap-1 whitespace-nowrap px-6 py-3">
           <span className="mr-2 inline-flex p-2">
             <img src={brand.logo} alt={brand.name} width="56" height="19" />
           </span>

@@ -82,10 +82,11 @@ test("purpose, rationale and allergen chips show with the to-dos they add (#74)"
   expect(output).toContain(trust.purpose);
   expect(output).toContain("Your usual flour. Cheapest 20 kg sack that arrives Monday.");
   expect(output).toContain("Free from lactose");
-  // A trace risk adds a to-do; a broken rule adds a to-do and a box on its line.
+  // A trace risk and a broken rule each add a to-do; the line shows only the red chip.
   expect(output).toContain("May contain sesame");
   expect(output).toContain("Check it suits your sesame rule");
-  expect(output.match(/Breaks your rule: no egg/g)?.length).toBe(2);
+  expect(output.match(/Breaks your rule: no egg/g)?.length).toBe(1);
+  expect(output).toContain("Contains egg");
   // Confirm stays enabled: the server refuses a broken rule.
   expect(output).not.toMatch(/part="button approve"[^>]*disabled/);
 });

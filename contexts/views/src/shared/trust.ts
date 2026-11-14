@@ -30,7 +30,7 @@ const TEXT = {
 
 /** "Contains egg": the chip's phrase. */
 export const allergenText = (a: LineAllergen) => `${pick(TEXT).relation[a.type]} ${a.allergen}`;
-/** "Breaks your rule: no egg": the box on a line, and the action of its to-do. */
+/** "Breaks your rule: no egg": the action of a broken rule's to-do. */
 export const brokenRule = (a: LineAllergen) => {
   const text = pick(TEXT);
   return text.brokenRule(a.rule ?? text.noAllergen(a.allergen));

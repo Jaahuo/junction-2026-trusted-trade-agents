@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
 import { fail, git } from "./lib.ts";
+import { hasRuntime } from "./runtime.ts";
 import { parseWorktrees, worktreeCleanup } from "./workflow-policy.ts";
 
 async function run(cmd: string[], cwd: string, env = process.env): Promise<boolean> {
@@ -39,7 +39,7 @@ export async function cleanMergedWorktree(
   const keep = (reason: string) =>
     console.log(`Kept worktree ${worktree.path}: ${reason}. From ${mainPath}, run: ${rerun}`);
   if (!decision.remove) return keep(decision.reason);
-  if (await Bun.file(resolve(worktree.path, ".local/runtime.json")).exists()) {
+  if (await hasRuntime(worktree.path)) {
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([name]) => name !== "DATABASE_URL"),
     );

@@ -113,11 +113,11 @@ describe("merged worktree cleanup", () => {
   const porcelain = [
     "worktree /repo\nHEAD aaa\nbranch refs/heads/main",
     "worktree /repo.task-7\nHEAD bbb\nbranch refs/heads/task/7",
-    "worktree /repo.detached\nHEAD ccc\ndetached",
+    "worktree /repo.detached\nHEAD ccc\ndetached\nlocked in use",
   ].join("\n\n");
   const [main, task, detached] = parseWorktrees(`${porcelain}\n`);
   const input = (overrides: Partial<Parameters<typeof worktreeCleanup>[0]> = {}) => ({
-    worktree: task ?? { path: "", head: "", branch: null },
+    worktree: task ?? { path: "", head: "", branch: null, locked: false },
     mainPath: "/repo",
     callerPath: "/repo",
     dirty: false,
@@ -126,9 +126,9 @@ describe("merged worktree cleanup", () => {
   });
 
   test("parses worktree paths, heads and branches", () => {
-    expect(main).toEqual({ path: "/repo", head: "aaa", branch: "main" });
-    expect(task).toEqual({ path: "/repo.task-7", head: "bbb", branch: "task/7" });
-    expect(detached).toEqual({ path: "/repo.detached", head: "ccc", branch: null });
+    expect(main).toEqual({ path: "/repo", head: "aaa", branch: "main", locked: false });
+    expect(task).toEqual({ path: "/repo.task-7", head: "bbb", branch: "task/7", locked: false });
+    expect(detached).toEqual({ path: "/repo.detached", head: "ccc", branch: null, locked: true });
   });
 
   test("removes a clean worktree at the merged head", () => {
@@ -142,6 +142,11 @@ describe("merged worktree cleanup", () => {
   test("keeps the worktree the command runs in", () => {
     expect(worktreeCleanup(input({ callerPath: "/repo.task-7/scripts" })).remove).toBe(false);
     expect(worktreeCleanup(input({ callerPath: "/repo.task-70" })).remove).toBe(true);
+  });
+
+  test("keeps a locked worktree", () => {
+    const locked = { path: "/repo.task-7", head: "bbb", branch: "task/7", locked: true };
+    expect(worktreeCleanup(input({ worktree: locked })).remove).toBe(false);
   });
 
   test("keeps a worktree with uncommitted changes", () => {

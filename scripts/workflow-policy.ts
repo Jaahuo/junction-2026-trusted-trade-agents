@@ -112,7 +112,7 @@ export function requireMergeEvidence(input: {
     );
 }
 
-export type Worktree = { path: string; branch: string | null; head: string };
+export type Worktree = { path: string; branch: string | null; head: string; locked: boolean };
 
 export function parseWorktrees(porcelain: string): Worktree[] {
   return porcelain.split(/\n\s*\n/).flatMap((block) => {
@@ -125,7 +125,8 @@ export function parseWorktrees(porcelain: string): Worktree[] {
     const head = line("HEAD");
     if (!path || !head) return [];
     const ref = line("branch");
-    return [{ path, head, branch: ref?.replace(/^refs\/heads\//, "") ?? null }];
+    const locked = block.split("\n").some((entry) => /^locked( |$)/.test(entry));
+    return [{ path, head, locked, branch: ref?.replace(/^refs\/heads\//, "") ?? null }];
   });
 }
 
@@ -143,6 +144,7 @@ export function worktreeCleanup(input: {
     input.callerPath.startsWith(`${input.worktree.path}/`)
   )
     return { remove: false, reason: "this command runs inside it" };
+  if (input.worktree.locked) return { remove: false, reason: "it is locked" };
   if (input.dirty) return { remove: false, reason: "it has uncommitted changes" };
   if (input.worktree.head !== input.mergedHead)
     return { remove: false, reason: "its HEAD differs from the merged PR head" };

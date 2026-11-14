@@ -1,0 +1,26 @@
+{
+  "name": "@ctx/views",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api/index.ts"
+  },
+  "dependencies": {
+    "@app/contract": "workspace:*",
+    "@app/server-kit": "workspace:*",
+    "@app/ui": "workspace:*",
+    "@ctx/mandates": "workspace:*",
+    "@ctx/orders": "workspace:*",
+    "@elysia/eden": "catalog:",
+    "@modelcontextprotocol/ext-apps": "catalog:",
+    "elysia": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "tailwindcss": "catalog:",
+    "vite-plugin-singlefile": "catalog:"
+  }
+}

@@ -3,7 +3,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@app/contract": "workspace:*",
     "@app/server-kit": "workspace:*",
+    "@ctx/orders": "workspace:*",
+    "@elysia/eden": "catalog:",
     "drizzle-orm": "catalog:",
     "elysia": "catalog:"
   }

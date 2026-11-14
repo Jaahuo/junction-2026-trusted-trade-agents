@@ -302,6 +302,8 @@ Verification: a mapping test with a recorded response in the documented shape, i
 
 PRD: [Signed offer](prd.md#signed-offer), [Delivery later than requested](prd.md#delivery-later-than-requested), [Products that cannot be offered](prd.md#products-that-cannot-be-offered).
 
+Later hardening: `requote`, `validate` and the live-amount rule. This part is built in the later hardening issues and is reviewed again before that work starts.
+
 ```ts
 export interface OffersRequest { lines: { productId: string; quantity: Quantity /* sales unit */ }[]; deliverBy: string;
   paymentTerms: PaymentTerms; hard: HardConstraint[]; soft: SoftConstraint[] }
@@ -324,7 +326,8 @@ export interface OfferLine { offerId: string; token: string; claims: OfferClaims
 export interface OffersResult { offers: OfferLine[]; omitted: { productId: string; reason: OmitReason; detail: string }[] }
 export interface RequoteRequest { tokens: string[]; changes?: { productId: string; quantity?: Quantity; deliverBy?: string }[] }
 export interface ValidateRequest { tokens: string[] }
-export interface ValidateResult { results: ({ offerId: string; ok: true } | { offerId: string; ok: false; reason: "SALES_BLOCKED" | "NO_DELIVERY_DATE" | "CUTOFF_PASSED"; nextDeliveryDate: string | null })[] }
+export interface ValidateResult { results: ({ offerId: string; ok: true } | { offerId: string; ok: false; reason: "SALES_BLOCKED" | "NO_DELIVERY_DATE" | "CUTOFF_PASSED"; nextDeliveryDate: string | null })[];
+  products: { productId: string; liveAmount: Quantity | null /* sales units; null = stock unconfirmed */ }[] }
 // @app/contract/server
 export interface OfferSigningKey { kid: string; privateKey: CryptoKey; publicJwk: JsonWebKey }
 export type OfferKeySet = (kid: string) => Promise<CryptoKey | null>;
@@ -350,7 +353,8 @@ Steps of `get_offers`:
 - Totals: gross = (net × (1 + vatRate/100) + deposit) × quantity value, rounded to cents.
 - Keys: `OFFER_SIGNING_JWK` (private ES256 JWK) and `OFFER_SIGNING_KID`. With both set, a restart keeps every issued offer valid. When they are unset and `NODE_ENV` is not `production`, `offerSigningKeyFromEnv` generates a key for the process and logs one warning; in `production` it throws and the server does not start. `GET /.well-known/jwks.json` publishes the public key only.
 - `requote`: re-issues offers for the same product, quantity and date (or the given changes) of the given tokens, under the current mandate of the token's `agentId`.
-- `validate`: re-reads live availability of the tokens' products and reports a sales block, a lost date or a passed cut-off.
+- `validate`: re-reads live availability of the tokens' products with a fresh availability request (SPEC-005) and reports a sales block, a lost date or a passed cut-off. It also reports the live confirmed amount per product in `products[].liveAmount`, `null` when stock is unconfirmed.
+- Live-amount rule: when the live amount of a product is lower than the summed order quantity of that product (SPEC-009), the offers are stale. At `place_order` the request is refused with `409 STALE_OFFER` and the agent requests new offers (SPEC-009 R6). At approval the order goes through the re-quote path (SPEC-011).
 
 Failure paths: upstream down → 502 `UPSTREAM_FAILED`. A body field `customer` → 400. Verification: one test per step and per failure path.
 
@@ -413,14 +417,15 @@ export type Evaluate = (input: { claims: OfferClaims[]; mandate: Mandate | null;
 
 `NOT_AUTHENTICATED` is not produced in the first build. `OFFER_INVALID` is a refusal (400), never a stored reason; it stays in the list because the PRD names it.
 
-Precedence for `place_order` (one list; the first matching step R1-R5 ends the request):
+Precedence for `place_order` (one list; the first matching step R1-R6 ends the request):
 
 - R1. The body fails its schema, or holds 0 or more than 20 tokens → `400 BAD_REQUEST`. No record.
 - R2. The idempotency key is known: same tokens → `200` with the stored order; other tokens → `409 CONFLICT`.
 - R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token → `400 OFFER_INVALID`.
 - R4. Tokens differ in `customer` or `paymentTerms`, or the customer is not the principal's → `400 BAD_REQUEST`.
 - R5. A current mandate exists and a token's `agentId`, `mandateId` or `mandateVersion` differs from it → `409 STALE_OFFER` ("request new offers").
-- R3-R5 store no order and write one audit record `order_refused` with no order id and the code in `detail`.
+- R6. `validate` reports a live amount below the summed quantity of a product → `409 STALE_OFFER` (live-amount rule, SPEC-006).
+- R3-R6 store no order and write one audit record `order_refused` with no order id and the code in `detail`.
 
 Quantities: the quantities of lines for the same product are summed. Every quantity rule (`QUANTITY_UNUSUAL`, `UNCONFIRMED_STOCK`) and every limit applies to the sum per product and to the whole order.
 
@@ -439,6 +444,8 @@ Verification: one rule test per reason; a test that all reasons are listed; one 
 ## SPEC-010 Orders and placement
 
 PRD: [Order](prd.md#order), [Order states and exceptions](prd.md#order-states-and-exceptions).
+
+Later hardening: validation at placement (`validate` in `commitPlacement` and R6 of SPEC-009). This part is built in the later hardening issues and is reviewed again before that work starts.
 
 ```ts
 export const ORDER_STATUSES = [
@@ -507,6 +514,10 @@ export interface Order {
     by: string;
     at: string;
   } | null;
+  remember: {
+    operationId: string;
+    step: "mandate_registered" | "proposal_requoted" | "approved";
+  } | null;
   requotes: Requote[];
   nextDeliveryDate: string | null;
   audit: AuditEvent[];
@@ -530,7 +541,7 @@ export interface PrecheckRequest {
 - Idempotency: unique (customer, idempotencyKey). See SPEC-009 R2.
 - `approvalUrl` is computed when the order is read: `${publicBaseUrl()}/approvals/<orderId>` while pending, else null. It is not stored. It points to the approval page (SPEC-013), the one plain page with the approval actions.
 - Order history: a table owned by the orders context, with rows `{ productId, quantity /* sales units */, placedAt }`. A placed order adds one row per line. The demo seed adds rows directly; they are not orders and use no credit. `QUANTITY_UNUSUAL` compares sales units with the median of that product's rows; `NEW_PRODUCT` means the product has no row.
-- Placement operation `commitPlacement(orderId)`: every move to `placed` goes through it, from `place_order` and from approval. In one transaction with a per-customer lock: re-validate the offers (SPEC-006 `validate`; until that route exists, skipped); invoice: remaining credit = principal's `creditLimit` − gross of placed invoice orders, total above it → `rejected CREDIT_LIMIT`; pay-on-order: a `PaymentPort` step, `awaiting_payment`, then simulated authorization that fails above `paymentFailAbove` → `rejected PAYMENT_FAILED`, else `payment_authorized`; then `placed`. Each step writes its audit event in the same transaction.
+- Placement operation `commitPlacement(orderId)`: every move to `placed` goes through it, from `place_order` and from approval. In one transaction with a per-customer lock: re-validate the offers (SPEC-006 `validate`, with its live-amount rule; until that route exists, skipped); invoice: remaining credit = principal's `creditLimit` − gross of placed invoice orders, total above it → `rejected CREDIT_LIMIT`; pay-on-order: a `PaymentPort` step, `awaiting_payment`, then simulated authorization that fails above `paymentFailAbove` → `rejected PAYMENT_FAILED`, else `payment_authorized`; then `placed`. Each step writes its audit event in the same transaction.
 - First build: only invoice terms reach `commitPlacement` (SPEC-002); the `PaymentPort` adapter for pay-on-order arrives with the second account.
 - Order, lines and audit are written in one transaction. `order_refused` records have no order id and appear in no `Order.audit`.
 
@@ -542,6 +553,8 @@ Verification: parallel tests: 10 calls with one idempotency key; two orders that
 
 PRD: [Approval card](prd.md#approval-card), [Offer expires while the order waits](prd.md#offer-expires-while-the-order-waits).
 
+Later hardening: re-quote at approval, edit, pick_alternative and approve and remember. This part is built in the later hardening issues and is reviewed again before that work starts.
+
 ```ts
 export type DecideApprovalRequest = { proposalVersion: number } & (
   | { decision: "approve" }
@@ -552,11 +565,15 @@ export type DecideApprovalRequest = { proposalVersion: number } & (
 );
 ```
 
-- Only `pending_approval` orders accept a decision. `proposalVersion` must equal the order's; else 409 `CONFLICT`. Edit and re-quote increase it by 1. The update filters on status and proposalVersion, so one decision wins.
-- Approve: load the current mandate of the order's `agentId`; none → `rejected MANDATE_INVALID`. Lines whose `mandateId` or `mandateVersion` differ from it, or whose offers expired, are re-quoted under it through `requote`. Same or lower price, same date and amount, no new reason → replace the lines, write `requoted`, continue. Else add `PRICE_CHANGED` or `AVAILABILITY_DIFFERS` (or the new rule's reason), append a `Requote`, increase `proposalVersion`, keep pending, return 200 with the order. Then `commitPlacement`. Until `requote` exists: a differing mandate → `409 STALE_OFFER`, an expired offer → `409 OFFER_EXPIRED`, and the order stays pending.
+- Replay first: an `approve_and_remember` request whose `operationId` equals the order's `remember.operationId` is a replay. It skips the status and `proposalVersion` checks and resumes after the stored `remember.step`; at step `approved` it returns 200 with the order unchanged.
+- Only `pending_approval` orders accept a decision. `proposalVersion` must equal the order's; else 409 `CONFLICT`. This includes an `approve_and_remember` request with an unknown `operationId` and an old `proposalVersion`. Edit and re-quote increase it by 1. The update filters on status and proposalVersion, so one decision wins.
+- Approve: load the current mandate of the order's `agentId`; none → `rejected MANDATE_INVALID`. Lines whose `mandateId` or `mandateVersion` differ from it, whose offers expired, or whose product breaks the live-amount rule of SPEC-006, are re-quoted under it through `requote`. Same or lower price, same date and amount, no new reason → replace the lines, write `requoted`, continue. Else add `PRICE_CHANGED` or `AVAILABILITY_DIFFERS` (or the new rule's reason), append a `Requote`, increase `proposalVersion`, keep pending, return 200 with the order. Then `commitPlacement`. Until `requote` exists: a differing mandate → `409 STALE_OFFER`, an expired offer → `409 OFFER_EXPIRED`, and the order stays pending.
 - Reject: `declined`, `decision.next` = `stop` (the agent stops and tells the user) or `alternatives` (the agent may look for alternatives).
 - Edit and pick_alternative: new offers through `requote` (or the chosen alternative), every check of SPEC-009 again.
-- Approve and remember, in this order: (1) register a mandate with the raised `maxOrderTotal` and the `operationId` (idempotent, SPEC-008); (2) re-quote the order's lines under the new mandate; (3) store the new lines, the new mandate id and version, and `proposalVersion` + 1; (4) approve as above. A retry after a failure at any step reuses the operationId: step 1 returns the stored mandate, and steps 2-4 run again.
+- Approve and remember, in this order: (1) register a mandate with the raised `maxOrderTotal` and the `operationId` (idempotent, SPEC-008), then store `remember` with step `mandate_registered`; (2) re-quote the order's lines under the new mandate; (3) in one transaction, store the new lines, the new mandate id and version, `proposalVersion` + 1 and step `proposal_requoted`; (4) approve as above, and set step `approved` in the transaction that writes the approve result. A retry with the original request reuses the operationId: it is a replay and resumes after the stored step; with no stored step, step 1 returns the stored mandate and steps 2-4 run.
+
+Verification: a failure after the proposal update (step 3), then a retry with the original request, ends in the approved result.
+
 - Cut-off job: every 60 seconds, and through `runCutoffJob()` in tests, every pending order whose earliest `cutoffAt` has passed becomes `declined` with `next: "alternatives"`, actor `server`, filtered on status.
 
 ## SPEC-012 MCP binding

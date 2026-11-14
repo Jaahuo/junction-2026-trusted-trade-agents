@@ -1,9 +1,10 @@
-import type { OmitReason, ReasonCode } from "@app/contract";
+import type { OfferLine, OmitReason, ReasonCode } from "@app/contract";
 
-// The offer comparison's text in each view language. Read it at render time with
-// `pick(OFFERS)`, so a language change re-renders in the new language.
+// The text this view owns, in each view language. Read it at render time with `pick(OFFERS)`,
+// so a language change re-renders in the new language. Reason sentences come from the
+// approval card's strings, units from its parts, and loading/error states from the shell.
 
-type Rank = "best" | "better" | "good";
+type Rank = NonNullable<OfferLine["rank"]>;
 
 const en = {
   /** The short reason on a row (Figma: "Over limit"). */
@@ -29,7 +30,7 @@ const en = {
     PAYMENT_FAILED: "Payment failed",
     CUTOFF_PASSED: "Cut-off passed",
     SALES_BLOCKED: "Not for sale",
-  } as Record<ReasonCode, string>,
+  } satisfies Record<ReasonCode, string>,
   omitted: {
     NO_PRICE: "No price",
     SALES_BLOCKED: "Not for sale",
@@ -38,11 +39,12 @@ const en = {
     INVALID_QUANTITY: "Invalid amount",
     INSUFFICIENT_STOCK: "Not available",
     CONSTRAINT_CONTRADICTED: "Fails a requirement",
-  } as Record<OmitReason, string>,
-  rank: { best: "Best substitute", better: "Better substitute", good: "Substitute" } as Record<
-    Rank,
-    string
-  >,
+  } satisfies Record<OmitReason, string>,
+  rank: {
+    best: "Best substitute",
+    better: "Better substitute",
+    good: "Substitute",
+  } satisfies Record<Rank, string>,
   notChecked: "Not checked",
   wouldBeRejected: "Would be rejected",
   needsApproval: "Needs approval",
@@ -51,8 +53,10 @@ const en = {
   partly: (offered: string, total: string, unit: string) => `${offered} of ${total} ${unit}`,
   late: (days: number) => `${days} ${days === 1 ? "day" : "days"} late`,
   /** How a price per standard unit is read out: "€8.40 per kg". */
-  perSpoken: { LTR: "per l", KGM: "per kg", KG: "per kg" } as Record<string, string>,
-  perOther: (unit: string) => `per ${unit}`,
+  perSpoken: { LTR: "per l", KGM: "per kg", KG: "per kg" } satisfies Record<
+    "LTR" | "KGM" | "KG",
+    string
+  >,
   words: {
     notChecked: "not checked",
     rejected: "would be rejected",
@@ -65,7 +69,8 @@ const en = {
   noAnswer: "The pre-check did not answer. The order is checked again when it is placed.",
   autoSentence: "No approval needed for this product.",
   needsYourApproval: "Needs your approval",
-  overYourLimit: (head: string, over: string) => `${head}: ${over} over your order limit.`,
+  /** This offer's own amount over the limit, after "Needs your approval:". */
+  overYourLimit: (over: string) => `${over} over your order limit.`,
   onlyPart: (part: string) => `Only ${part} can be delivered.`,
   arrives: (day: string, late: string) => `Arrives ${day}, ${late} for the request.`,
   reliabilityDelta: (sign: string, points: number) => `${sign}${points} pts reliability`,
@@ -79,6 +84,10 @@ const en = {
   checkedAgain: "The whole order is checked again when it is placed.",
   together: (over: string, limit: string) =>
     `Together ${over} over your ${limit} order limit, so the order needs your approval.`,
+  rejectedNotCounted: (count: number) =>
+    count === 1
+      ? "1 product would be rejected and is not counted."
+      : `${count} products would be rejected and are not counted.`,
   noData: "No data",
   approval: {
     notChecked: "Not checked",
@@ -110,6 +119,9 @@ const en = {
     approval: "Approval",
   },
   useText: (row: string, product: string) => `For ${row}, use ${product} instead.`,
+  /** A substitute covers only what is missing: "For the missing 16 l of Test milk 1 l, …". */
+  useForMissing: (missing: string, row: string, product: string) =>
+    `For the missing ${missing} of ${row}, use ${product}.`,
   askElseText: (row: string) => `For ${row}, look for something else.`,
   retryText: (row: string) => `Check the offer for ${row} again.`,
   sendFailed: "This did not reach the chat. Type it in the chat yourself, or try again.",
@@ -168,7 +180,6 @@ const fi: typeof en = {
   partly: (offered, total, unit) => `${offered}/${total} ${unit}`,
   late: (days) => `${days} ${days === 1 ? "päivä" : "päivää"} myöhässä`,
   perSpoken: { LTR: "litralta", KGM: "kilolta", KG: "kilolta" },
-  perOther: (unit) => `/ ${unit}`,
   words: {
     notChecked: "ei tarkistettu",
     rejected: "hylättäisiin",
@@ -181,7 +192,7 @@ const fi: typeof en = {
   noAnswer: "Esitarkistus ei vastannut. Tilaus tarkistetaan uudelleen, kun se tehdään.",
   autoSentence: "Tämä tuote ei vaadi hyväksyntää.",
   needsYourApproval: "Vaatii hyväksyntäsi",
-  overYourLimit: (head, over) => `${head}: ${over} yli tilausrajasi.`,
+  overYourLimit: (over) => `${over} yli tilausrajasi.`,
   onlyPart: (part) => `Vain ${part} voidaan toimittaa.`,
   arrives: (day, late) => `Saapuu ${day}, ${late} pyydetystä.`,
   reliabilityDelta: (sign, points) => `${sign}${points} %-yks. toimitusvarmuus`,
@@ -195,6 +206,10 @@ const fi: typeof en = {
   checkedAgain: "Koko tilaus tarkistetaan uudelleen, kun se tehdään.",
   together: (over, limit) =>
     `Yhteensä ${over} yli ${limit} tilausrajasi, joten tilaus vaatii hyväksyntäsi.`,
+  rejectedNotCounted: (count) =>
+    count === 1
+      ? "1 tuote hylättäisiin, eikä sitä lasketa mukaan."
+      : `${count} tuotetta hylättäisiin, eikä niitä lasketa mukaan.`,
   noData: "Ei tietoa",
   approval: {
     notChecked: "Ei tarkistettu",
@@ -226,6 +241,8 @@ const fi: typeof en = {
     approval: "Hyväksyntä",
   },
   useText: (row, product) => `Käytä tuotteen ${row} sijaan tuotetta ${product}.`,
+  useForMissing: (missing, row, product) =>
+    `Täydennä tuotteen ${row} puuttuvat ${missing} tuotteella ${product}.`,
   askElseText: (row) => `Etsi tuotteen ${row} tilalle jotain muuta.`,
   retryText: (row) => `Tarkista tuotteen ${row} tarjous uudelleen.`,
   sendFailed: "Viesti ei mennyt keskusteluun. Kirjoita se itse tai yritä uudelleen.",

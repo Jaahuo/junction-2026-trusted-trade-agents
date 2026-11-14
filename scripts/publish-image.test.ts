@@ -3,28 +3,11 @@ import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const field = (value: unknown, key: string): unknown =>
-  value && typeof value === "object" && key in value
-    ? Object.getOwnPropertyDescriptor(value, key)?.value
-    : undefined;
-
-async function publicationScript(): Promise<string> {
-  const workflow: unknown = Bun.YAML.parse(
-    await Bun.file(`${import.meta.dir}/../.github/workflows/deploy.yml`).text(),
-  );
-  const steps = field(field(field(workflow, "jobs"), "publish"), "steps");
-  if (!Array.isArray(steps)) throw new Error("Missing publication job");
-  const step: unknown = steps.find(
-    (value: unknown) => field(value, "name") === "Publish verified images",
-  );
-  const script = field(step, "run");
-  if (typeof script !== "string") throw new Error("Missing publication program");
-  return script;
-}
-
 const digest = (text: string) =>
   `sha256:${new Bun.CryptoHasher("sha256").update(text).digest("hex")}`;
 const config = (letter: string) => `sha256:${letter.repeat(64)}`;
+const verifier = `${import.meta.dir}/ci-verify-published-image.sh`;
+const publication = `bash "${verifier}" fixture-1-1 ${config("a")} image && bash "${verifier}" fixture-1-1-chat ${config("b")} chat_image`;
 
 async function publish(mode: string) {
   const root = await mkdtemp(join(tmpdir(), "publish-image-"));
@@ -41,14 +24,9 @@ async function publish(mode: string) {
       const hash = mode === "hash" && name === "chat" ? config("d") : digest(body);
       await writeFile(join(root, `${name}.headers`), `Docker-Content-Digest: ${hash}\r\n`);
     }
-    await writeFile(
-      join(root, "deployment-evidence/manifest.json"),
-      JSON.stringify({ imageId: config("a"), chatImageId: config("b") }),
-    );
     await writeFile(join(root, "output"), "");
     await writeFile(join(root, "chat-reads"), "0");
     const commands = {
-      docker: '#!/bin/sh\nif [ "$1" = login ]; then cat >/dev/null; fi\n',
       sleep: "#!/bin/sh\nexit 0\n",
       curl: `#!/bin/sh
 case "$*" in *"/token?"*) printf '{"token":"fixture"}'; exit 0;; esac
@@ -89,7 +67,7 @@ if [ "$status_output" = true ]; then printf '%s' "$status"; fi
       await writeFile(path, script);
       await chmod(path, 0o755);
     }
-    const child = Bun.spawn(["bash", "-c", await publicationScript()], {
+    const child = Bun.spawn(["bash", "-c", publication], {
       env: {
         ...process.env,
         PATH: `${bin}:${process.env["PATH"] ?? ""}`,
@@ -97,9 +75,6 @@ if [ "$status_output" = true ]; then printf '%s' "$status"; fi
         MODE: mode,
         RUNNER_TEMP: root,
         GITHUB_OUTPUT: join(root, "output"),
-        SHA: "fixture",
-        GITHUB_RUN_ID: "1",
-        GITHUB_RUN_ATTEMPT: "1",
         GH_TOKEN: "fixture-token",
         REGISTRY_USER: "fixture-user",
       },

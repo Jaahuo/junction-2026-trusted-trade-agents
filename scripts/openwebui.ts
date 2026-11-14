@@ -117,7 +117,7 @@ async function compose(...args: string[]): Promise<void> {
   if ((await child.exited) !== 0) fail(`docker compose ${args.join(" ")} failed.`);
 }
 
-async function waitUntilUp(base: string): Promise<void> {
+export async function waitUntilUp(base: string): Promise<void> {
   for (let attempt = 0; attempt < 90; attempt++) {
     const up = await fetch(`${base}/health`)
       .then((response) => response.ok)
@@ -125,10 +125,26 @@ async function waitUntilUp(base: string): Promise<void> {
     if (up) return;
     await Bun.sleep(2000);
   }
-  fail(`Open WebUI did not answer at ${base} within 3 minutes.`);
+  throw new Error(`Open WebUI did not answer at ${base} within 3 minutes.`);
 }
 
-async function setup(env: Record<string, string>, base: string): Promise<void> {
+/** How `configure` reaches one Open WebUI and what it sets there. */
+export interface ChatHost {
+  readonly base: string;
+  /** Empty on the laptop, where login is off and every visitor is the one local account. */
+  readonly email: string;
+  readonly password: string;
+  readonly mcpUrl: string;
+  /** When set, pushed to Open WebUI, which otherwise keeps the endpoint of its first start. */
+  readonly openaiUrl?: string | undefined;
+  readonly openaiKey?: string | undefined;
+  /** Empty = the first model of the endpoint that is not an embedding model. */
+  readonly baseModel?: string | undefined;
+}
+
+/** Connects the MCP server, sets the model endpoint and creates the Buyer agent model. A rerun changes nothing. */
+export async function configure(host: ChatHost): Promise<void> {
+  const { base, mcpUrl, openaiUrl } = host;
   let token = "";
   async function call(path: string, body?: Json): Promise<{ status: number; data: unknown }> {
     const response = await fetch(`${base}${path}`, {
@@ -141,23 +157,18 @@ async function setup(env: Record<string, string>, base: string): Promise<void> {
   }
   async function must(step: string, path: string, body?: Json): Promise<unknown> {
     const { status, data } = await call(path, body);
-    if (status !== 200) fail(`${step}: HTTP ${status} from ${path}`);
+    if (status !== 200) throw new Error(`${step}: HTTP ${status} from ${path}`);
     return data;
   }
 
-  // With login off, Open WebUI signs every visitor in as its one local account.
-  const session = await must("sign in", "/api/v1/auths/signin", { email: "", password: "" });
+  const session = await must("sign in", "/api/v1/auths/signin", {
+    email: host.email,
+    password: host.password,
+  });
   if (!isObject(session) || typeof session["token"] !== "string")
-    fail(
-      "sign in: no token. This setup needs WEBUI_AUTH=False, as hosts/openwebui/compose.yaml sets.",
-    );
+    throw new Error("sign in: no token. Check the admin login, or WEBUI_AUTH=False on the laptop.");
   token = session["token"];
 
-  let mcpUrl = env["OPENWEBUI_MCP_URL"];
-  if (!mcpUrl) {
-    await loadRuntime();
-    mcpUrl = `http://host.docker.internal:${process.env["PORT"]}/mcp`;
-  }
   const current = await must("read tool servers", "/api/v1/configs/tool_servers");
   const existing =
     isObject(current) && Array.isArray(current["TOOL_SERVER_CONNECTIONS"])
@@ -171,9 +182,8 @@ async function setup(env: Record<string, string>, base: string): Promise<void> {
     console.log(`tool server: ${mcpUrl}`);
   }
 
-  const openaiUrl = env["OPENAI_API_BASE_URL"];
   if (openaiUrl) {
-    const openaiKey = env["OPENAI_API_KEY"] ?? "";
+    const openaiKey = host.openaiKey ?? "";
     const stored = await must("read model endpoint", "/openai/config");
     if (hasOpenaiConfig(stored, openaiUrl, openaiKey)) console.log("model endpoint: unchanged");
     else {
@@ -182,7 +192,7 @@ async function setup(env: Record<string, string>, base: string): Promise<void> {
     }
   }
 
-  let baseModel = env["OPENWEBUI_BASE_MODEL"];
+  let baseModel = host.baseModel;
   if (!baseModel) {
     const models = await must("list models", "/api/models");
     const ids = (isObject(models) && Array.isArray(models["data"]) ? models["data"] : [])
@@ -190,7 +200,7 @@ async function setup(env: Record<string, string>, base: string): Promise<void> {
       .filter((id): id is string => typeof id === "string");
     baseModel = ids.find((id) => id !== MODEL_ID && !/embed/i.test(id));
     if (!baseModel)
-      fail("No chat model found. Check OPENAI_API_BASE_URL or set OPENWEBUI_BASE_MODEL.");
+      throw new Error("No chat model found. Check the model endpoint or set the base model.");
   }
 
   const system = buildSystemPrompt(
@@ -214,6 +224,23 @@ async function setup(env: Record<string, string>, base: string): Promise<void> {
   console.log(`Open WebUI is ready at ${base}. Choose the model "Buyer agent".`);
 }
 
+async function setup(env: Record<string, string>, base: string): Promise<void> {
+  let mcpUrl = env["OPENWEBUI_MCP_URL"];
+  if (!mcpUrl) {
+    await loadRuntime();
+    mcpUrl = `http://host.docker.internal:${process.env["PORT"]}/mcp`;
+  }
+  await configure({
+    base,
+    email: "",
+    password: "",
+    mcpUrl,
+    openaiUrl: env["OPENAI_API_BASE_URL"],
+    openaiKey: env["OPENAI_API_KEY"],
+    baseModel: env["OPENWEBUI_BASE_MODEL"],
+  });
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command !== "up" && command !== "setup" && command !== "down") fail(USAGE);
@@ -225,4 +252,7 @@ async function main(): Promise<void> {
   await setup(env, base);
 }
 
-if (import.meta.main) await main();
+if (import.meta.main)
+  await main().catch((error: unknown) =>
+    fail(error instanceof Error ? error.message : String(error)),
+  );

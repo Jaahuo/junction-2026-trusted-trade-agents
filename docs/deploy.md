@@ -103,6 +103,34 @@ ssh-keyscan -t ed25519 "$(tofu -chdir=infra output -raw public_ip)" | gh secret 
 
 `DEPLOY_OUTPUTS` holds the database URL. Set it again after any `apply` that changes an output. The challenge data ships in a separate step without `--delete`, so a CI push never removes the data files that are not in Git.
 
+## Hosted chat
+
+`push` also runs Open WebUI v0.13.3 at `https://chat.<hostname>` when `VERDA_INFERENCE_KEY` is set (#155).
+Without that key it skips the chat host and changes nothing else.
+The chat host uses the OpenAI-compatible Verda endpoint `https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1` with the base model `nemotron-3.5-super-vl`, and connects to `<url>/mcp` of the same deployment.
+Login is on and sign-up is off, because the inference key pays for every chat.
+Sign in with the admin account and choose the model "Buyer agent".
+
+Keep the chat secrets in a fourth operator file, `~/.config/trusted-trade/env.chat`:
+
+```sh
+VERDA_INFERENCE_KEY=       # the Verda inference key
+OPENWEBUI_SECRET_KEY=      # openssl rand -hex 32; keep it stable, or sessions end at the next deploy
+OPENWEBUI_ADMIN_EMAIL=     # the one chat login
+OPENWEBUI_ADMIN_PASSWORD=  # openssl rand -base64 18
+```
+
+Open WebUI creates the admin account only at its first start, so a later password change in the file does not change the login.
+For a manual `push`, load the file first with `set -a && . ~/.config/trusted-trade/env.chat && set +a`.
+For CI, set each line as a secret of the `production` environment:
+
+```sh
+while IFS='=' read -r name value; do printf '%s' "$value" | gh secret set "$name" --env production; done < ~/.config/trusted-trade/env.chat
+```
+
+With `TF_VAR_domain`, add a DNS A record for `chat.<domain>` as well. The `sslip.io` name resolves without one.
+The chat data lives in the Docker volume `trusted-trade-chat` on the VM; `journalctl -u trusted-trade-chat` shows its log.
+
 ## Update, inspect and remove
 
 - Deploy a published image by hand: set `DEPLOY_IMAGE` and the registry variables above, then run `bun scripts/deploy.ts push`.

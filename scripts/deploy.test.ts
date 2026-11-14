@@ -3,6 +3,9 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CHAT_SERVICE,
+  chatEnv,
+  chatSettings,
   deployEnv,
   type Outputs,
   parseEnv,
@@ -122,6 +125,57 @@ test("Caddy serves the hostname with automatic TLS and proxies to the app port",
   expect(renderCaddyfile(outputs)).toBe(
     "203-0-113-7.sslip.io {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:3000\n}\n",
   );
+});
+
+const chatSecrets = {
+  VERDA_INFERENCE_KEY: "inference-key",
+  OPENWEBUI_SECRET_KEY: "session-key",
+  OPENWEBUI_ADMIN_EMAIL: "admin@example.com",
+  OPENWEBUI_ADMIN_PASSWORD: "admin-password",
+};
+
+test("the deploy skips the chat host until the inference key is set", () => {
+  expect(chatSettings({})).toBeUndefined();
+  expect(chatSettings({ ...chatSecrets, VERDA_INFERENCE_KEY: " " })).toBeUndefined();
+  expect(chatSettings(chatSecrets)).toEqual({
+    inferenceKey: "inference-key",
+    secretKey: "session-key",
+    adminEmail: "admin@example.com",
+    adminPassword: "admin-password",
+  });
+});
+
+test("an inference key without the admin login fails before anything is deployed", () => {
+  const { OPENWEBUI_ADMIN_PASSWORD: _password, ...partial } = chatSecrets;
+  expect(() => chatSettings(partial)).toThrow(/needs OPENWEBUI_ADMIN_PASSWORD/);
+});
+
+test("the chat host runs with login on, sign-up off and the hosted inference endpoint", () => {
+  const chat = chatSettings(chatSecrets);
+  if (!chat) throw new Error("chat settings expected");
+  const env = chatEnv(outputs, chat);
+  expect(env.get("WEBUI_AUTH")).toBe("True");
+  expect(env.get("ENABLE_SIGNUP")).toBe("False");
+  expect(env.get("WEBUI_URL")).toBe("https://chat.203-0-113-7.sslip.io");
+  expect(env.get("OPENAI_API_BASE_URL")).toBe(
+    "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1",
+  );
+  expect(env.get("OPENAI_API_KEY")).toBe("inference-key");
+  expect(renderEnvFile(env)).toContain("WEBUI_ADMIN_PASSWORD=admin-password\n");
+});
+
+test("Caddy serves the chat host on its own subdomain when the chat runs", () => {
+  expect(renderCaddyfile(outputs, true)).toBe(
+    "203-0-113-7.sslip.io {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:3000\n}\n\n" +
+      "chat.203-0-113-7.sslip.io {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:8080\n}\n",
+  );
+});
+
+test("the chat unit keeps its data in a volume and listens on loopback only", () => {
+  expect(CHAT_SERVICE).toContain("-p 127.0.0.1:8080:8080");
+  expect(CHAT_SERVICE).toContain("-v trusted-trade-chat:/app/backend/data");
+  expect(CHAT_SERVICE).toContain("--env-file /etc/trusted-trade-chat.env");
+  expect(CHAT_SERVICE).toContain("ghcr.io/open-webui/open-webui:v0.13.3");
 });
 
 test("a reset runs with the hosted keys and production mode against the local checkout", async () => {

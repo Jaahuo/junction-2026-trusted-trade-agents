@@ -101,7 +101,7 @@ test("draft rows show the value in force only where it differs", () => {
   const rows = draftRows(fixtures.mandateDraft);
   const limit = rows[0];
   expect(limit?.proposed).toContain("500");
-  expect(limit?.current).toMatch(/^1\D000/);
+  expect(limit?.current).toMatch(/(^|\D)1\D000\D/);
   expect(rows.find((row) => row.label === "Categories")).toEqual({
     label: "Categories",
     proposed: "All categories",

@@ -7,6 +7,35 @@ description: Use when you buy goods for a user from a wholesaler through the tru
 
 The wholesaler's server checks every order against the buyer's mandate. This skill is guidance. The server is the control.
 
+## Direct order
+
+The user is a chef at work. A request that names what, how much and by when is an instruction to order. Run the four calls with no text in between, then give one reply:
+
+`get_mandate` → `find_products` → `quote_offers` → `place_order` → reply
+
+Leave this path only for a branch that [Flow](#flow) names.
+
+## Reply
+
+- Stay silent until the order has a status or you need an answer. Write no progress note, no plan and no list of what you found.
+- Give the outcome first, in one or two short sentences: product, quantity, delivery day and gross total.
+- For a sign-off, say that the order needs a sign-off, give the reason in a few plain words and give `approvalUrl`.
+- Leave out what a card shows, and leave out tool names, codes and ids.
+- End on the outcome. Offer no menu of next steps.
+
+"Tell the user" in this skill and in [reason-codes.md](reason-codes.md) means one such sentence.
+
+## Questions
+
+Ask only for a fact that you cannot look up and that changes the order:
+
+- What, how much or by when is missing from the request.
+- No product of the kind the user asked for has an offer (step 4).
+- A candidate has no conversion for the quantity ([Units](#units)).
+- No mandate exists (step 1).
+
+Ask everything in one message, then order on the answer. Look up the rest: pack sizes, prices, stock and delivery days. The server decides limits and sign-offs, so place the order instead of asking whether to place it.
+
 ## Flow
 
 Do the steps in order. Each step ends when its output is in hand.
@@ -29,14 +58,14 @@ When the user asks you to order, use the quiet tools `find_products` and `quote_
 
 | Status                                       | Action                                                                                                                                    |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `placed`                                     | Tell the user the order is placed, with delivery date and total.                                                                          |
+| `placed`                                     | Tell the user the order is placed, with product, quantity, delivery date and total.                                                       |
 | `pending_approval`                           | Tell the user, give `approvalUrl` and the reasons in plain words, then stop. A human decides.                                             |
 | `declined`, `decision.next` = `stop`         | The human rejected the order and chose stop. Stop and tell the user. Do not look for alternatives.                                        |
 | `declined`, `decision.next` = `alternatives` | The human rejected the order and allows alternatives. You may search again for the user's original need. The new order faces every check. |
 | `rejected`                                   | A fixed guardrail failed. Read each code in [reason-codes.md](reason-codes.md) and take its action.                                       |
 | `awaiting_payment`                           | Pay-on-order only. Call `get_order_status` later.                                                                                         |
 
-After `pending_approval`, call `get_order_status` to read the human's decision. `list_pending_approvals` lists the orders that still wait. A pending order whose cut-off passes becomes `declined` with `next` = `alternatives`.
+A `placed` or `pending_approval` order needs no further call in the same turn. Call `get_order_status` to read the human's decision only when the user comes back to the order. `list_pending_approvals` lists the orders that still wait. A pending order whose cut-off passes becomes `declined` with `next` = `alternatives`.
 
 A request can fail before an order exists: `409 STALE_OFFER`, `400 OFFER_INVALID`, `409 CONFLICT`. See [reason-codes.md](reason-codes.md#errors-before-an-order-exists).
 

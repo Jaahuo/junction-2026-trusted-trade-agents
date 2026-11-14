@@ -50,14 +50,8 @@
       ]
     },
     "contexts/views": {
-      "entry": ["src/views/*/main.tsx", "src/harness/main.tsx"],
-      "ignoreDependencies": [
-        "@app/contract",
-        "@ctx/mandates",
-        "@ctx/orders",
-        "@elysia/eden",
-        "@modelcontextprotocol/ext-apps"
-      ]
+      "entry": ["src/views/*/main.{ts,tsx}"],
+      "ignoreDependencies": ["@ctx/mandates", "@ctx/orders", "@elysia/eden"]
     },
     "packages/contract": {
       "ignoreDependencies": ["@app/server-kit", "jose"]

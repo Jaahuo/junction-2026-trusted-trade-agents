@@ -6,7 +6,7 @@ The buyer's mandate sets the limits, the wholesaler's server checks them on ever
 
 Built for the Valio Aimo challenge at Junction 2026 ([challenge brief](docs/challenge.md)).
 
-**Pitch video:** [link added at submission](docs/submission.md#links-and-release-record) · **Deck:** [link added at submission](docs/submission.md#links-and-release-record)
+**Pitch video:** [link added at submission](docs/submission.md#links-and-release-record) · **Deck:** [slides (PDF)](docs/trusted-trade-agents-slides.pdf)
 
 ## Try it
 

@@ -20,7 +20,8 @@ You need a worktree that `bun scripts/runtime.ts setup` has prepared, and Docker
    Keep the same `.env` for the whole demo day, so offers issued before a server or tunnel restart stay valid after it.
    Without them a non-production server makes a new key per process, and a restart invalidates every open offer.
 
-2. Add `VALIO_AIMO_API_KEY` (and `VALIO_AIMO_PORTAL_PASSWORD` if you use the portal) to `.env`.
+2. Add `VALIO_AIMO_API_KEY` (and `VALIO_AIMO_PORTAL_PASSWORD` if you use the portal) to `.env`, and set `WHOLESALER_LIVE=mock`.
+   Offers read live price and availability only with both set (SPEC-005, #100); any other value omits every line `NO_PRICE` and signs no offer.
    Get the values from the organizers or a teammate.
    Never put a key anywhere other than `.env`.
 
@@ -130,8 +131,8 @@ Run these from the worktree that serves the demo, in order:
 | `--base-url <url>` | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                      |
 | `--no-reset`       | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                              |
 
-The server, not the script, reads `WHOLESALER_LIVE`.
-To prove both wholesaler adapters, restart the server with `WHOLESALER_LIVE=fixture` and run both scenarios, then do the same with `WHOLESALER_LIVE=mock`.
+The server, not the script, reads `WHOLESALER_LIVE`; start it with `WHOLESALER_LIVE=mock`.
+If `offers` fails with `omitted: NO_PRICE`, the server has no live price source: check `WHOLESALER_LIVE` and `VALIO_AIMO_API_KEY`.
 
 ## Restart check
 

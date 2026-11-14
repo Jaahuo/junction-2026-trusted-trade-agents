@@ -253,38 +253,42 @@ describe("getOffers", () => {
     expect(setup.signer.signed).toHaveLength(2);
   });
 
-  test("a cached quote is not served after validTo or after cutoffAt", async () => {
-    const cases = [
-      {
-        live: quoted(
-          OAT,
-          { cutoffAt: "2026-11-16T10:00:00+00:00" },
-          { validTo: "2026-11-18T00:00:00+00:00" },
-        ),
-        later: "2026-11-16T10:00:00Z",
-      },
-      {
-        live: quoted(
-          OAT,
-          { cutoffAt: "2026-11-18T00:00:00+00:00" },
-          { validTo: "2026-11-16T10:00:00+00:00" },
-        ),
-        later: "2026-11-16T10:00:01Z",
-      },
-    ];
-    for (const { live, later } of cases) {
-      const setup = fakeOffersDeps({ products: [fakeProduct(OAT)], live });
-      valueOf(await getOffers(setup.deps, principal, request()));
-      setup.clock.set(later);
-      valueOf(await getOffers(setup.deps, principal, request()));
+  test("a cached quote is not served after validTo, and after cutoffAt it gives NO_DELIVERY_DATE without an upstream call", async () => {
+    const stale = fakeOffersDeps({
+      products: [fakeProduct(OAT)],
+      live: quoted(
+        OAT,
+        { cutoffAt: "2026-11-18T00:00:00+00:00" },
+        { validTo: "2026-11-16T10:00:00+00:00" },
+      ),
+    });
+    valueOf(await getOffers(stale.deps, principal, request()));
+    stale.clock.set("2026-11-16T10:00:00Z");
+    valueOf(await getOffers(stale.deps, principal, request()));
 
-      expect(setup.live.calls.map((call) => call.kind)).toEqual([
-        "availability",
-        "prices",
-        "availability",
-        "prices",
-      ]);
-    }
+    expect(stale.live.calls.map((call) => call.kind)).toEqual([
+      "availability",
+      "prices",
+      "availability",
+      "prices",
+    ]);
+
+    const cut = fakeOffersDeps({
+      products: [fakeProduct(OAT)],
+      live: quoted(
+        OAT,
+        { cutoffAt: "2026-11-16T10:00:00+00:00" },
+        { validTo: "2026-11-18T00:00:00+00:00" },
+      ),
+    });
+    valueOf(await getOffers(cut.deps, principal, request()));
+    cut.clock.set("2026-11-16T10:00:00Z");
+    const afterCutoff = valueOf(await getOffers(cut.deps, principal, request()));
+
+    expect(cut.live.calls).toHaveLength(2);
+    expect(afterCutoff.offers).toEqual([]);
+    expect(reasons(afterCutoff.omitted)).toEqual({ [OAT]: "NO_DELIVERY_DATE" });
+    expect(cut.signer.signed).toHaveLength(1);
   });
 
   test("an omitted line is not cached", async () => {
@@ -467,6 +471,66 @@ describe("getOffers", () => {
     expect(reasons(result.omitted)).toEqual({ [OAT]: "NO_DELIVERY_DATE" });
     expect(result.offers).toEqual([]);
     expect(setup.signer.signed).toEqual([]);
+  });
+
+  test("a fractional deadline that floors to now is omitted", async () => {
+    const CUT = "prod_test_cut";
+    const STALE = "prod_test_stale";
+    const ids = [CUT, STALE, OAT];
+    const setup = fakeOffersDeps({
+      now: "2026-11-14T10:00:00.200Z",
+      products: ids.map((id) => fakeProduct(id)),
+      live: {
+        ...quoted(CUT, { cutoffAt: "2026-11-14T10:00:00.900+00:00" }),
+        ...quoted(STALE, {}, { validTo: "2026-11-14T10:00:00.500+00:00" }),
+        ...quoted(OAT, { cutoffAt: "2026-11-14T10:00:01.000+00:00" }),
+      },
+    });
+
+    const result = valueOf(
+      await getOffers(setup.deps, principal, request({ lines: ids.map((id) => line(id)) })),
+    );
+
+    expect(reasons(result.omitted)).toEqual({ [CUT]: "NO_DELIVERY_DATE", [STALE]: "NO_PRICE" });
+    expect(setup.signer.signed.map((entry) => entry.claims.productId)).toEqual([OAT]);
+    expect(result.offers[0]?.claims).toMatchObject({
+      iat: Date.parse("2026-11-14T10:00:00Z") / 1000,
+      exp: Date.parse("2026-11-14T10:00:01Z") / 1000,
+    });
+  });
+
+  test("an offer whose deadline passes during signing is omitted", async () => {
+    const STALE = "prod_test_stale";
+    const ids = [OAT, STALE, RYE];
+    const setup = fakeOffersDeps({
+      now: "2026-11-14T10:00:00Z",
+      products: ids.map((id) => fakeProduct(id)),
+      live: {
+        ...quoted(OAT, { cutoffAt: "2026-11-14T10:00:05+00:00" }),
+        ...quoted(STALE, {}, { validTo: "2026-11-14T10:00:05+00:00" }),
+        ...quoted(RYE),
+      },
+    });
+    const signer: OfferSigner = {
+      jwks: () => setup.signer.jwks(),
+      async sign(claims, exp) {
+        setup.clock.set("2026-11-14T10:00:05Z");
+        return setup.signer.sign(claims, exp);
+      },
+    };
+
+    const result = valueOf(
+      await getOffers(
+        { ...setup.deps, signer },
+        principal,
+        request({ lines: ids.map((id) => line(id)) }),
+      ),
+    );
+
+    expect(setup.signer.signed).toHaveLength(3);
+    expect(reasons(result.omitted)).toEqual({ [OAT]: "NO_DELIVERY_DATE", [STALE]: "NO_PRICE" });
+    expect(result.offers.map((offer) => offer.claims.productId)).toEqual([RYE]);
+    expect(OffersResultSchema.safeParse(result).success).toBe(true);
   });
 
   test("an availableDate later than deliverBy still gives an offer with that delivery date", async () => {

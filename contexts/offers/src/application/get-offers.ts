@@ -61,6 +61,28 @@ const upstream = (message: string): GetOffersError => ({ code: "UPSTREAM_FAILED"
 
 const unique = (ids: readonly string[]): string[] => [...new Set(ids)];
 
+type ExpiryReason = "NO_DELIVERY_DATE" | "NO_PRICE";
+
+const EXPIRED_DETAIL: Record<ExpiryReason, string> = {
+  NO_DELIVERY_DATE: "the order cut-off for the delivery date has passed",
+  NO_PRICE: "the price is no longer valid",
+};
+
+const jwtSeconds = (ms: number): number => Math.floor(ms / 1000);
+
+// Token exp has second precision, so a deadline within the current second has already passed.
+const expiredAt = (price: PriceQuote, quote: AvailabilityQuote, now: Date): ExpiryReason | null =>
+  expiredOmitReason(
+    price.validTo,
+    quote.cutoffAt,
+    new Date(jwtSeconds(now.getTime()) * 1000 + 999),
+  );
+
+const earlierBound = (price: PriceQuote, quote: AvailabilityQuote): ExpiryReason =>
+  quote.cutoffAt !== null && Date.parse(quote.cutoffAt) <= Date.parse(price.validTo)
+    ? "NO_DELIVERY_DATE"
+    : "NO_PRICE";
+
 async function mapLimit<T, R>(
   items: readonly T[],
   limit: number,
@@ -196,7 +218,7 @@ export async function getOffers(
   }
   for (const [productId, hit] of cached) prices.set(productId, hit.price);
 
-  // Re-read: a quote may expire during the upstream calls, and the signer stamps iat later.
+  // Re-read: a quote may expire during the upstream calls.
   const now = deps.now();
   const signable: Signable[] = [];
   for (const line of dated) {
@@ -205,13 +227,9 @@ export async function getOffers(
       omit(line, "NO_PRICE");
       continue;
     }
-    const expired = expiredOmitReason(price.validTo, line.availability.cutoffAt, now);
-    if (expired === "NO_DELIVERY_DATE") {
-      omit(line, expired, "the order cut-off for the delivery date has passed");
-      continue;
-    }
-    if (expired === "NO_PRICE") {
-      omit(line, expired, "the price is no longer valid");
+    const expired = expiredAt(price, line.availability, now);
+    if (expired !== null) {
+      omit(line, expired, EXPIRED_DETAIL[expired]);
       continue;
     }
     signable.push({ ...line, price });
@@ -221,7 +239,6 @@ export async function getOffers(
   const signed = await Promise.all(
     signable.map(async (offer) => {
       const { line, product, price, availability: quote } = offer;
-      const exp = offerExpiry(price.validTo, quote.cutoffAt);
       const { total, deposits } = lineTotal(price.unitPrice, price.deposit, line.quantity.value);
       const claims: Omit<OfferClaims, "iat" | "exp"> = {
         iss: issuer,
@@ -254,25 +271,41 @@ export async function getOffers(
           match: product.match,
         },
       };
-      const minted = await deps.signer.sign(claims, exp);
-      if (!cached.has(line.productId)) {
-        deps.cache.set(cacheKey(line.productId), { availability: quote, price }, exp);
-      }
-      return minted;
+      const minted = await deps.signer.sign(claims, offerExpiry(price.validTo, quote.cutoffAt));
+      return { offer, minted };
     }),
   );
 
-  const offers: OfferLine[] = await mapLimit(signed, PRECHECK_CONCURRENCY, async (minted) => {
-    const precheck = await deps.orders.precheck(minted.token);
-    return {
+  const prechecked = await mapLimit(signed, PRECHECK_CONCURRENCY, async (entry) => {
+    const precheck = await deps.orders.precheck(entry.minted.token);
+    return { ...entry, precheck: precheck.ok ? precheck.value : null };
+  });
+
+  // Signing and prechecks take time: drop an offer whose token is already expired.
+  const returnedAt = jwtSeconds(deps.now().getTime());
+  const offers: OfferLine[] = [];
+  for (const { offer, minted, precheck } of prechecked) {
+    if (minted.claims.exp <= returnedAt) {
+      const reason = earlierBound(offer.price, offer.availability);
+      omit(offer, reason, EXPIRED_DETAIL[reason]);
+      continue;
+    }
+    if (!cached.has(offer.line.productId)) {
+      deps.cache.set(
+        cacheKey(offer.line.productId),
+        { availability: offer.availability, price: offer.price },
+        new Date(offer.price.validTo),
+      );
+    }
+    offers.push({
       offerId: minted.claims.offerId,
       token: minted.token,
       claims: minted.claims,
-      precheck: precheck.ok ? precheck.value : null,
+      precheck,
       rank: null,
       comparison: null,
-    };
-  });
+    });
+  }
 
   return ok({
     offers,

@@ -6,6 +6,6 @@ PostgreSQL 17 runs as one Compose service per project. Each worktree receives a 
 
 Setup also generates an ignored `.env.test.local` with the local `TEST_DATABASE_URL`, because `bun test` does not load `.env.local`. Route tests create and remove unique disposable databases on that PostgreSQL instance; they do not reset your worktree data. Run `bun test` or `bun run gate` after setup. CI supplies its own local test URL. Never point tests at a hosted database.
 
-Before removing a task worktree, stop its servers and run `bun run runtime:drop --yes` from that worktree. Then run `wt remove <branch>` from another worktree. Removing a worktree alone does not delete its database or ownership record. Never tear down the project's shared volume as part of worktree cleanup.
+`ship --merge` and `task finish` remove a merged, clean worktree with its database; see [workflow](workflow.md#worktree-cleanup-after-merge). To remove a worktree by hand, stop its servers and run `bun run runtime:drop --yes` from that worktree. Then run `wt remove <branch>` from another worktree. Removing a worktree alone does not delete its database or ownership record. Never tear down the project's shared volume as part of worktree cleanup.
 
 For a demo, run `bun run production` after setup and exercise the actual built application. See [sponsor guidance](sponsors.md) before any optional integration.

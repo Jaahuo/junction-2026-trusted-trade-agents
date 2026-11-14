@@ -12,7 +12,11 @@ import type { HistoryRow } from "../domain/evaluate.ts";
 /** An order as stored: the approval URL is computed on read (SPEC-010). */
 export type StoredOrder = Omit<Order, "approvalUrl"> & {
   idempotencyKey: string;
-  requested: { offers: string[]; alternatives: string[] };
+  requested: {
+    offers: string[];
+    alternatives: string[];
+    supersedes?: { orderId: string; proposalVersion: number };
+  };
 };
 
 type VerifiedOffer = Result<
@@ -62,6 +66,8 @@ export interface OrderStore {
   find(customer: string, orderId: string): Promise<StoredOrder | null>;
   /** The customer's orders that wait for a decision, oldest first. */
   pending(customer: string): Promise<StoredOrder[]>;
+  /** Pending orders with at least one line at or past its cutoff, optionally for one customer. */
+  expiredPending(now: Date, customer?: string): Promise<StoredOrder[]>;
   findByKey(customer: string, idempotencyKey: string): Promise<StoredOrder | null>;
   history(customer: string, productIds: string[]): Promise<HistoryRow[]>;
   refuse(customer: string, event: AuditEvent): Promise<Result<void, "AUDIT_INVALID">>;

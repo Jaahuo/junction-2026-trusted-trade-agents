@@ -583,6 +583,7 @@ export interface PlaceOrderRequest {
   offers: string[];
   alternatives?: string[];
   originalRequest?: string;
+  supersedes?: { orderId: string; proposalVersion: number };
   idempotencyKey: string;
 }
 export interface PrecheckRequest {
@@ -592,6 +593,7 @@ export interface PrecheckRequest {
 
 - `place_order` takes signed offer tokens only. `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
 - Idempotency: unique (customer, idempotencyKey). See SPEC-009 R2.
+- Replacement: when the buyer changes a pending proposal, `supersedes` identifies that exact order and proposal version. The server requires the same customer, account and agent, pending status and matching version under the customer lock; otherwise `409 CONFLICT`. Only an accepted replacement (`pending_approval`, `placed` or `awaiting_payment`) closes the predecessor as `declined`, with `decision.next: "stop"` and server identity. Rejected or failed replacements leave it open. Both audits identify the other order. The transaction preserves unrelated orders and rolls back both writes on failure. Idempotency includes the replacement reference; changing or omitting it with the same key gives `409 CONFLICT`. Replacement is not a human approval and never places the predecessor.
 - Trust and rationale fields (optional; the views hide each part when it is absent): `purpose` and line `rationale` come from the agent; line `allergens` with their `status` are computed by the server from the buyer's hard rules; `offerSignature` and `receiptSignature` report the wholesaler's signature checks; `auditIntegrity` and `integrityOk` report the audit signature or hash-chain check, per log and per entry. An `invalid` offer signature or an `error` allergen must be refused at approval by the server; the views only report them.
 - `approvalUrl` is computed when the order is read: `${publicBaseUrl()}/approvals/<orderId>` while pending, else null. It is not stored. It points to the approval page (SPEC-013), the one plain page with the approval actions.
 - Order history: a table owned by the orders context, with rows `{ productId, quantity /* sales units */, placedAt }`. A placed order adds one row per line. The demo seed adds rows directly; they are not orders and use no credit. `QUANTITY_UNUSUAL` compares sales units with the median of that product's rows; `NEW_PRODUCT` means the product has no row.
@@ -654,7 +656,8 @@ export type DecideApprovalRequest = { proposalVersion: number } & (
 - Approve: load the current mandate of the order's `agentId`; none → `rejected MANDATE_INVALID`. Lines whose `mandateId` or `mandateVersion` differ from it, whose offers expired, or whose product breaks the live-amount rule of SPEC-006, are re-quoted under it through `requote`. Same or lower price, same date and amount, no new reason → replace the lines, write `requoted`, continue. Else add `PRICE_CHANGED` or `AVAILABILITY_DIFFERS` (or the new rule's reason), append a `Requote`, increase `proposalVersion`, keep pending, return 200 with the order. Then `commitPlacement`. Until `requote` exists: a differing mandate → `409 STALE_OFFER`, an expired offer → `409 OFFER_EXPIRED`, and the order stays pending.
 - Reject: `declined`, `decision.next` = `stop` (the agent stops and tells the user) or `alternatives` (the agent may look for alternatives).
 - Edit and pick_alternative: new offers through `requote` (or the chosen alternative), every check of SPEC-009 again.
-- Cut-off job: every 60 seconds, and through `runCutoffJob()` in tests, every pending order whose earliest `cutoffAt` has passed becomes `declined` with `next: "alternatives"`, actor `server`, filtered on status.
+- Cut-off job: at startup, every 60 seconds, and through `runCutoffJob()` in tests, every pending order whose earliest `cutoffAt` is at or before server time becomes `declined` with `next: "alternatives"`, actor `server`. The job rechecks status and proposal version under the customer lock. Pending-list reads also run customer-scoped cleanup. Decisions recheck the cut-off under the same lock, so an elapsed proposal cannot be approved or edited before the next scheduled run. Declines preserve the audit chain and do not issue placement receipts.
+- A corrupt audit prevents that order's automatic transition. Cleanup logs the failure and continues with other orders. Pending-list reads still return valid, non-expired proposals; they do not repair or expose the corrupt expired proposal as actionable.
 
 Approve and remember: the approver raises the mandate's order limit and approves the order in one action. The first build answers this decision with `501 NOT_IMPLEMENTED`. The sequence of mandate change, re-quote and approval, its behaviour under concurrent decisions and its retry rule are not part of this contract yet. The hardening issue that builds it adds them through a SPEC change, with a review, before the work starts.
 

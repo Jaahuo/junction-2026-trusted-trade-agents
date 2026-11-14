@@ -154,8 +154,10 @@ export const precheck = async (
 };
 
 const sameTokens = (order: StoredOrder, request: PlaceOrderRequest): boolean =>
-  JSON.stringify(order.requested) ===
-  JSON.stringify({ offers: request.offers, alternatives: request.alternatives ?? [] });
+  JSON.stringify(order.requested.offers) === JSON.stringify(request.offers) &&
+  JSON.stringify(order.requested.alternatives) === JSON.stringify(request.alternatives ?? []) &&
+  order.requested.supersedes?.orderId === request.supersedes?.orderId &&
+  order.requested.supersedes?.proposalVersion === request.supersedes?.proposalVersion;
 
 const replayOrConflict = (
   order: StoredOrder,
@@ -210,13 +212,21 @@ const buildOrder = (
 ): StoredOrder => {
   const claims = checked.lines.map((line) => line.claims);
   const at = now.toISOString();
+  const audit = auditOf(evaluation, byProduct, at);
+  const requested = audit[0];
+  if (requested !== undefined && request.supersedes !== undefined)
+    requested.detail = `Replaces ${request.supersedes.orderId} proposal ${request.supersedes.proposalVersion}`;
   return {
     orderId: `ord_${crypto.randomUUID()}`,
     customer: principal.customer,
     agentId: principal.agentId,
     accountId: principal.accountId,
     idempotencyKey: request.idempotencyKey,
-    requested: { offers: request.offers, alternatives: request.alternatives ?? [] },
+    requested: {
+      offers: request.offers,
+      alternatives: request.alternatives ?? [],
+      ...(request.supersedes === undefined ? {} : { supersedes: request.supersedes }),
+    },
     offerIds: checked.lines.map((line) => line.offerId),
     lines: checked.lines,
     alternatives: checked.alternatives,
@@ -234,7 +244,7 @@ const buildOrder = (
     nextDeliveryDate: evaluation.reasons.includes("CUTOFF_PASSED")
       ? nextDeliveryDateAfterCutoff(claims, now)
       : null,
-    audit: auditOf(evaluation, byProduct, at),
+    audit,
     createdAt: at,
   };
 };
@@ -257,6 +267,37 @@ const refuse = async (
       return err(refusal("UPSTREAM_FAILED", "The audit record could not be verified."));
   }
   return err(error);
+};
+
+const replacementPredecessor = async (
+  tx: OrderTx,
+  principal: Principal,
+  supersedes: PlaceOrderRequest["supersedes"],
+): Promise<Result<StoredOrder | null, Refusal>> => {
+  if (supersedes === undefined) return ok(null);
+  const previous = await tx.find(principal.customer, supersedes.orderId);
+  if (
+    previous === null ||
+    previous.agentId !== principal.agentId ||
+    previous.accountId !== principal.accountId ||
+    previous.status !== "pending_approval" ||
+    previous.proposalVersion !== supersedes.proposalVersion
+  )
+    return err(refusal("CONFLICT", "The proposal to replace is not pending or has changed."));
+  return ok(previous);
+};
+
+const closeReplacedProposal = (previous: StoredOrder, replacement: StoredOrder, now: Date) => {
+  const at = now.toISOString();
+  const detail = `Replaced by ${replacement.orderId}`;
+  return appendOrderAudit(
+    {
+      ...previous,
+      status: "declined",
+      decision: { action: "reject", next: "stop", note: detail, by: "server", at },
+    },
+    [{ at, actor: "server", event: "declined", detail }],
+  );
 };
 
 /**
@@ -299,6 +340,14 @@ export const placeOrder = async (
       )
     )
       return err(refusal("OFFER_INVALID", "An offer has already been used in an order."));
+    const predecessor = await replacementPredecessor(tx, principal, request.supersedes);
+    if (!predecessor.ok) return predecessor;
+    const closed =
+      predecessor.value === null
+        ? null
+        : await closeReplacedProposal(predecessor.value, order, now);
+    if (closed !== null && !closed.ok)
+      return err(refusal("UPSTREAM_FAILED", "The earlier proposal's audit could not be verified."));
     const final =
       evaluation.decision === "auto"
         ? await commitPlacement({
@@ -311,6 +360,10 @@ export const placeOrder = async (
           })
         : ok(order);
     if (!final.ok) return err(refusal("UPSTREAM_FAILED", "The order could not be finalized."));
+    if (final.value.status !== "rejected" && closed !== null && closed.ok) {
+      if (!(await tx.decide(closed.value, closed.value.proposalVersion)))
+        throw new Error("The replacement proposal changed under the customer's lock.");
+    }
     await tx.insert(final.value);
     return ok({ order: final.value, created: true });
   });

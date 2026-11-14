@@ -80,7 +80,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   quote_offers:
     "The same signed offers as get_offers, without a view. Use it while you prepare or place an order the user asked for, so the chat shows only the order. Same input and result as get_offers; pass the offer tokens to place_order.",
   place_order:
-    "Place an order from signed offer tokens with an idempotency key. The order is placed, pending human approval or rejected, with reason codes. A pending order has an approvalUrl for the human; do not approve it yourself.",
+    "Place an order from signed offer tokens with an idempotency key. The order is placed, pending human approval or rejected, with reason codes. When the user changes an earlier pending proposal, pass supersedes with its orderId and proposalVersion. An accepted replacement closes only that earlier proposal. Do not replace unrelated orders. A pending order has an approvalUrl for the human; do not approve it yourself.",
   get_order_status: "Get the current status and the audit record of an order.",
   get_mandate: "Get the purchasing limits currently in force for this agent.",
   draft_mandate:

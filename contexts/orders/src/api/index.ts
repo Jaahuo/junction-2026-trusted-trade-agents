@@ -19,16 +19,16 @@ import {
   selfBaseUrl,
 } from "@app/server-kit";
 import { Elysia } from "elysia";
-import { type DecisionError, decide, listPending } from "../application/approvals.ts";
 import {
-  findOrder,
-  type OrderDeps,
-  placeOrder,
-  precheck,
-  type Refusal,
-} from "../application/orders.ts";
+  type ApprovalDeps,
+  type DecisionError,
+  decide,
+  listPending,
+} from "../application/approvals.ts";
+import { findOrder, placeOrder, precheck, type Refusal } from "../application/orders.ts";
 import type { StoredOrder } from "../application/ports.ts";
 import { mandateClient } from "../infra/mandate-client.ts";
+import { offersClient } from "../infra/offers-client.ts";
 import { processOfferVerifier } from "../infra/offer-verifier.ts";
 import { postgresOrderStore } from "../infra/order-store.ts";
 import { refusingPayment } from "../infra/payment/refusing-payment.ts";
@@ -52,7 +52,7 @@ const toOrder = (
   approvalUrl: order.status === "pending_approval" ? approvalUrl(baseUrl(), order.orderId) : null,
 });
 
-export interface ApiDeps extends OrderDeps {
+export interface ApiDeps extends ApprovalDeps {
   /** Read on every response, so a new PUBLIC_BASE_URL applies to orders already stored. */
   publicBaseUrl: () => string;
 }
@@ -66,13 +66,15 @@ const REFUSAL_STATUS = {
 } as const satisfies Record<Refusal["code"], 400 | 409 | 502>;
 
 const DECISION_STATUS = {
+  BAD_REQUEST: 400,
+  OFFER_INVALID: 400,
   NOT_FOUND: 404,
   CONFLICT: 409,
   STALE_OFFER: 409,
   OFFER_EXPIRED: 409,
   NOT_IMPLEMENTED: 501,
   UPSTREAM_FAILED: 502,
-} as const satisfies Record<DecisionError["code"], 404 | 409 | 501 | 502>;
+} as const satisfies Record<DecisionError["code"], 400 | 404 | 409 | 501 | 502>;
 
 const envelope = (failure: Refusal | DecisionError) => ({
   error: { code: failure.code, message: failure.message },
@@ -85,7 +87,7 @@ const refused = {
 };
 
 const defaultDeps = (db: Db): ApiDeps => {
-  let mandates: OrderDeps["mandates"] | undefined;
+  let mandates: ApiDeps["mandates"] | undefined;
   return {
     store: postgresOrderStore(db),
     verifyOffer: processOfferVerifier(),
@@ -93,6 +95,7 @@ const defaultDeps = (db: Db): ApiDeps => {
     mandates: {
       current: (agentId) => (mandates ??= mandateClient(`${selfBaseUrl()}/api`)).current(agentId),
     },
+    offers: offersClient,
     payment: refusingPayment,
     now: () => new Date(),
     publicBaseUrl,
@@ -148,6 +151,7 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
         body: DecideApprovalRequestSchema,
         response: {
           200: OrderSchema,
+          400: ErrorEnvelopeSchema,
           404: ErrorEnvelopeSchema,
           409: ErrorEnvelopeSchema,
           501: ErrorEnvelopeSchema,

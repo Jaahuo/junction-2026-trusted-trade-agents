@@ -232,8 +232,11 @@ test("an edit whose re-quote raises the unit price keeps the order pending with 
     expect(order).toMatchObject({ status: "pending_approval", proposalVersion: 2, decision: null });
     expect(order.reasons).toEqual(["PRICE_CHANGED"]);
     const net = fixtures.offerClaims.unitPrice.net;
+    const gross = pending.lines[0]?.claims.total.gross ?? 0;
+    // The fake scales the total by the amount (2 of 4) and the price (1.5).
+    const grossAfter = cents(gross * (2 / 4) * 1.5) / 2;
     expect(edited(order)).toEqual([
-      `${fixtures.offerClaims.product.name}: 4 → 2 CT, unit price ${net} → ${cents(net * 1.5)} EUR net`,
+      `${fixtures.offerClaims.product.name}: 4 → 2 CT, unit price ${net} → ${cents(net * 1.5)} EUR net, unit price incl. VAT ${cents(gross / 4)} → ${cents(grossAfter)} EUR`,
     ]);
     expect(order.requotes.at(-1)?.reasons).toEqual(["PRICE_CHANGED"]);
     expect((await counts(db)).history).toBe(0);

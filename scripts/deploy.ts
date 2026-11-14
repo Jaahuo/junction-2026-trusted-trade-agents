@@ -1,5 +1,6 @@
 import { $ } from "bun";
 import { existsSync } from "node:fs";
+import { configure, waitUntilUp } from "./openwebui.ts";
 
 // Deploys an immutable image to the Vultr host that infra/ creates. See docs/deploy.md.
 
@@ -86,8 +87,85 @@ export const renderEnvFile = (values: ReadonlyMap<string, string>): string =>
     })
     .join("\n")}\n`;
 
-export const renderCaddyfile = (outputs: Outputs): string =>
-  `${outputs.hostname} {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:${outputs.app_port}\n}\n`;
+const site = (hostname: string, port: number): string =>
+  `${hostname} {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:${port}\n}\n`;
+
+export const renderCaddyfile = (outputs: Outputs, chat = false): string =>
+  site(outputs.hostname, outputs.app_port) +
+  (chat ? `\n${site(chatHostname(outputs), CHAT_PORT)}` : "");
+
+// Open WebUI as the hosted chat host (#155). It runs only when VERDA_INFERENCE_KEY is set.
+const CHAT_IMAGE = "ghcr.io/open-webui/open-webui:v0.13.3";
+const CHAT_PORT = 8080;
+const CHAT_MODEL_URL = "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1";
+const CHAT_BASE_MODEL = "nemotron-3.5-super-vl";
+const CHAT_SECRETS = [
+  "OPENWEBUI_SECRET_KEY",
+  "OPENWEBUI_ADMIN_EMAIL",
+  "OPENWEBUI_ADMIN_PASSWORD",
+] as const;
+
+/** Open WebUI needs a host of its own, because it does not run under a path prefix. */
+export const chatHostname = (outputs: Outputs): string => `chat.${outputs.hostname}`;
+
+export interface Chat {
+  readonly inferenceKey: string;
+  readonly secretKey: string;
+  readonly adminEmail: string;
+  readonly adminPassword: string;
+}
+
+/** The chat settings, or undefined when VERDA_INFERENCE_KEY is unset and the deploy skips the chat host. */
+export const chatSettings = (
+  settings: Readonly<Record<string, string | undefined>>,
+): Chat | undefined => {
+  const inferenceKey = (settings["VERDA_INFERENCE_KEY"] ?? "").trim();
+  if (inferenceKey === "") return undefined;
+  const value = (name: (typeof CHAT_SECRETS)[number]): string => (settings[name] ?? "").trim();
+  const missing = CHAT_SECRETS.filter((name) => value(name) === "");
+  if (missing.length > 0)
+    throw new Error(
+      `VERDA_INFERENCE_KEY is set, so the chat host also needs ${missing.join(", ")}`,
+    );
+  return {
+    inferenceKey,
+    secretKey: value("OPENWEBUI_SECRET_KEY"),
+    adminEmail: value("OPENWEBUI_ADMIN_EMAIL"),
+    adminPassword: value("OPENWEBUI_ADMIN_PASSWORD"),
+  };
+};
+
+/** Login on and sign-up off: the inference key pays for every chat. The admin exists after the first start. */
+export const chatEnv = (outputs: Outputs, chat: Chat): Map<string, string> =>
+  new Map([
+    ["WEBUI_URL", `https://${chatHostname(outputs)}`],
+    ["WEBUI_AUTH", "True"],
+    ["ENABLE_SIGNUP", "False"],
+    ["ENABLE_OLLAMA_API", "False"],
+    ["WEBUI_SECRET_KEY", chat.secretKey],
+    ["WEBUI_ADMIN_EMAIL", chat.adminEmail],
+    ["WEBUI_ADMIN_PASSWORD", chat.adminPassword],
+    ["OPENAI_API_BASE_URL", CHAT_MODEL_URL],
+    ["OPENAI_API_KEY", chat.inferenceKey],
+  ]);
+
+export const CHAT_SERVICE = `[Unit]
+Description=Trusted trade chat host (Open WebUI)
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+ConditionPathExists=/etc/trusted-trade-chat.env
+
+[Service]
+ExecStart=/usr/bin/docker run --rm --name trusted-trade-chat --pull=never --env-file /etc/trusted-trade-chat.env -p 127.0.0.1:${CHAT_PORT}:8080 -v trusted-trade-chat:/app/backend/data ${CHAT_IMAGE}
+ExecStop=/usr/bin/docker stop --time 30 trusted-trade-chat
+TimeoutStopSec=40
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+`;
 
 const SSH = ["-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"];
 
@@ -208,6 +286,7 @@ export const push = async (
     throw new Error("DEPLOY_REGISTRY_USER and DEPLOY_REGISTRY_TOKEN are required");
   const unit = renderService(outputs);
   const envFile = renderEnvFile(await loadDeployEnv(outputs));
+  const chat = chatSettings(settings);
   const host = `root@${outputs.public_ip}`;
   const dir = shellQuote(outputs.app_dir);
   await $`ssh ${SSH} ${host} cloud-init status --wait`.quiet();
@@ -229,15 +308,36 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   if (!digest) throw new Error("Pulled image has no trusted repository digest");
   const remoteShell = `ssh ${SSH.join(" ")}`;
   if (existsSync("data")) await transferData("data/", host, outputs.app_dir, remoteShell);
+  // Everything slow or network-bound for the chat host happens before the app stops.
+  if (chat) {
+    await $`ssh ${SSH} ${host} docker pull --quiet ${CHAT_IMAGE}`;
+    await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat.env < ${new Response(renderEnvFile(chatEnv(outputs, chat)))}`;
+    await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade-chat.service < ${new Response(CHAT_SERVICE)}`;
+  }
   await $`ssh ${SSH} ${host} systemctl stop trusted-trade`;
   await $`ssh ${SSH} ${host} ${`chown -R 1000:1000 ${dir}/data && chmod -R u+rX ${dir}/data`}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${digest}"\n`)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade.service < ${new Response(unit)}`;
-  await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs))}`;
+  await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs, chat !== undefined))}`;
   // The Vultr Ubuntu image enables ufw with only SSH open.
   await $`ssh ${SSH} ${host} ${"ufw allow 80/tcp && ufw allow 443/tcp && systemctl daemon-reload && systemctl enable --now trusted-trade && systemctl reload caddy"}`;
   await waitForHealth(outputs.public_base_url);
+  if (chat) {
+    // The chat restarts only after the app is healthy, so it never adds to the app's downtime.
+    await $`ssh ${SSH} ${host} ${"systemctl daemon-reload && systemctl enable trusted-trade-chat && systemctl restart trusted-trade-chat"}`;
+    const base = `https://${chatHostname(outputs)}`;
+    await waitUntilUp(base);
+    await configure({
+      base,
+      email: chat.adminEmail,
+      password: chat.adminPassword,
+      mcpUrl: `${outputs.public_base_url}/mcp`,
+      openaiUrl: CHAT_MODEL_URL,
+      openaiKey: chat.inferenceKey,
+      baseModel: CHAT_BASE_MODEL,
+    });
+  } else console.log("chat host: skipped, VERDA_INFERENCE_KEY is not set");
 };
 
 const reset = async (outputs: Outputs): Promise<void> => {

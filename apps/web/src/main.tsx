@@ -30,11 +30,8 @@ function App() {
     <div className="min-h-screen">
       <header className="bg-primary text-primary-foreground">
         <nav className="mx-auto flex max-w-4xl items-center gap-1 whitespace-nowrap px-6 py-3">
-          <span className="mr-2 inline-flex items-center gap-2 font-semibold tracking-tight">
-            <span className="inline-flex bg-primary p-2">
-              <img src={brand.logo} alt="" width="56" height="19" />
-            </span>
-            {brand.name}
+          <span className="mr-2 inline-flex p-2">
+            <img src={brand.logo} alt={brand.name} width="56" height="19" />
           </span>
           <Link
             href="/"

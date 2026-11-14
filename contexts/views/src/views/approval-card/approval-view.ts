@@ -32,16 +32,10 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     base,
     cardStyles,
     css`
-      .title {
-        font-size: var(--font-size-xl);
-        font-weight: 800;
-        line-height: 1.083;
-        letter-spacing: -0.25px;
-      }
       .skeleton {
         display: block;
         height: 14px;
-        border-radius: var(--border-radius-md);
+        border-radius: 0;
         background: var(--color-bg-subtle);
       }
       .header .skeleton {
@@ -84,7 +78,6 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       }
       .center .headline {
         font-size: var(--font-size-xl);
-        font-weight: 600;
       }
       .list {
         display: flex;
@@ -99,7 +92,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         gap: var(--spacing-sm);
         padding: var(--spacing-lg);
         border: 1px solid var(--color-border);
-        border-radius: var(--border-radius-md);
+        border-radius: 0;
       }
       .item-reason {
         display: flex;

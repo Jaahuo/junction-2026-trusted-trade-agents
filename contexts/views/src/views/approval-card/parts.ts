@@ -84,12 +84,11 @@ export const cardStyles = css`
   :host {
     container-type: inline-size;
   }
+  /* v12: flat Aimo cards, no radius and no shadow. */
   .card {
     overflow: hidden;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-lg);
     background: var(--color-white);
-    box-shadow: var(--shadow-sm);
   }
   .header {
     display: flex;
@@ -113,13 +112,17 @@ export const cardStyles = css`
   .eyebrow {
     color: var(--color-text-on-brand-subtle);
   }
+  /* v13 Heading/H2: Barlow Condensed bold 32/1. */
+  .headline,
+  .header .title {
+    font-family: var(--font-family-condensed);
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1;
+  }
   .headline {
     display: flex;
     gap: var(--spacing-lg);
-    font-size: var(--font-size-xl);
-    font-weight: 800;
-    line-height: 1.083;
-    letter-spacing: -0.25px;
   }
   .headline .name {
     flex: 1;

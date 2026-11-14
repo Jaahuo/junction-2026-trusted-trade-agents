@@ -169,7 +169,7 @@ export class ApprovalCard extends LitElement {
         gap: var(--spacing-sm) var(--spacing-md);
         align-items: center;
         padding: var(--spacing-lg);
-        border-radius: var(--border-radius-md);
+        border-radius: 0;
         background: var(--color-bg-brand-subtle);
       }
       .compare.two {
@@ -220,7 +220,7 @@ export class ApprovalCard extends LitElement {
         display: flex;
         gap: var(--spacing-md);
         padding: var(--spacing-lg);
-        border-radius: var(--border-radius-md);
+        border-radius: 0;
         background: var(--color-bg-brand-subtle);
       }
       .result .title {
@@ -496,7 +496,7 @@ export class ApprovalCard extends LitElement {
   private orderLines(order: Order) {
     if (order.lines.length < 2) return nothing;
     return html`<div class="group">
-      <h3 class="label-small secondary">Order lines</h3>
+      <p class="body-small secondary">Order lines</p>
       <ul class="lines">
         ${order.lines.map(
           ({ claims }) =>
@@ -524,7 +524,7 @@ export class ApprovalCard extends LitElement {
     if (order.reasons.some((r) => REQUOTE.has(r))) return "Approve new price";
     if (more.length === 0 && only === "SUBSTITUTION") return "Use substitute";
     if (more.length === 0 && only === "NEW_PRODUCT") return "Approve new product";
-    return `Approve ${money(order.total.net)} order`;
+    return "Approve order";
   }
 
   private pendingBody(order: Order) {

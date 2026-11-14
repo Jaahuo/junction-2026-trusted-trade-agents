@@ -16,7 +16,7 @@ import { createQuoteCache } from "./quote-cache.ts";
 
 // Invented products only (team rules R-23).
 
-export const FAKE_NOW = "2026-11-14T10:00:00Z";
+const FAKE_NOW = "2026-11-14T10:00:00Z";
 export const FAKE_ISSUER = "http://offers.test";
 
 export const fakeProduct = (
@@ -62,7 +62,7 @@ export const fakePrice = (productId: string, patch: Partial<PriceQuote> = {}): P
 });
 
 type LiveKind = "availability" | "prices";
-export interface LiveCall {
+interface LiveCall {
   kind: LiveKind;
   query: LiveQuery;
 }
@@ -73,13 +73,13 @@ export type FakeLiveData = Record<
   { availability?: Record<string, AvailabilityQuote>; prices?: Record<string, PriceQuote> }
 >;
 
-export interface FakeWholesaler extends WholesalerLive {
+interface FakeWholesaler extends WholesalerLive {
   readonly calls: LiveCall[];
   /** Without `kind`, both calls fail. */
   failWith(on: boolean, kind?: LiveKind): void;
 }
 
-export function fakeWholesaler(data: FakeLiveData): FakeWholesaler {
+function fakeWholesaler(data: FakeLiveData): FakeWholesaler {
   const calls: LiveCall[] = [];
   const failing = new Set<LiveKind>();
   const answer = <T>(
@@ -112,12 +112,12 @@ export function fakeWholesaler(data: FakeLiveData): FakeWholesaler {
   };
 }
 
-export interface FakeCatalog extends CatalogFacts {
+interface FakeCatalog extends CatalogFacts {
   readonly requests: FactsRequest[];
   fail(on: boolean): void;
 }
 
-export function fakeCatalog(products: readonly ProductFacts[]): FakeCatalog {
+function fakeCatalog(products: readonly ProductFacts[]): FakeCatalog {
   const requests: FactsRequest[] = [];
   let failing = false;
   return {
@@ -135,11 +135,11 @@ export function fakeCatalog(products: readonly ProductFacts[]): FakeCatalog {
   };
 }
 
-export interface FakeMandates extends CurrentMandate {
+interface FakeMandates extends CurrentMandate {
   fail(on: boolean): void;
 }
 
-export function fakeMandates(mandate: Mandate | null): FakeMandates {
+function fakeMandates(mandate: Mandate | null): FakeMandates {
   let failing = false;
   return {
     fail(on) {
@@ -149,14 +149,14 @@ export function fakeMandates(mandate: Mandate | null): FakeMandates {
   };
 }
 
-export interface FakePrechecker extends Prechecker {
+interface FakePrechecker extends Prechecker {
   readonly calls: string[];
   readonly maxInFlight: number;
   /** An error answer stands for orders answering 501 or being unreachable. */
   answerWith(answer: Result<Precheck, "UNAVAILABLE">): void;
 }
 
-export function fakePrechecker(
+function fakePrechecker(
   initial: Result<Precheck, "UNAVAILABLE"> = ok(fixtures.precheck),
 ): FakePrechecker {
   const calls: string[] = [];
@@ -182,13 +182,13 @@ export function fakePrechecker(
   };
 }
 
-export interface FakeSigner extends OfferSigner {
+interface FakeSigner extends OfferSigner {
   readonly signed: { claims: Omit<OfferClaims, "iat" | "exp">; exp: Date }[];
 }
 
 const seconds = (date: Date): number => Math.floor(date.getTime() / 1000);
 
-export function fakeSigner(now: () => Date): FakeSigner {
+function fakeSigner(now: () => Date): FakeSigner {
   const signed: FakeSigner["signed"] = [];
   return {
     signed,
@@ -203,12 +203,12 @@ export function fakeSigner(now: () => Date): FakeSigner {
   };
 }
 
-export interface FakeClock {
+interface FakeClock {
   readonly now: () => Date;
   set(iso: string): void;
 }
 
-export function fakeClock(start = FAKE_NOW): FakeClock {
+function fakeClock(start = FAKE_NOW): FakeClock {
   let current = new Date(start);
   return {
     now: () => new Date(current),

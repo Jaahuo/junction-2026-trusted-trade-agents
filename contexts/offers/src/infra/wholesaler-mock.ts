@@ -92,7 +92,7 @@ const TIME_PATTERN =
   /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2})(?::(\d{2}(?:\.\d+)?))?(Z|[+-]\d{2}:\d{2})?)?$/;
 
 /** ISO 8601 with offset, or null. A time with no offset is Europe/Helsinki local time; `dateOnly` is the time of a bare date. */
-export const toHelsinkiTime = (value: string, dateOnly: string | null): string | null => {
+const toHelsinkiTime = (value: string, dateOnly: string | null): string | null => {
   const match = TIME_PATTERN.exec(value.trim());
   const date = match?.[1];
   if (date === undefined) return null;

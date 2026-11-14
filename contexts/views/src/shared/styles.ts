@@ -14,10 +14,8 @@ const tokens = css`
     --color-button-text: #003747;
     --color-light-purple-aimo: #eee8f5;
     --color-yellow-aimo-soft: #fff3b0;
-    /* The Valio sunrise gradient of the loading shimmer. */
-    --color-sunrise-lilac: #d9d2f5;
-    --color-sunrise-pink: #e0a6f1;
-    --color-sunrise-amber: #e8b57a;
+    /* A lilac between light purple and the Valio sunrise lilac, for the loading bars. */
+    --color-lilac-aimo: #e2daf5;
     --color-text: #23282d;
     --color-text-secondary: #555759;
     --color-text-on-brand: #ffffff;
@@ -197,25 +195,27 @@ export const base = css`
   .message.danger {
     color: var(--color-text-danger);
   }
-  /* Loading: a shimmering Valio sunrise gradient, no spinners. Always aria-hidden. One
-     gradient, fixed to the viewport and repeating, moves across every shimmer at once, so the
-     bars stay in step and the movement never jumps. */
+  /* Loading: a soft white sweep over light lilac, no spinners. Always aria-hidden.
+     The sweep is fixed to the viewport and repeats, so every shimmer moves in step and the
+     loop never jumps. A shimmer on a petrol header sets --shimmer-base to translucent white. */
   .shimmer {
+    --shimmer-base: var(--color-light-purple-aimo);
+    --shimmer-sweep: color-mix(in srgb, var(--color-white) 85%, transparent);
+    background-color: var(--shimmer-base);
     background-image: linear-gradient(
       90deg,
-      var(--color-sunrise-lilac) 0%,
-      var(--color-sunrise-pink) 30%,
-      var(--color-sunrise-amber) 50%,
-      var(--color-sunrise-pink) 70%,
-      var(--color-sunrise-lilac) 100%
+      transparent 0%,
+      var(--shimmer-sweep) 50%,
+      transparent 100%
     );
     background-size: 200vw 100%;
     background-repeat: repeat;
     background-attachment: fixed;
-    animation: shimmer 3s linear infinite;
+    animation: shimmer 2.4s linear infinite;
   }
   /* A shimmer bar along the bottom of a header or strip while something loads. */
   .load-bar {
+    --shimmer-base: var(--color-lilac-aimo);
     display: block;
     height: 6px;
   }

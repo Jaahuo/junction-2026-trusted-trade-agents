@@ -189,5 +189,9 @@ if (action === "status") {
   if (issue.state !== "CLOSED") await command("gh", "issue", "close", number);
   await boardStatus("Done");
   console.log(`Finished #${number} from merged PR #${numberPr}.`);
-  await cleanMergedWorktree(`task/${number}`, pr.head.sha);
+  await cleanMergedWorktree(
+    `task/${number}`,
+    pr.head.sha,
+    `bun run task finish ${number} --pr ${numberPr}`,
+  );
 } else fail("Unknown task command; see --help.");

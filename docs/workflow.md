@@ -12,7 +12,7 @@ Each candidate has its own GitHub Issues and private board. Issues are created u
 
 ## Worktree cleanup after merge
 
-The owner removes the task worktree once its PR merges. Stop the worktree's servers before the merge; cleanup does not stop processes. `ship --merge` and `task finish` do it: they drop the worktree's database, run `wt remove`, and delete the local branch. They keep the worktree and print why when it has uncommitted changes, when its `HEAD` differs from the merged PR head, or when it is the main worktree. Then commit or discard that work, and clean up by hand as [local runtime](runtime.md) says. Remove an exploration worktree by hand when you finish with it.
+The owner removes the task worktree once its PR merges. Stop the worktree's servers before the merge; cleanup does not stop processes. `ship --merge` and `task finish` do it: they drop the worktree's database, run `wt remove`, and delete the local branch. They keep the worktree and print why when the command runs inside it, when it has uncommitted changes, when its `HEAD` differs from the merged PR head, or when it is the main worktree. Then commit or discard that work, and clean up by hand as [local runtime](runtime.md) says. Ship runs inside the task worktree, so after a merge it prints the cleanup command. Move to the main checkout and run that command there. Remove an exploration worktree by hand when you finish with it.
 
 ## Fresh upstream for worktrees
 

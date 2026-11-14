@@ -132,11 +132,17 @@ export function parseWorktrees(porcelain: string): Worktree[] {
 export function worktreeCleanup(input: {
   worktree: Worktree;
   mainPath: string;
+  callerPath: string;
   dirty: boolean;
   mergedHead: string;
 }): { remove: true } | { remove: false; reason: string } {
   if (input.worktree.path === input.mainPath)
     return { remove: false, reason: "it is the main worktree" };
+  if (
+    input.callerPath === input.worktree.path ||
+    input.callerPath.startsWith(`${input.worktree.path}/`)
+  )
+    return { remove: false, reason: "this command runs inside it" };
   if (input.dirty) return { remove: false, reason: "it has uncommitted changes" };
   if (input.worktree.head !== input.mergedHead)
     return { remove: false, reason: "its HEAD differs from the merged PR head" };

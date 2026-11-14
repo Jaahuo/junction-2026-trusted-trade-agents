@@ -185,7 +185,8 @@ const merged = await ghJson(
 );
 if (!merged.merged) fail("GitHub did not merge the PR.");
 console.log(`Squash merged PR #${pr.number}.`);
-if (!taskIssue) await cleanMergedWorktree(branch, head);
+if (!taskIssue)
+  await cleanMergedWorktree(branch, head, `bun scripts/worktree-cleanup.ts ${branch} ${head}`);
 else {
   const finish = Bun.spawn(
     ["bun", "scripts/task.ts", "finish", taskIssue, "--pr", String(pr.number)],

@@ -119,6 +119,7 @@ describe("merged worktree cleanup", () => {
   const input = (overrides: Partial<Parameters<typeof worktreeCleanup>[0]> = {}) => ({
     worktree: task ?? { path: "", head: "", branch: null },
     mainPath: "/repo",
+    callerPath: "/repo",
     dirty: false,
     mergedHead: "bbb",
     ...overrides,
@@ -136,6 +137,11 @@ describe("merged worktree cleanup", () => {
 
   test("keeps the main worktree", () => {
     expect(worktreeCleanup(input({ mainPath: "/repo.task-7" })).remove).toBe(false);
+  });
+
+  test("keeps the worktree the command runs in", () => {
+    expect(worktreeCleanup(input({ callerPath: "/repo.task-7/scripts" })).remove).toBe(false);
+    expect(worktreeCleanup(input({ callerPath: "/repo.task-70" })).remove).toBe(true);
   });
 
   test("keeps a worktree with uncommitted changes", () => {

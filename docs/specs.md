@@ -80,6 +80,7 @@ export const MODEL_TOOLS = [
   "place_order",
   "get_order_status",
   "get_mandate",
+  "show_mandate",
   "draft_mandate",
   "list_pending_approvals",
 ] as const; // the model sees these
@@ -137,6 +138,7 @@ export const TOOL_INPUT = {
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
+  show_mandate: EmptySchema,
   draft_mandate: DraftMandateRequestSchema,
   list_pending_approvals: EmptySchema,
   decide_approval: DecideApprovalInputSchema,
@@ -680,6 +682,7 @@ PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
 - Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`; SPEC-013 defines the versioned URI.
 - Quiet twins: `find_products` and `quote_offers` are `search_products` and `get_offers` without a view. Same `TOOL_INPUT`, `TOOL_OUTPUT`, REST route and handler; no `_meta.ui` and no `language` input; `ROUTES` keeps the name of the tool with the view. A host opens a view for every call of a tool that declares one, so the agent uses the quiet twins while it prepares or places an order the user asked for, and the chat shows only the approval card. It uses `search_products` and `get_offers` when the user asks to see the products or compare offers.
+- Mandate lookup: `get_mandate` returns the limits without a view or `language` input. `show_mandate` has the same `TOOL_INPUT`, `TOOL_OUTPUT`, REST route and handler, but opens mandate settings and accepts `language`. The agent uses `get_mandate` during ordering and `show_mandate` only when the user asks to see the limits or settings. `ROUTES` keeps `get_mandate`.
 - Each tool whose view is shown in the chat also lists an optional `language` input (a BCP 47 tag): the language the user writes in. Only the view reads it, from the tool input; the server drops it before the REST call, so it is not part of `TOOL_INPUT` or any route.
 - Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
 
@@ -696,6 +699,7 @@ export const TOOL_OUTPUT = {
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,
+  show_mandate: StoredMandateSchema,
   draft_mandate: MandateDraftSchema,
   list_pending_approvals: PendingListSchema,
   decide_approval: OrderSchema,
@@ -742,7 +746,7 @@ export const VIEWS = [
   {
     view: "mandate-settings",
     uri: "ui://trusted-trade/mandate-settings",
-    tools: ["get_mandate", "draft_mandate"],
+    tools: ["show_mandate", "draft_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
     plainList: null,
@@ -758,7 +762,7 @@ export const VIEWS = [
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
 - Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. Without the query, a view with a `plainList` route loads that list instead (`/views/approval-card` lists the open orders). The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
 - The approval card shows a link to `approvalUrl` in every pending state.
-- Mandate settings: a `get_mandate` result shows the limits in force. A `draft_mandate` result shows the proposed limits next to the current ones and a Register button. Register calls `register_mandate` with the draft and an `operationId` the view creates once per draft, so a retry after a failed or lost call returns the stored mandate (SPEC-008). The view then shows the registered mandate. A failed call keeps the draft and shows the error next to the button.
+- Mandate settings: a `show_mandate` result shows the limits in force. A `draft_mandate` result shows the proposed limits next to the current ones and a Register button. Register calls `register_mandate` with the draft and an `operationId` the view creates once per draft, so a retry after a failed or lost call returns the stored mandate (SPEC-008). The view then shows the registered mandate. A failed call keeps the draft and shows the error next to the button.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
 - Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
 - Language: a view shows English or Finnish. In a host it takes the tool input's `language`, else the host context `locale`, else the browser language; on the plain page and in the harness the browser language. Any other language gives English. `?lang=` on the view URL overrides both, for the harness and screenshots.

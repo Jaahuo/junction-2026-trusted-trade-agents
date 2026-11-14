@@ -90,7 +90,10 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   place_order:
     "Place an order from the offerIds of signed offers (from get_offers or quote_offers) with an idempotency key. Pass the short offerId (off_…), not the long token. The order is placed, pending human approval or rejected, with reason codes. When the user changes an earlier pending proposal, pass supersedes with its orderId and proposalVersion. An accepted replacement closes only that earlier proposal. Do not replace unrelated orders. A pending order has an approvalUrl for the human; do not approve it yourself.",
   get_order_status: "Get the current status and the audit record of an order.",
-  get_mandate: "Get the purchasing limits currently in force for this agent.",
+  get_mandate:
+    "Get the purchasing limits currently in force for this agent, without opening a view. Use it to check limits while preparing or placing an order. When the user asks to see the limits, use show_mandate.",
+  show_mandate:
+    "Show the purchasing limits currently in force in the mandate settings view. Use it only when the user asks to see the agent's limits or settings. While preparing or placing an order, use get_mandate instead. Same input and result as get_mandate.",
   draft_mandate:
     "Draft new purchasing limits (a mandate) from the terms the human gave, to set or change the limits or after MANDATE_INVALID. Nothing is registered: the mandate view shows the draft next to the current limits, and only the human registers it there with the Register button. The limits are not in force until get_mandate shows them.",
   list_pending_approvals: "List the orders that wait for a human approval decision.",

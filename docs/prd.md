@@ -345,15 +345,17 @@ The list is fixed and part of the open contract, so any agent can act on a resul
 
 An order is always in one of five states, and each exception below has one defined handling.
 
-| State            | Meaning                                                             | Moves to                                                                                                            |
-| ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Pending approval | Waiting for the approver's decision                                 | Placed, declined, awaiting payment, or rejected (the mandate became invalid, or the credit limit fails at approval) |
-| Awaiting payment | Pay-on-order only: waiting for the simulated authorization          | Placed or rejected                                                                                                  |
-| Placed           | Committed at the offer's price and delivery date                    | Final                                                                                                               |
-| Rejected         | A fixed guardrail failed                                            | Final. The agent may start a new request.                                                                           |
-| Declined         | The approver said no, or gave no answer before the delivery cut-off | Final. The order states whether the agent stops or may look for alternatives.                                       |
+| State            | Meaning                                                                                                 | Moves to                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Pending approval | Waiting for the approver's decision                                                                     | Placed, declined, awaiting payment, or rejected (the mandate became invalid, or the credit limit fails at approval) |
+| Awaiting payment | Pay-on-order only: waiting for the simulated authorization                                              | Placed or rejected                                                                                                  |
+| Placed           | Committed at the offer's price and delivery date                                                        | Final                                                                                                               |
+| Rejected         | A fixed guardrail failed                                                                                | Final. The agent may start a new request.                                                                           |
+| Declined         | The approver said no, the delivery cut-off passed, or an accepted proposal explicitly replaces this one | Final. The order states whether the agent stops or may look for alternatives.                                       |
 
 Orders live in our own store, because the mock has no order endpoint.
+
+The pending list contains only proposals that still need a decision. When the buyer changes a pending proposal, the agent explicitly identifies the proposal it replaces. The server closes that proposal only after it accepts the replacement. It keeps unrelated orders open and records the replacement in both audits. Replacement does not approve an order.
 
 ### Offer expires while the order waits
 

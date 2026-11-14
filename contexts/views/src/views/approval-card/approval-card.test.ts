@@ -341,6 +341,22 @@ test("a declined substitute offers one tap to stop suggesting it", () => {
   expect(visible(card)).toContain(text.neverSaved(SUBSTITUTE, ORIGINAL));
 });
 
+for (const next of ["stop", "alternatives"] as const) {
+  test(`a server decline with next ${next} does not offer a standing substitution rule`, () => {
+    const text = pick(CARD);
+    const order = OrderSchema.parse(declinedSubstitution);
+    for (const event of order.audit) {
+      if (event.event === "declined") event.actor = "server";
+    }
+    const { card } = cardFor({
+      ...order,
+      decision: { ...order.decision, action: "reject", next, by: "server" },
+    });
+    expect(visible(card)).not.toContain(text.dontSuggestAgain);
+    expect(visible(card)).not.toContain(text.neverSuggest(SUBSTITUTE, ORIGINAL));
+  });
+}
+
 test("a pair that already has a rule is not offered again", () => {
   const text = pick(CARD);
   const { card } = cardFor(declinedSubstitution);

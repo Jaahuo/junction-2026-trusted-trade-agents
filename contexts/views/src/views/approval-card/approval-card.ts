@@ -174,7 +174,9 @@ const ruleChoice = (order: Order): RuleChoice | null => {
           c.replaces !== null &&
           samePair(offer, { replaces: c.replaces, productId: c.productId }),
       )
-    : order.status === "declined"
+    : order.status === "declined" &&
+        order.decision?.action === "reject" &&
+        order.decision.by !== "server"
       ? claims.find((c) => c.replaces !== null)
       : undefined;
   if (substitute === undefined || substitute.replaces === null) return null;

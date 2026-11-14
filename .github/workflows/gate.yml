@@ -31,4 +31,12 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@v5
       - run: bun install --frozen-lockfile
-      - run: bun run gate
+      - name: Run gate in an isolated process namespace
+        run: |
+          sudo --preserve-env=PATH,HOME,DATABASE_URL,TEST_DATABASE_URL,MISE_LOG_LEVEL,MISE_TRUSTED_CONFIG_PATHS,MISE_YES \
+            /usr/bin/unshare --mount --propagation private --pid --fork \
+            /bin/sh -eu -c '
+              /usr/bin/umount --recursive /proc
+              /usr/bin/mount --types proc proc /proc
+              exec /usr/bin/setpriv --reuid="$1" --regid="$2" --init-groups bun run gate
+            ' sh "$(id -u)" "$(id -g)"

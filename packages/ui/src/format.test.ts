@@ -5,6 +5,7 @@ import {
   ORDER_OUTCOMES,
   ORDER_STATUS_LABELS,
   ORDER_TERMS,
+  ORDER_WORDING,
   formatDeliveryDate,
   formatMoney,
   formatOrderNumber,
@@ -134,4 +135,42 @@ test("order numbers are bounded and retain short identifiers", () => {
   expect(formatOrderNumber("")).toBe("Order number unavailable");
   expect(formatOrderNumber("abc")).toBe("abc");
   expect(formatOrderNumber("12345678-1234-1234-1234-123456789abc")).toBe("12345678");
+});
+
+describe("Finnish", () => {
+  test("the Finnish wording has the English keys and the English wording is the exports", () => {
+    expect(ORDER_WORDING.en.statuses).toBe(ORDER_STATUS_LABELS);
+    for (const group of ["statuses", "actions", "outcomes", "actors", "terms"] as const)
+      expect(Object.keys(ORDER_WORDING.fi[group])).toEqual(Object.keys(ORDER_WORDING.en[group]));
+  });
+
+  test("money, dates and times use fi-FI and Finnish basis words", () => {
+    expect(formatMoney(1112.3, "EUR", "gross", "fi")).toBe(
+      `${new Intl.NumberFormat("fi-FI", { style: "currency", currency: "EUR" }).format(1112.3)} (verollinen)`,
+    );
+    expect(formatDeliveryDate("2026-11-16", "fi")).toBe(
+      new Intl.DateTimeFormat("fi-FI", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(new Date("2026-11-16T00:00:00Z")),
+    );
+    expect(formatTimestamp("2026-11-14T10:02:11Z", "fi")).toEndWith(" UTC");
+  });
+
+  test("quantities take the partitive after any number but 1", () => {
+    expect(formatQuantity({ value: 1, unit: "CT" }, "fi")).toBe("1 pakkaus");
+    expect(formatQuantity({ value: 100, unit: "CT" }, "fi")).toBe("100 pakkausta");
+    expect(formatQuantity({ value: 2, unit: "XYZ" }, "fi")).toBe("2 (yksikkö tuntematon)");
+  });
+
+  test("fallback texts are Finnish", () => {
+    expect(formatMoney(NaN, "EUR", "net", "fi")).toBe("Summa ei saatavilla (veroton)");
+    expect(formatDeliveryDate("2026-02-30", "fi")).toBe("Toimituspäivä ei saatavilla");
+    expect(formatTimestamp("nope", "fi")).toBe("Aika ei saatavilla");
+    expect(formatQuantity({ value: NaN, unit: "CT" }, "fi")).toBe("Määrä ei saatavilla");
+    expect(formatOrderNumber("", "fi")).toBe("Tilausnumero ei saatavilla");
+  });
 });

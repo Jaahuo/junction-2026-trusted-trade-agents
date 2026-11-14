@@ -12,8 +12,6 @@
     "@ctx/mandates": "workspace:*",
     "@ctx/orders": "workspace:*",
     "@elysia/eden": "catalog:",
-    "@fontsource/barlow-condensed": "catalog:",
-    "@fontsource/nunito": "catalog:",
     "@modelcontextprotocol/ext-apps": "catalog:",
     "elysia": "catalog:",
     "lit": "catalog:",
@@ -23,7 +21,6 @@
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
     "@vitejs/plugin-react": "catalog:",
-    "tailwindcss": "catalog:",
     "vite-plugin-singlefile": "catalog:"
   }
 }

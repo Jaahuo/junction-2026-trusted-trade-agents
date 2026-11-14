@@ -1,8 +1,8 @@
-import { formatMoney, formatQuantity, formatTimestamp, ORDER_TERMS } from "@app/ui/format";
+import { brand } from "@app/ui/brand";
+import { formatMoney, formatQuantity, formatTimestamp, ORDER_WORDING } from "@app/ui/format";
 import { css, html } from "lit";
-import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import { plainPageUrl, type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
+import { lang, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { loadMandate } from "./loader.ts";
@@ -14,6 +14,7 @@ import {
   substitutionText,
   thresholdText,
 } from "./presentation.ts";
+import { MANDATE } from "./strings.ts";
 
 const row = (label: string, value: string) =>
   html`<div class="row">
@@ -150,45 +151,44 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
   }
 
   private header() {
+    const text = pick(MANDATE);
     return html`<header class="header" part="header">
       <div class="brand">
-        <span class="logo" role="img" aria-label="Valio Aimo">${unsafeSVG(logo)}</span
-        ><span>Agent settings</span>
+        <img class="logo" src=${brand.logo} alt=${brand.name} /><span>${text.agentSettings}</span>
       </div>
-      <h2 class="title">Agent limits</h2>
+      <h2 class="title">${text.title}</h2>
     </header>`;
   }
 
   override render() {
     const state = this.state;
     if (state.kind === "done") return this.renderDone(state.data);
+    const text = pick(MANDATE);
     return html`<article class="card" part=${state.kind}>
       ${this.header()}
       <div class="body">
         ${
           state.kind === "loading"
             ? html`<p role="status">
-                <span class="spinner" aria-hidden="true"></span> Loading agent limits…
+                <span class="spinner" aria-hidden="true"></span> ${text.loading}
               </p>`
             : state.kind === "empty"
               ? html`<section>
-                  <h3>No current mandate</h3>
-                  <p>
-                    The agent has no current authority to place orders. Ask an approver to set up a
-                    mandate.
-                  </p>
+                  <h3>${text.noMandateTitle}</h3>
+                  <p>${text.noMandateBody}</p>
                 </section>`
               : html`<section role="alert">
-                  <h3>Agent limits could not be loaded</h3>
-                  <p>Try again or open the limits page.</p>
+                  <h3>${text.loadFailedTitle}</h3>
+                  <p>${text.loadFailedBody}</p>
                   <div class="actions">
-                    <button class="btn primary" @click=${() => this.reload(true)}>Try again</button
+                    <button class="btn primary" @click=${() => this.reload(true)}>
+                      ${text.tryAgain}</button
                     ><a
                       class="btn ghost"
                       href=${plainPageUrl("mandate-settings", document.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ?? location.origin) ?? "/views/mandate-settings"}
                       target="_blank"
                       rel="noreferrer"
-                      >Open limits page</a
+                      >${text.openLimitsPage}</a
                     >
                   </div>
                 </section>`
@@ -204,76 +204,71 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
     this.renderedStatus = status;
     const hard = standingConstraints.hard;
     const soft = standingConstraints.soft;
+    const text = pick(MANDATE);
+    const terms = pick(ORDER_WORDING).terms;
+    const l = lang();
     return html`<article class="card" part="done">
       ${this.header()}
       <div class="body">
         <div class="status ${status === "active" ? "" : "inactive"}" part="status">
-          <p class="strong">
-            ${status === "active" ? "Active" : status === "revoked" ? "Revoked" : "Expired"} ·
-            Version ${mandate.version}
-          </p>
-          <p>
-            ${status === "active" ? "Automatic placement is subject to these limits and other fixed checks." : "No current authority: these historical limits are not in force and cannot authorize orders."}
-          </p>
+          <p class="strong">${text.status[status]} · ${text.version(mandate.version)}</p>
+          <p>${status === "active" ? text.activeNote : text.inactiveNote}</p>
         </div>
-        ${status === "active" ? html`` : html`<h3>Previous limits and policies</h3>`}
+        ${status === "active" ? html`` : html`<h3>${text.previousLimits}</h3>`}
         <section>
-          <h3>Order limits</h3>
+          <h3>${text.orderLimits}</h3>
           <dl>
-            ${row(ORDER_TERMS.limit, `${formatMoney(limits.maxOrderTotal.value, limits.maxOrderTotal.currency, limits.maxOrderTotal.basis)} per order, including VAT and deposits. At or below this limit, automatic placement is allowed subject to other checks; above it, approval is required.`)}
-            ${row("Categories", `${categoriesText(limits.categories)}. ${limits.categories === null ? "All categories are eligible for automatic placement, subject to other checks." : limits.categories.length === 0 ? "No categories are eligible for automatic placement; approval is required." : "Listed categories are eligible for automatic placement, subject to other checks; other categories require approval."}`)}
-            ${row("Substitutions", substitutionText(limits.substitutions))}
-            ${row("Products not previously ordered by this customer", policyText(limits.newProducts))}
+            ${row(terms.limit, text.perOrder(formatMoney(limits.maxOrderTotal.value, limits.maxOrderTotal.currency, limits.maxOrderTotal.basis, l)))}
+            ${row(text.categories, `${categoriesText(limits.categories)}. ${limits.categories === null ? text.categoriesAll : limits.categories.length === 0 ? text.categoriesNone : text.categoriesListed}`)}
+            ${row(text.substitutions, substitutionText(limits.substitutions))}
+            ${row(text.newProducts, policyText(limits.newProducts))}
           </dl>
         </section>
         <section>
-          <h3>Product data</h3>
+          <h3>${text.productData}</h3>
           <dl>
-            ${row("Minimum delivery reliability", `${thresholdText(limits.minDeliveryReliability, (value) => new Intl.NumberFormat("en-FI", { style: "percent", maximumFractionDigits: 4 }).format(value))} ${limits.minDeliveryReliability === null ? "" : "At or above the minimum, automatic placement is allowed subject to other checks; below it, approval is required."}`)}
-            ${row("Maximum estimated CO₂-equivalent per kg", `${thresholdText(limits.maxCo2PerKg, (value) => `${formatQuantity({ value, unit: "KGM" })} CO₂-eq per kg`)} ${limits.maxCo2PerKg === null ? "" : "At or below the maximum, automatic placement is allowed subject to other checks; above it, approval is required."}`)}
-            ${row("Missing allergen data", `${policyText(limits.allergenData.ifNoData)} when an allergen constraint is unknown. Contradicted or missing matches still require approval.`)}
+            ${row(text.minReliability, `${thresholdText(limits.minDeliveryReliability, (value) => new Intl.NumberFormat(l === "fi" ? "fi-FI" : "en-FI", { style: "percent", maximumFractionDigits: 4 }).format(value))} ${limits.minDeliveryReliability === null ? "" : text.reliabilityRule}`)}
+            ${row(text.maxCo2, `${thresholdText(limits.maxCo2PerKg, (value) => text.co2PerKg(formatQuantity({ value, unit: "KGM" }, l)))} ${limits.maxCo2PerKg === null ? "" : text.co2Rule}`)}
+            ${row(text.missingAllergen, text.allergenRule(policyText(limits.allergenData.ifNoData)))}
           </dl>
         </section>
         <section>
-          <h3>Payment terms</h3>
+          <h3>${text.paymentTerms}</h3>
           <dl>
-            ${row("Invoice", policyText(limits.paymentTerms.invoice))}
-            ${row(ORDER_TERMS.paymentOnOrder, policyText(limits.paymentTerms.pay_on_order))}
+            ${row(text.invoice, policyText(limits.paymentTerms.invoice))}
+            ${row(terms.paymentOnOrder, policyText(limits.paymentTerms.pay_on_order))}
           </dl>
         </section>
         <section>
-          <h3>Standing constraints</h3>
-          <p class="strong">Required</p>
+          <h3>${text.standingConstraints}</h3>
+          <p class="strong">${text.required}</p>
           ${
             hard.length === 0
-              ? html`<p>None</p>`
+              ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${hard.map(() => html`<li>Free from lactose</li>`)}
+                  ${hard.map(() => html`<li>${text.freeFromLactose}</li>`)}
                 </ul>`
           }
-          <p class="strong">Preferred</p>
+          <p class="strong">${text.preferred}</p>
           ${
             soft.length === 0
-              ? html`<p>None</p>`
+              ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${soft.map((item) => html`<li>${item.attribute === "countryOfOrigin" ? "Country of origin" : item.attribute === "category" ? "Category" : item.attribute}: ${item.prefer}</li>`)}
+                  ${soft.map((item) => html`<li>${item.attribute === "countryOfOrigin" ? text.countryOfOrigin : item.attribute === "category" ? text.category : item.attribute}: ${item.prefer}</li>`)}
                 </ul>`
           }
         </section>
         <section>
-          <h3>Validity</h3>
+          <h3>${text.validity}</h3>
           <dl>
-            ${row("Issued", formatTimestamp(new Date(mandate.iat * 1000).toISOString()))}${row("Expires", formatTimestamp(new Date(mandate.exp * 1000).toISOString()))}
+            ${row(text.issued, formatTimestamp(new Date(mandate.iat * 1000).toISOString(), l))}${row(text.expires, formatTimestamp(new Date(mandate.exp * 1000).toISOString(), l))}
           </dl>
         </section>
-        <p class="secondary">
-          This view is read-only. An approver must authorize changes. Unusual quantities and
-          unconfirmed stock can still require approval; other checks also apply.
-        </p>
+        <p class="secondary">${text.readOnly}</p>
         <details>
-          <summary>Technical details</summary>
+          <summary>${text.technicalDetails}</summary>
           <dl>
-            ${row("Mandate ID", mandate.mandateId)}${row("Customer", mandate.iss)}${row("Agent", mandate.agent)}${row("Signed by", mandate.signedBy)}${row("Registered", formatTimestamp(record.registeredAt))}
+            ${row(text.mandateId, mandate.mandateId)}${row(text.customer, mandate.iss)}${row(text.agent, mandate.agent)}${row(text.signedBy, mandate.signedBy)}${row(text.registered, formatTimestamp(record.registeredAt, l))}
           </dl>
         </details>
       </div>

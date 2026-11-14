@@ -21,6 +21,7 @@ import {
   type Ui,
   useText,
 } from "./model.ts";
+import { setLang } from "../../shared/locale.ts";
 import { renderLoading, renderOfferComparison } from "./offer-comparison.ts";
 
 const fixture = async (name: string): Promise<OffersResult> =>
@@ -427,6 +428,28 @@ describe("products left out", () => {
     const data = await fixture("empty");
     const output = visible(renderOfferComparison(data, inHost({ open: openAt("omitted:1") })));
     expect(output).toContain("The product is blocked from sale.");
+  });
+});
+
+describe("language", () => {
+  test("in Finnish a row, the open sentence and the links read in Finnish", async () => {
+    const data = await fixture("offers");
+    const butter = named(data, BUTTER);
+    setLang("fi");
+    try {
+      const row = first(rowsOf(data).filter((r) => r.name === BUTTER));
+      expect(row.reason).toBe("Yli rajan");
+      const output = visible(
+        renderOfferComparison(data, inHost({ open: openAt(butter.key) }), undefined, 1700),
+      );
+      expect(output).toContain("5 tuotetta");
+      expect(output).toContain("Vaatii hyväksyntäsi: 236,01 € yli tilausrajasi.");
+      expect(output).toContain("Tiedot");
+      expect(output).toContain("Muut vaihtoehdot (1)");
+      expect(output).not.toContain("Needs your approval");
+    } finally {
+      setLang("en");
+    }
   });
 });
 

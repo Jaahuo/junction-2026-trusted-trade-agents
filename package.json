@@ -10,8 +10,6 @@
     ],
     "catalog": {
       "@elysia/eden": "2.0.0-rc.1",
-      "@fontsource/barlow-condensed": "^5.3.0",
-      "@fontsource/nunito": "^5.3.0",
       "@modelcontextprotocol/ext-apps": "^2.0.4",
       "@modelcontextprotocol/sdk": "^1.32.2",
       "@tailwindcss/vite": "^4.1.0",
@@ -59,6 +57,7 @@
     "drizzle-kit": "^0.31.0",
     "jscpd": "^5.4.3",
     "knip": "^6.45.1",
+    "playwright-core": "^1.65.1",
     "typescript": "7.0.2",
     "vite-plus": "1.6.0"
   },

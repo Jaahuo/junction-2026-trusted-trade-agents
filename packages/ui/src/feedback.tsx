@@ -15,10 +15,10 @@ export function Spinner({ className }: { className?: string }) {
 }
 
 const alertTones = {
-  info: "border-primary/30 bg-primary/5 text-foreground",
-  success: "border-success/40 bg-success/10 text-foreground",
-  warning: "border-warning/50 bg-warning/10 text-foreground",
-  danger: "border-danger/40 bg-danger/10 text-danger",
+  info: "border-primary/30 bg-[var(--color-bg-brand-subtle)] text-foreground",
+  success: "border-success/40 bg-[var(--color-bg-success)] text-foreground",
+  warning: "border-warning/50 bg-[var(--color-bg-warning)] text-foreground",
+  danger: "border-danger/40 bg-[var(--color-bg-danger)] text-danger",
 } as const;
 
 export function Alert({
@@ -48,7 +48,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center">
+    <div className="flex flex-col items-center gap-2 border border-dashed border-border px-6 py-10 text-center">
       <p className="font-medium">{title}</p>
       {description === undefined ? null : <p className="text-sm text-muted">{description}</p>}
       {action}

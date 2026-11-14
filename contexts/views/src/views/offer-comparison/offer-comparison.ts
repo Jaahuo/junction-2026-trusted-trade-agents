@@ -1,11 +1,12 @@
 import { type OffersResult, OffersResultSchema } from "@app/contract";
+import { brand } from "@app/ui/brand";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { callAction, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
 import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 import minus16 from "../../shared/icons/minus-16.svg?raw";
 import warning16 from "../../shared/icons/warning-16.svg?raw";
+import { pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { cardStyles, icon } from "../approval-card/parts.ts";
@@ -34,6 +35,7 @@ import {
   type Ui,
   useText,
 } from "./model.ts";
+import { OFFERS } from "./strings.ts";
 
 // Read-only: the view never orders or approves. "Use", "Ask for something else" and
 // "Try again" hand a message to the chat through the host; approval happens later, on the
@@ -65,20 +67,21 @@ const linkButton = (label: string, onClick: () => void, expanded?: boolean) =>
  */
 function steerButton(label: string, id: string, ui: Ui, send: () => void) {
   const state = linkState(id, ui);
+  const text = pick(OFFERS);
   return html`<button
     type="button"
     class="link ${state}"
     aria-disabled=${state === "enabled" ? "false" : "true"}
     @click=${() => (state === "enabled" ? send() : undefined)}
   >
-    ${state === "asked" ? "Asked ✓" : state === "sending" ? "Sending…" : label}
+    ${state === "asked" ? text.asked : state === "sending" ? text.sending : label}
   </button>`;
 }
 
 function action(row: OfferedRow, option: Option, ui: Ui, on: Handlers) {
-  if (option.action === "pick") return html`<span class="tag">Pick</span>`;
+  if (option.action === "pick") return html`<span class="tag">${pick(OFFERS).pick}</span>`;
   if (option.action === null || !ui.canSteer) return nothing;
-  return steerButton("Use", option.line.offerId, ui, () =>
+  return steerButton(pick(OFFERS).use, option.line.offerId, ui, () =>
     on.steer(option.line.offerId, row.key, useText(row, option)),
   );
 }
@@ -110,7 +113,7 @@ function options(row: OfferedRow, ui: Ui, on: Handlers) {
     </ul>
     ${
       ui.canSteer
-        ? steerButton("Ask for something else", elseId, ui, () =>
+        ? steerButton(pick(OFFERS).askElse, elseId, ui, () =>
             on.steer(elseId, row.key, askElseText(row)),
           )
         : nothing
@@ -135,8 +138,9 @@ function detailList(row: OfferedRow, offerId: string | null) {
 function steerStatus(row: OfferedRow, ui: Ui) {
   const ids = [...row.options.map((o) => o.line.offerId), `else:${row.key}`, `retry:${row.key}`];
   const latest = ui.asked.at(-1);
-  if (ui.sending?.key === row.key) return "Sending to the chat…";
-  return latest !== undefined && ids.includes(latest) ? "Sent to the chat." : "";
+  const text = pick(OFFERS);
+  if (ui.sending?.key === row.key) return text.sendingStatus;
+  return latest !== undefined && ids.includes(latest) ? text.sentStatus : "";
 }
 
 function opened(row: Row, ui: Ui, on: Handlers, over: number | null): TemplateResult {
@@ -148,21 +152,22 @@ function opened(row: Row, ui: Ui, on: Handlers, over: number | null): TemplateRe
   const others = row.options.length - 1;
   const catalogue = row.pick.claims.product.name;
   const retryId = `retry:${row.key}`;
+  const text = pick(OFFERS);
   return html`<div class="panel" id=${`panel-${row.key}`}>
     ${catalogue === row.name ? nothing : html`<p class="catalogue">${catalogue}</p>`}
     <p class="sentence ${row.status}">${explain(row.pick, over)}</p>
     ${
       row.pick.precheck === null && ui.canSteer
-        ? steerButton("Try again", retryId, ui, () => on.steer(retryId, row.key, retryText(row)))
+        ? steerButton(text.tryAgain, retryId, ui, () => on.steer(retryId, row.key, retryText(row)))
         : nothing
     }
     <div class="links">
       ${linkButton(
-        "Details",
+        text.details,
         () => on.show("details", null),
         panel === "details" && ui.open?.offerId === null,
       )}
-      ${linkButton(`Other options (${others})`, () => on.show("options"), panel === "options")}
+      ${linkButton(text.otherOptions(others), () => on.show("options"), panel === "options")}
     </div>
     ${panel === "options" ? options(row, ui, on) : nothing}
     ${panel === "details" ? detailList(row, ui.open?.offerId ?? null) : nothing}
@@ -197,7 +202,7 @@ const brandHead = (title: string, until: string | null) =>
   html`<header class="header" part="header">
     <div class="eyebrow-row spread">
       <span class="brand">
-        ${icon(logo, "Valio Aimo")}
+        <img src=${brand.logo} alt=${brand.name} />
         <span class="divider" aria-hidden="true"></span>
         <h2 class="title">${title}</h2>
       </span>
@@ -223,9 +228,7 @@ export function renderOfferComparison(
     ${brandHead(head.title, head.until)}
     ${
       data.offers.length === 0
-        ? html`<p class="body-small nothing-offered" part="empty">
-            None of the products can be offered. The reason is on each row.
-          </p>`
+        ? html`<p class="body-small nothing-offered" part="empty">${pick(OFFERS).noneOffered}</p>`
         : nothing
     }
     <ul class="products">
@@ -238,7 +241,7 @@ export function renderOfferComparison(
 /** Before the result arrives: the branded frame with three placeholder rows. */
 export function renderLoading(): TemplateResult {
   return html`<section class="card" part="loading" aria-busy="true">
-    ${brandHead("Getting offers…", null)}
+    ${brandHead(pick(OFFERS).gettingOffers, null)}
     <ul class="products">
       ${[0, 1, 2].map(
         () =>

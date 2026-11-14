@@ -5,7 +5,7 @@ import { FI_ALLERGENS } from "./trust.ts";
 // "Gluten free", "Vegan", "Country of origin: Finland", "Pakkausmateriaali: palautettava lasi".
 
 /** "packagingMaterial", "invented_drinks" → "Packaging material", "Invented drinks". */
-export const words = (key: string) => {
+const words = (key: string) => {
   const spaced = key
     .replace(/([a-z\d])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")

@@ -1228,7 +1228,11 @@ export class ApprovalCard extends LitElement {
               type="button"
               class="btn secondary talk"
               part="button talk"
-              @click=${() => this.ask(`About order ${order.orderId}:`, "tt-talk")}
+              @click=${() =>
+                this.ask(
+                  `I'd like to discuss order ${order.orderId} before I decide. Give me a short summary and ask what I want to change.`,
+                  "tt-talk",
+                )}
             >
               ${icon(agent16)}Discuss order with agent
             </button>`

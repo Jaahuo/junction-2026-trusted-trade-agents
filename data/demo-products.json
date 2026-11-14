@@ -1,18 +1,91 @@
 {
-  "observedAt": "2026-11-14T08:03:18Z",
+  "observedAt": "2026-11-14T11:40:37Z",
   "requestedDate": "2026-11-16",
-  "s1": { "productId": "464201", "quantity": { "value": 20, "unit": "LTR" } },
-  "s2": { "productId": "464306", "quantity": { "value": 1000, "unit": "LTR" } },
-  "s3": null,
+  "s1": {
+    "productId": "464201",
+    "quantity": {
+      "value": 20,
+      "unit": "LTR"
+    }
+  },
+  "s2": {
+    "productId": "464306",
+    "quantity": {
+      "value": 1000,
+      "unit": "LTR"
+    }
+  },
+  "s3": {
+    "productId": "465147",
+    "quantity": {
+      "value": 240,
+      "unit": "ST"
+    }
+  },
   "late": null,
   "triedForS3": [
-    { "productId": "464306", "quantity": { "value": 1000, "unit": "LTR" } },
-    { "productId": "464306", "quantity": { "value": 10000, "unit": "LTR" } },
-    { "productId": "464237", "quantity": { "value": 1000, "unit": "LTR" } },
-    { "productId": "464237", "quantity": { "value": 10000, "unit": "LTR" } },
-    { "productId": "464201", "quantity": { "value": 1000, "unit": "LTR" } },
-    { "productId": "464201", "quantity": { "value": 10000, "unit": "LTR" } },
-    { "productId": "464073", "quantity": { "value": 1000, "unit": "LTR" } },
-    { "productId": "464073", "quantity": { "value": 10000, "unit": "LTR" } }
+    {
+      "productId": "464306",
+      "quantity": {
+        "value": 1000,
+        "unit": "LTR"
+      }
+    },
+    {
+      "productId": "464306",
+      "quantity": {
+        "value": 10000,
+        "unit": "LTR"
+      }
+    },
+    {
+      "productId": "464237",
+      "quantity": {
+        "value": 1000,
+        "unit": "LTR"
+      }
+    },
+    {
+      "productId": "464237",
+      "quantity": {
+        "value": 10000,
+        "unit": "LTR"
+      }
+    },
+    {
+      "productId": "464201",
+      "quantity": {
+        "value": 1000,
+        "unit": "LTR"
+      }
+    },
+    {
+      "productId": "464201",
+      "quantity": {
+        "value": 10000,
+        "unit": "LTR"
+      }
+    },
+    {
+      "productId": "464073",
+      "quantity": {
+        "value": 1000,
+        "unit": "LTR"
+      }
+    },
+    {
+      "productId": "464073",
+      "quantity": {
+        "value": 10000,
+        "unit": "LTR"
+      }
+    },
+    {
+      "productId": "465147",
+      "quantity": {
+        "value": 240,
+        "unit": "ST"
+      }
+    }
   ]
 }

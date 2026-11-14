@@ -1,0 +1,355 @@
+@font-face {
+  font-family: "Zilla Slab";
+  src: url("/static/acme/fonts/zilla-slab.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rethink Sans";
+  src: url("/static/acme/fonts/rethink-sans-regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rethink Sans";
+  src: url("/static/acme/fonts/rethink-sans-medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+}
+
+:root {
+  --font-display: "Zilla Slab", Georgia, serif;
+  --font-text: "Rethink Sans", system-ui, sans-serif;
+  --app-font-family: var(--font-text);
+  --display-weight: 400;
+  --display-tracking: -0.018em;
+  --acme-photo: url("/static/acme/kitchen.jpg");
+  --color-white: #fffdf7;
+  --color-gray-50: #f8f4e9;
+  --color-gray-100: #eee8d9;
+  --color-gray-200: #e0d7c4;
+  --color-gray-300: #c6bba4;
+  --color-gray-400: #988c75;
+  --color-gray-500: #776d5a;
+  --color-gray-600: #625a49;
+  --color-gray-700: #484c3f;
+  --color-gray-800: #303e33;
+  --color-gray-850: #24382c;
+  --color-gray-900: #192f25;
+  --color-gray-950: #10231b;
+  --acme-paper: #faf8f1;
+  --acme-panel: #fffdf7;
+  --acme-ink: #173e35;
+  --acme-muted: #62655d;
+  --acme-accent: #173e35;
+  --acme-line: #d8d8cc;
+  --acme-wash: #e8eee8;
+  --acme-shadow: 0 4px 20px #173e3506;
+}
+
+html.dark {
+  --color-gray-50: #faf8f1;
+  --color-gray-100: #f7e9c9;
+  --color-gray-200: #deddd3;
+  --color-gray-300: #c8ccc5;
+  --color-gray-400: #aeb7af;
+  --color-gray-500: #8e9a91;
+  --color-gray-600: #69766c;
+  --color-gray-700: #454c47;
+  --color-gray-800: #333a35;
+  --color-gray-850: #2b302c;
+  --color-gray-900: #1e211f;
+  --color-gray-950: #171a18;
+  --acme-paper: #1e211f;
+  --acme-panel: #272c28;
+  --acme-ink: #f7e9c9;
+  --acme-muted: #bdc4b9;
+  --acme-accent: #9dbdaa;
+  --acme-line: #454d46;
+  --acme-wash: #303c33;
+  --acme-shadow: 0 4px 20px #00000018;
+}
+
+/* The picker identifies the selected brand without depending on chat history. */
+:root:has(#model-selector-model-button[aria-label$="Acme Bakery"]) {
+  --color-gray-700: #5d4437;
+  --color-gray-800: #452d21;
+  --color-gray-850: #39251c;
+  --color-gray-900: #2d1e17;
+  --color-gray-950: #241912;
+  --acme-paper: #fbf6ee;
+  --acme-panel: #fffcf5;
+  --acme-ink: #4f3023;
+  --acme-muted: #756051;
+  --acme-accent: #783e27;
+  --acme-line: #e0d3c2;
+  --acme-wash: #f2e5d5;
+  --acme-photo: url("/static/acme/bakery.webp");
+}
+
+html.dark:has(#model-selector-model-button[aria-label$="Acme Bakery"]) {
+  --color-gray-50: #fffcf5;
+  --color-gray-100: #f7e9c9;
+  --color-gray-200: #e4d9cd;
+  --color-gray-300: #d4c6b6;
+  --color-gray-400: #beab97;
+  --color-gray-500: #a48e79;
+  --color-gray-600: #7a6757;
+  --color-gray-700: #5a483b;
+  --color-gray-800: #40342b;
+  --color-gray-850: #332b25;
+  --color-gray-900: #241f1b;
+  --color-gray-950: #1b1714;
+  --acme-paper: #241f1b;
+  --acme-panel: #302822;
+  --acme-ink: #f7e9c9;
+  --acme-muted: #cbbbaa;
+  --acme-accent: #d6ab8d;
+  --acme-line: #584638;
+  --acme-wash: #403025;
+}
+
+body,
+#chat-container {
+  background-color: var(--acme-paper);
+  color: var(--acme-ink);
+}
+
+#chat-container {
+  border-top: 4px solid var(--acme-accent);
+}
+
+#chat-pane {
+  background: var(--acme-paper);
+}
+
+#sidebar {
+  background-color: var(--acme-panel);
+  border-color: var(--acme-line);
+}
+
+#sidebar-webui-name {
+  font-family: var(--font-display);
+  font-weight: 400;
+}
+
+#sidebar a:hover,
+#sidebar button:hover {
+  background-color: var(--acme-wash);
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) {
+  max-width: 72rem;
+  padding: 2rem clamp(1.25rem, 4vw, 4rem);
+  transform: none;
+}
+
+#chat-pane .m-auto:has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"]) {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 2rem;
+}
+
+#chat-pane .m-auto:has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])::before {
+  content: "";
+  min-height: 20rem;
+  background: var(--acme-photo) center / cover no-repeat;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) > .w-full {
+  text-align: left;
+  min-width: 0;
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) > .w-full > .w-full {
+  align-items: flex-start;
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) .flex-row:has(> h2) {
+  padding-inline: 0;
+  max-width: 100%;
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) > .mx-auto {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) > .mx-auto > .mx-5 {
+  margin-inline: 0;
+}
+
+#chat-pane h2:has(.line-clamp-1) {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 3.3vw, 3rem);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: var(--display-tracking);
+  color: var(--acme-ink);
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) img[src*="/models/model/profile/image"] {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.75rem;
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) .markdown {
+  padding-inline: 0;
+  font-size: 1rem;
+  margin-block: 0.75rem 1rem;
+  color: var(--acme-muted);
+  line-height: 1.7;
+  -webkit-line-clamp: unset;
+}
+
+#chat-pane .m-auto:has(#suggestions-heading) .markdown a {
+  font-size: 0.8125rem;
+  text-underline-offset: 0.2em;
+}
+
+#message-input-container {
+  background: var(--acme-panel);
+  border: 1px solid var(--acme-line);
+  border-radius: 0.75rem;
+  box-shadow: var(--acme-shadow);
+}
+
+#message-input-container:focus-within {
+  border-color: var(--acme-accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--acme-accent) 18%, transparent),
+    var(--acme-shadow);
+}
+
+#model-selector-model-button {
+  color: var(--acme-accent);
+  font-weight: 500;
+}
+
+#suggestions-heading {
+  color: var(--acme-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  margin-block: 0.5rem;
+}
+
+#chat-pane div:has(> [aria-labelledby="suggestions-heading"]) {
+  height: auto;
+}
+
+[aria-labelledby="suggestions-heading"] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  max-height: none;
+  overflow: visible;
+}
+
+[aria-labelledby="suggestions-heading"] button {
+  min-height: 7rem;
+  height: 100%;
+  padding: 1rem;
+  background: var(--acme-panel);
+  border: 1px solid var(--acme-line);
+  border-radius: 0.5rem;
+  transition:
+    background-color 160ms,
+    border-color 160ms,
+    transform 160ms;
+  animation: none;
+  opacity: 1;
+}
+
+[aria-labelledby="suggestions-heading"] button:hover {
+  background: var(--acme-wash);
+  border-color: var(--acme-accent);
+  transform: translateY(-2px);
+}
+
+[aria-labelledby="suggestions-heading"] button:active {
+  transform: translateY(0);
+}
+
+[aria-labelledby="suggestions-heading"] button .line-clamp-1 {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+[aria-labelledby="suggestions-heading"] button .text-sm {
+  color: var(--acme-ink);
+  font-size: 1rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+[aria-labelledby="suggestions-heading"] button .text-xs {
+  color: var(--acme-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+:where(a, button, input, textarea, [contenteditable="true"]):focus-visible {
+  outline: 2px solid var(--acme-accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 900px) {
+  #chat-pane .m-auto:has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"]) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+
+  #chat-pane .m-auto:has(img[src*="id=restaurant-buyer"], img[src*="id=bakery-buyer"])::before {
+    min-height: 0;
+    height: clamp(8rem, 24vw, 12rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [aria-labelledby="suggestions-heading"] button {
+    animation: none;
+    opacity: 1;
+    transition: none;
+    transform: none;
+  }
+}
+
+@media (max-width: 640px) {
+  #chat-pane .m-auto:has(#suggestions-heading) img[src*="/models/model/profile/image"] {
+    width: 3rem;
+    height: 3rem;
+  }
+
+  [aria-labelledby="suggestions-heading"] {
+    grid-template-columns: 1fr;
+  }
+
+  [aria-labelledby="suggestions-heading"] button {
+    min-height: 0;
+    padding: 0.85rem 1rem;
+  }
+}
+
+:root :is(a, button, input, textarea, [contenteditable="true"]):focus-visible {
+  outline: 2px solid var(--acme-accent) !important;
+  outline-offset: 3px;
+}
+
+/* WebUI leaves disabled attachment controls visible for users without Workspace access. */
+body:not(:has(#sidebar-workspace-button)) #input-menu-button,
+button[aria-label="Split screen"]:disabled {
+  display: none;
+}

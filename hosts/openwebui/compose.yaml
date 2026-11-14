@@ -4,15 +4,34 @@ services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:v0.13.3
     ports:
-      # Login is off, so the host is reachable from this machine only.
       - "127.0.0.1:${OPENWEBUI_PORT:-38090}:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file: .env
     environment:
-      WEBUI_AUTH: "False"
+      WEBUI_AUTH: "True"
+      ENABLE_SIGNUP: "False"
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:?Set the local operator email}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD:?Set the local operator password}
       ENABLE_OLLAMA_API: "False"
+      ENABLE_OPENAI_API: "True"
+      ENABLE_TOOL_SERVERS: "True"
+      ENABLE_DIRECT_CONNECTIONS: "False"
+      ENABLE_DIRECT_INTEGRATIONS: "False"
+      ENABLE_LOCAL_WEB_FETCH: "False"
+      ENABLE_VERSION_UPDATE_CHECK: "False"
+      ENABLE_TITLE_GENERATION: "False"
+      ENABLE_FOLLOW_UP_GENERATION: "False"
+      ENABLE_TAGS_GENERATION: "False"
+      OFFLINE_MODE: "True"
+      DO_NOT_TRACK: "True"
+      SCARF_NO_ANALYTICS: "True"
+      DEFAULT_MODELS: restaurant-buyer
+      DEFAULT_PINNED_MODELS: restaurant-buyer,bakery-buyer
     volumes:
       - data:/app/backend/data
+      - ./branding/custom.css:/app/backend/open_webui/static/custom.css:ro
+      - ./branding:/app/backend/open_webui/static/acme:ro
+      - ./scripts/migrate_auth.py:/opt/companion/migrate_auth.py:ro
 volumes:
   data:

@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./api": "./src/api/index.ts"
+    "./api": "./src/api/index.ts",
+    "./ui": "./src/ui/index.tsx"
   },
   "dependencies": {
     "@app/contract": "workspace:*",
     "@app/server-kit": "workspace:*",
     "@app/ui": "workspace:*",
+    "@app/web-kit": "workspace:*",
     "@ctx/mandates": "workspace:*",
     "@ctx/orders": "workspace:*",
     "@elysia/eden": "catalog:",

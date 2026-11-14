@@ -2,6 +2,7 @@ import { type OffersResult, OffersResultSchema, type StoredMandate } from "@app/
 import { brand } from "@app/ui/brand";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { callAction, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
+import agent16 from "../../shared/icons/agent-16.svg?raw";
 import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
 import minus16 from "../../shared/icons/minus-16.svg?raw";
@@ -81,11 +82,11 @@ function steerButton(label: string, id: string, ui: Ui, send: () => void) {
   const text = pick(OFFERS);
   return html`<button
     type="button"
-    class="link ${state}"
+    class="link steer ${state}"
     aria-disabled=${state === "enabled" ? "false" : "true"}
     @click=${() => (state === "enabled" ? send() : undefined)}
   >
-    ${state === "asked" ? text.asked : state === "sending" ? text.sending : label}
+    ${icon(agent16)}${state === "asked" ? text.asked : state === "sending" ? text.sending : label}
   </button>`;
 }
 
@@ -372,6 +373,11 @@ const styles = css`
     font: inherit;
     font-size: var(--font-size-xs);
     cursor: pointer;
+  }
+  .link.steer {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2xs);
   }
   .link.plain {
     color: inherit;

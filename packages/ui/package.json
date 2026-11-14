@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./format": "./src/format.ts",
     "./theme.css": "./src/theme.css"
   },
   "dependencies": {

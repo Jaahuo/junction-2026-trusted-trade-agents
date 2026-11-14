@@ -112,15 +112,15 @@ We enter the Nemotron, Codex, ElevenLabs, Vultr and Tiger Data challenges.
 
 **Kicker:** Partner technologies. **Title:** Built with.
 
-| Partner                      | Card title           | Card text                                                                                                                                                                                   |
-| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| NVIDIA Nemotron 3.5 Super VL | The buyer's agent    | Turns a chef's sentence or a recipe plan into a checked order through our MCP tools. Served by Verda. With a longer output limit and simpler tools, it passed 7 of 7 chat scenarios, twice. |
-| OpenAI Codex                 | The development team | Codex agents planned, built and reviewed in parallel worktrees: 377 subagent sessions. As the independent reviewer, it raised 171 findings, and we fixed 156.                               |
-| ElevenLabs                   | The agent's voice    | The chef speaks; the agent answers aloud in the hosted chat (`eleven_multilingual_v2`). Speech-to-text stays local. Approval stays a tap.                                                   |
-| Vultr                        | Runs everything live | The API, the MCP endpoint, the web app, the chat and our CI runners. Built with OpenTofu. Every push to main deploys.                                                                       |
-| Tiger Data                   | The database         | Managed PostgreSQL for orders, mandates, offers and the hash-chained audit log. Our migrations ran on it unchanged.                                                                         |
+| Partner                      | Card title          | Card text                                                                                                                           |
+| ---------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| NVIDIA Nemotron 3.5 Super VL | The chat agent      | Powers the chat in our Open WebUI, from a chef's sentence to a checked order.                                                       |
+| OpenAI Codex                 | A parallel dev team | 400+ agent sessions; each task ran on its own GitHub issue and worktree. 82 Codex reviews of Claude's code, 104 findings, 96 fixed. |
+| Vultr                        | Runs it live        | API, MCP endpoint, web app, chat and CI, set up with OpenTofu. Every push to main deploys.                                          |
+| Tiger Data                   | The database        | Managed PostgreSQL for orders, mandates, offers and our hash-chained audit log, which shows if anyone edits the past.               |
+| ElevenLabs                   | The agent's voice   | The chef talks and the agent answers aloud. Speech-to-text stays local. Approving is still a tap.                                   |
 
-Speaker notes: Nemotron reads an informal request and picks products, amounts and a date. The server checks every choice, so a wrong model choice cannot become an unchecked order. Codex counts come from our agent session logs. A person approves with a tap, never by voice. We do not use Tiger Data's time-series features.
+Speaker notes: Nemotron runs the whole ordering chat: it reads an informal request and picks products, amounts and a date. Verda serves it. The server checks every choice, so a wrong pick by the model cannot turn into an unchecked order. It passed 7 of 7 chat scenarios twice after these changes: the ordering skill in the prompt, a browser test with real chat sentences, a 16,384-token output limit, and tools that need less copying, such as short offer IDs. The Codex numbers come from our agent session logs: 52 main and 377 subagent sessions. We do not use Tiger Data's time-series features. ElevenLabs (`eleven_multilingual_v2`) reads replies aloud in the hosted chat. A person approves with a tap, never by voice.
 
 ### Nemotron form text
 

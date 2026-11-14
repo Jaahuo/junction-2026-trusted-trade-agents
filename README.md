@@ -71,13 +71,13 @@ A changed claim, another key or an expired offer fails the check.
 
 ## Partner technologies
 
-| Partner         | Use                                                                |
-| --------------- | ------------------------------------------------------------------ |
-| NVIDIA Nemotron | `nemotron-3.5-super-vl` on Verda is the buyer's agent in the chat. |
-| OpenAI Codex    | Codex agents planned, built and reviewed most of the code.         |
-| Vultr           | Hosts the service, the chat and the CI runners.                    |
-| Tiger Data      | Managed PostgreSQL for the live demo.                              |
-| ElevenLabs      | Speech output for the voice chat.                                  |
+| Partner         | Use                                                                                     |
+| --------------- | --------------------------------------------------------------------------------------- |
+| NVIDIA Nemotron | The chat agent: `nemotron-3.5-super-vl` on Verda turns a chef's sentence into an order. |
+| OpenAI Codex    | A parallel dev team: Codex agents built and reviewed the code, one worktree per task.   |
+| Vultr           | Runs it live: the service, the chat and the CI runners.                                 |
+| Tiger Data      | The database: managed PostgreSQL, including the hash-chained audit log.                 |
+| ElevenLabs      | The agent's voice: replies are read aloud in the hosted chat.                           |
 
 Details and evidence: [implementation and partner technologies](docs/implementation.md#partner-technologies).
 

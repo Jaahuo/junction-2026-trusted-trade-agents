@@ -17,6 +17,8 @@ import {
   type FakeOffers,
 } from "../application/fakes.ts";
 import { envOfferSigner } from "../infra/offer-signer.ts";
+import { peerAdapters } from "../infra/peers.ts";
+import { defaultOffersDeps } from "./adapters.ts";
 import { context } from "./index.ts";
 import { createApi, createRoot } from "./routes.ts";
 
@@ -181,5 +183,14 @@ describe("context wiring", () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  test("with the default adapters and no reachable peers, POST /offers answers 502 with the error envelope", async () => {
+    // Only the peer base URL is injected, so the test does not depend on PORT or a running server.
+    const unreachable = peerAdapters({ baseUrl: () => "http://127.0.0.1:1" });
+    const app = createApi({ ...defaultOffersDeps(), ...unreachable });
+    const response = await post(app, request());
+    const { status, body } = await errorOf(response);
+    expect({ status, code: body.error.code }).toEqual({ status: 502, code: "UPSTREAM_FAILED" });
   });
 });

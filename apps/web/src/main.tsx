@@ -25,7 +25,7 @@ function App() {
           {screens.map((screen) => (
             <Link
               key={screen.path}
-              href={screen.path}
+              href={screen.href ?? screen.path}
               className={(active) =>
                 active
                   ? "rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary"
@@ -43,7 +43,11 @@ function App() {
             <Route key={screen.path} path={screen.path} component={screen.Component} />
           ))}
           <Route>
-            {home ? <Redirect to={home.path} /> : <EmptyState title="No screens yet" />}
+            {home ? (
+              <Redirect to={home.href ?? home.path} />
+            ) : (
+              <EmptyState title="No screens yet" />
+            )}
           </Route>
         </Switch>
       </main>

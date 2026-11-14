@@ -46,7 +46,9 @@ test("an over-limit offer gives pending_approval with reasons exactly [SPEND_OVE
     const order = await orderOf(response);
     expect(order.status).toBe("pending_approval");
     expect(order.reasons).toEqual(["SPEND_OVER_LIMIT"]);
-    expect(order.approvalUrl).toBe(`https://first.example/approvals?order=${order.orderId}`);
+    expect(order.approvalUrl).toBe(
+      `https://first.example/approvals/${encodeURIComponent(order.orderId)}`,
+    );
     expect(order.audit.map((event) => event.event)).toEqual([
       "order_requested",
       "offer_verified",
@@ -56,7 +58,9 @@ test("an over-limit offer gives pending_approval with reasons exactly [SPEND_OVE
 
     publicBase.url = "https://second.example";
     const read = await orderOf(await call(app, "GET", `/${order.orderId}`));
-    expect(read.approvalUrl).toBe(`https://second.example/approvals?order=${order.orderId}`);
+    expect(read.approvalUrl).toBe(
+      `https://second.example/approvals/${encodeURIComponent(order.orderId)}`,
+    );
   }));
 
 test("precheck gives the same decision and reasons as place_order would and leaves orders, credit and audit unchanged", async () =>

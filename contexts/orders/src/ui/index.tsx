@@ -29,7 +29,7 @@ import {
 import { apiUrl, type Screen } from "@app/web-kit";
 import { treaty } from "@elysia/eden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Api } from "../api/index.ts";
 
 const api = treaty<Api>(apiUrl, { parseDate: false });
@@ -43,7 +43,23 @@ const failures: Record<string, string> = {
 };
 const explain = (code: string): string => failures[code] ?? "The decision could not be saved.";
 
-const pageOf = (orderId: string): string => `/approvals?order=${encodeURIComponent(orderId)}`;
+const pageOf = (orderId: string): string => `/approvals/${encodeURIComponent(orderId)}`;
+
+export function approvalRoute(pathname: string, search: string) {
+  const segment = pathname.match(/^\/approvals\/([^/]+)\/?$/)?.[1];
+  if (segment !== undefined) {
+    try {
+      return { orderId: decodeURIComponent(segment), redirect: null };
+    } catch {
+      return { orderId: segment, redirect: null };
+    }
+  }
+  const legacyOrderId = new URLSearchParams(search).get("order");
+  return {
+    orderId: null,
+    redirect: legacyOrderId === null ? null : pageOf(legacyOrderId),
+  };
+}
 
 const statusBadge: Record<
   Order["status"],
@@ -343,7 +359,11 @@ function PendingOrders() {
 }
 
 function ApprovalsScreen() {
-  const orderId = new URLSearchParams(window.location.search).get("order");
+  const { orderId, redirect } = approvalRoute(window.location.pathname, window.location.search);
+  useEffect(() => {
+    if (redirect !== null) window.location.replace(redirect);
+  }, [redirect]);
+  if (redirect !== null) return null;
   return (
     <>
       <PageHeader
@@ -356,7 +376,8 @@ function ApprovalsScreen() {
 }
 
 export const screen: Screen = {
-  path: "/approvals",
+  path: "/approvals/:orderId?",
+  href: "/approvals",
   title: "Approvals",
   Component: ApprovalsScreen,
 };

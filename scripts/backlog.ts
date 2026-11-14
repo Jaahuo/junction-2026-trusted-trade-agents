@@ -107,7 +107,7 @@ export function ownedPaths(body: string): string[] | null {
     // Outside backticks, also take the words that look like paths.
     const bare = line
       .replace(/`[^`]*`/g, " ")
-      .replace(/\bexcept\s+[^,;]+/gi, " ")
+      .replace(/\(?\bexcept\s+[\w./*@-]+\)?/gi, " ")
       .split(/[,;]\s*|\s+/)
       .filter(looksLikePath);
     const tokens = [...quoted, ...bare];

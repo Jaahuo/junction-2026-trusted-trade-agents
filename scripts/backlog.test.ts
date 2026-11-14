@@ -194,6 +194,12 @@ describe("unreadable ownership", () => {
   test("ownedPaths reads quoted and bare paths on one line", () => {
     const mixed = "## Owns\n\nOwned paths: `contexts/offers/**`, scripts/backlog.ts\n";
     expect(ownedPaths(mixed)).toEqual(["contexts/offers", "scripts/backlog.ts"]);
+    const excepted =
+      "## Owns\n\nOwned paths: contexts/offers/** (except package.json) and scripts/backlog.ts\n";
+    expect(ownedPaths(excepted)).toEqual(["contexts/offers", "scripts/backlog.ts"]);
+    const mine = issue(1, { body: `${excepted}\n## Acceptance\n\n1. gate.\n` });
+    const active = issue(2, { assignees: ["someone"], body: body("`scripts/backlog.ts`") });
+    expect(blockers(mine, board([mine, active]))).toEqual(["owned paths overlap active #2"]);
   });
 
   test("ownedPaths reads comma-separated paths without backticks", () => {

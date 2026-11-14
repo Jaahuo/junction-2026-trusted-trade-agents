@@ -1,13 +1,18 @@
-import {
-  type OfferClaims,
-  type OfferLine,
-  type OffersResult,
-  type OmitReason,
-  REASON_TEXT,
-  type ReasonCode,
-} from "@app/contract";
+import type { OfferClaims, OfferLine, OffersResult } from "@app/contract";
 import { formatDeliveryDate, formatQuantity, formatTimestamp } from "@app/ui/format";
-import { amount, day, money, number, stdUnits, unit, when } from "../approval-card/parts.ts";
+import { intlLocale, lang, pick } from "../../shared/locale.ts";
+import { CARD } from "../approval-card/card-strings.ts";
+import {
+  amount,
+  day,
+  money,
+  number,
+  stdUnits,
+  timeOnly,
+  unit,
+  when,
+} from "../approval-card/parts.ts";
+import { OFFERS } from "./strings.ts";
 
 // The offer comparison as data: one row per requested line, the agent's pick and the other
 // options, the words the view shows, and the open/ask state. Free of the DOM, so the rules
@@ -57,55 +62,18 @@ type OmittedRow = {
 
 export type Row = OfferedRow | OmittedRow;
 
-const SHORT: Record<ReasonCode, string> = {
-  SPEND_OVER_LIMIT: "Over limit",
-  CATEGORY_NOT_ALLOWED: "Category not allowed",
-  SUBSTITUTION: "Substitute",
-  NEW_PRODUCT: "New product",
-  RELIABILITY_BELOW_MIN: "Low reliability",
-  CO2_ABOVE_MAX: "High CO2",
-  UNCONFIRMED_DATA: "Missing data",
-  UNCONFIRMED_ALLERGEN: "Allergen unconfirmed",
-  UNCONFIRMED_STOCK: "Stock unconfirmed",
-  QUANTITY_UNUSUAL: "Unusual amount",
-  PAYMENT_TERMS: "Payment terms",
-  PRICE_CHANGED: "Price changed",
-  AVAILABILITY_DIFFERS: "Availability changed",
-  NOT_AUTHENTICATED: "Not signed in",
-  MANDATE_INVALID: "No mandate",
-  OFFER_INVALID: "Invalid offer",
-  OFFER_EXPIRED: "Expired",
-  CREDIT_LIMIT: "Over credit",
-  PAYMENT_FAILED: "Payment failed",
-  CUTOFF_PASSED: "Cut-off passed",
-  SALES_BLOCKED: "Not for sale",
-};
-
-const OMITTED: Record<OmitReason, string> = {
-  NO_PRICE: "No price",
-  SALES_BLOCKED: "Not for sale",
-  NO_DELIVERY_DATE: "No delivery date",
-  UNKNOWN_PRODUCT: "Not in catalogue",
-  INVALID_QUANTITY: "Invalid amount",
-  INSUFFICIENT_STOCK: "Not available",
-  CONSTRAINT_CONTRADICTED: "Fails a requirement",
-};
-
 type Rank = NonNullable<OfferLine["rank"]>;
 const RANK = { best: 0, better: 1, good: 2 } as const satisfies Record<Rank, number>;
-const RANK_WORDS = {
-  best: "Best substitute",
-  better: "Better substitute",
-  good: "Substitute",
-} as const satisfies Record<Rank, string>;
 const byRank = (a: OfferLine, b: OfferLine) => RANK[a.rank ?? "good"] - RANK[b.rank ?? "good"];
 
-const twoDecimals = new Intl.NumberFormat("en-GB", {
-  style: "currency",
-  currency: "EUR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+/** "€8.40" in English, "8,40 €" in Finnish: always two decimals. */
+const twoDecimals = (value: number) =>
+  new Intl.NumberFormat(intlLocale(), {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 /** "L" and "kg", as the design writes a price per standard unit. */
 const STD_UNIT: Record<string, string> = { LTR: "L", KGM: "kg", KG: "kg" };
 const perStd = (code: string) => STD_UNIT[code] ?? unit(code);
@@ -115,8 +83,10 @@ export function pricePerStdUnit(claims: OfferClaims): Price | null {
   const pack = claims.product.perSalesUnit;
   const std = pack === null ? 0 : claims.quantity.value * pack.value;
   if (pack === null || !(std > 0)) return null;
-  const value = twoDecimals.format(claims.total.net / std);
-  return { shown: `${value}/${perStd(pack.unit)}`, spoken: `${value} per ${unit(pack.unit)}` };
+  const value = twoDecimals(claims.total.net / std);
+  const text = pick(OFFERS);
+  const per = text.perSpoken[pack.unit] ?? text.perOther(unit(pack.unit));
+  return { shown: `${value}/${perStd(pack.unit)}`, spoken: `${value} ${per}` };
 }
 
 /** Days the delivery comes after the requested date; 0 when on time, early or unreadable. */
@@ -130,20 +100,21 @@ function partly(claims: OfferClaims): string | null {
   const short = claims.shortfall;
   if (short === null) return null;
   const offered = stdUnits(claims).value;
-  return `${number(offered)} of ${number(offered + short.value)} ${unit(short.unit)}`;
+  return pick(OFFERS).partly(number(offered), number(offered + short.value), unit(short.unit));
 }
 
-const lateText = (days: number) => `${days} ${days === 1 ? "day" : "days"} late`;
+const lateText = (days: number) => pick(OFFERS).late(days);
 
 /** The short reason a row shows, or null when nothing needs a look. Never null when the
  * pre-check asks for approval or rejects, even without a reason code. */
 export function shortReason(line: OfferLine): string | null {
   const check = line.precheck;
-  if (check === null) return "Not checked";
+  const text = pick(OFFERS);
+  if (check === null) return text.notChecked;
   if (check.decision !== "auto") {
     const first = check.reasons[0];
-    if (first !== undefined) return SHORT[first];
-    return check.decision === "rejected" ? "Would be rejected" : "Needs approval";
+    if (first !== undefined) return text.short[first];
+    return check.decision === "rejected" ? text.wouldBeRejected : text.needsApproval;
   }
   const part = partly(line.claims);
   if (part !== null) return part;
@@ -160,10 +131,11 @@ function statusOf(line: OfferLine): Exclude<Status, "none"> {
 /** The status in words, for the row's accessible name. */
 function statusWords(line: OfferLine): string {
   const check = line.precheck;
-  if (check === null) return "not checked";
-  if (check.decision === "rejected") return "would be rejected";
-  if (check.decision === "needs_approval") return "needs approval";
-  return statusOf(line) === "auto" ? "no approval needed for this product" : "needs a look";
+  const words = pick(OFFERS).words;
+  if (check === null) return words.notChecked;
+  if (check.decision === "rejected") return words.rejected;
+  if (check.decision === "needs_approval") return words.needsApproval;
+  return statusOf(line) === "auto" ? words.auto : words.attention;
 }
 
 const lowerFirst = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
@@ -191,28 +163,28 @@ export function overLimit(rows: Row[], limit: number | null): number | null {
  */
 export function explain(line: OfferLine, over: number | null = null): string {
   const check = line.precheck;
+  const text = pick(OFFERS);
+  const reasonText = pick(CARD).reason;
   const sentences: string[] = [];
-  if (check === null)
-    sentences.push("The pre-check did not answer. The order is checked again when it is placed.");
-  else if (check.decision === "auto") sentences.push("No approval needed for this product.");
+  if (check === null) sentences.push(text.noAnswer);
+  else if (check.decision === "auto") sentences.push(text.autoSentence);
   else {
-    const head = check.decision === "rejected" ? "Would be rejected" : "Needs your approval";
+    const head = check.decision === "rejected" ? text.wouldBeRejected : text.needsYourApproval;
     const [only, ...more] = check.reasons;
     sentences.push(
       only === undefined
         ? `${head}.`
         : more.length > 0
-          ? `${head}. ${check.reasons.map((r) => REASON_TEXT[r]).join(" ")}`
+          ? `${head}. ${check.reasons.map((r) => reasonText[r]).join(" ")}`
           : only === "SPEND_OVER_LIMIT" && over !== null
-            ? `${head}: ${money(over)} over your order limit.`
-            : `${head}: ${lowerFirst(REASON_TEXT[only])}`,
+            ? text.overYourLimit(head, money(over))
+            : `${head}: ${lowerFirst(reasonText[only])}`,
     );
   }
   const part = partly(line.claims);
-  if (part !== null) sentences.push(`Only ${part} can be delivered.`);
+  if (part !== null) sentences.push(text.onlyPart(part));
   const late = daysLate(line.claims);
-  if (late > 0)
-    sentences.push(`Arrives ${day(line.claims.deliveryDate)}, ${lateText(late)} for the request.`);
+  if (late > 0) sentences.push(text.arrives(day(line.claims.deliveryDate), lateText(late)));
   return sentences.join(" ");
 }
 
@@ -224,14 +196,15 @@ function differsText(line: OfferLine): string | null {
   const per = pack === null ? "" : `/${perStd(pack.unit)}`;
   const reliability = c.reliabilityDelta;
   const price = c.pricePerStdUnitDelta;
+  const text = pick(OFFERS);
   const parts = [
     reliability === null || reliability === 0
       ? null
-      : `${reliability > 0 ? "+" : "−"}${Math.round(Math.abs(reliability) * 100)} pts reliability`,
+      : text.reliabilityDelta(reliability > 0 ? "+" : "−", Math.round(Math.abs(reliability) * 100)),
     price === null || price === 0
       ? null
-      : `${twoDecimals.format(Math.abs(price))}${per} ${price > 0 ? "dearer" : "cheaper"}`,
-    c.originDiffers === true ? "other origin" : null,
+      : text.priceDelta(`${twoDecimals(Math.abs(price))}${per}`, price > 0),
+    c.originDiffers === true ? text.otherOrigin : null,
   ].filter((part) => part !== null);
   return parts.length === 0 ? null : parts.join(" · ");
 }
@@ -243,17 +216,17 @@ function optionReason(line: OfferLine): string | null {
     line.precheck.decision !== "rejected" &&
     line.precheck.reasons.every((r) => r === "SUBSTITUTION");
   return line.rank !== null && onlySubstitution && partly(line.claims) === null
-    ? RANK_WORDS[line.rank]
+    ? pick(OFFERS).rank[line.rank]
     : shortReason(line);
 }
 
-function optionOf(line: OfferLine, pick: OfferLine): Option {
+function optionOf(line: OfferLine, chosen: OfferLine): Option {
   return {
     line,
     status: statusOf(line),
     reason: optionReason(line),
     price: pricePerStdUnit(line.claims),
-    action: line === pick ? "pick" : line.precheck?.decision === "rejected" ? null : "use",
+    action: line === chosen ? "pick" : line.precheck?.decision === "rejected" ? null : "use",
     differs: differsText(line),
   };
 }
@@ -309,31 +282,32 @@ function groupsOf(offers: OfferLine[]): Group[] {
  * row then carries why the product itself was left out. */
 function offeredRow(group: Group, leftOut: string | null): OfferedRow | null {
   const ranked = group.substitutes.toSorted(byRank);
-  const pick = group.original ?? ranked[0];
-  if (pick === undefined) return null;
+  const chosen = group.original ?? ranked[0];
+  if (chosen === undefined) return null;
   const others = group.original === null ? ranked.slice(1) : ranked;
-  const options = [pick, ...others].map((line) => optionOf(line, pick));
+  const options = [chosen, ...others].map((line) => optionOf(line, chosen));
+  const text = pick(OFFERS);
   if (group.original === null)
     return {
       kind: "offered",
       key: group.key,
-      name: `Product ${group.productId}`,
+      name: text.productId(group.productId),
       status: "attention",
-      reason: leftOut ?? "Substitute",
-      price: pricePerStdUnit(pick.claims),
-      words: "only a substitute is offered",
-      pick,
+      reason: leftOut ?? text.substitute,
+      price: pricePerStdUnit(chosen.claims),
+      words: text.words.onlySubstitute,
+      pick: chosen,
       options,
     };
   return {
     kind: "offered",
     key: group.key,
-    name: pick.claims.product.name,
-    status: statusOf(pick),
-    reason: shortReason(pick),
-    price: pricePerStdUnit(pick.claims),
-    words: statusWords(pick),
-    pick,
+    name: chosen.claims.product.name,
+    status: statusOf(chosen),
+    reason: shortReason(chosen),
+    price: pricePerStdUnit(chosen.claims),
+    words: statusWords(chosen),
+    pick: chosen,
     options,
   };
 }
@@ -348,20 +322,21 @@ export function rowsOf(result: OffersResult): Row[] {
       const match = omitted.find((o) => !o.used && o.entry.productId === group.productId);
       if (match !== undefined) {
         match.used = true;
-        leftOut = OMITTED[match.entry.reason];
+        leftOut = pick(OFFERS).omitted[match.entry.reason];
       }
     }
     return offeredRow(group, leftOut) ?? [];
   });
+  const text = pick(OFFERS);
   const rest = omitted
     .filter((o) => !o.used)
     .map(({ entry, index }): OmittedRow => ({
       kind: "omitted",
       key: `omitted:${index}`,
-      name: `Product ${entry.productId}`,
+      name: text.productId(entry.productId),
       status: "none",
-      reason: OMITTED[entry.reason],
-      words: "not offered",
+      reason: text.omitted[entry.reason],
+      words: text.words.notOffered,
       detail: entry.detail,
     }));
   return [...offered, ...rest];
@@ -373,93 +348,96 @@ export function accessibleName(row: Row): string {
   const price =
     row.kind === "omitted"
       ? []
-      : [row.price === null ? "price per unit unknown" : row.price.spoken];
+      : [row.price === null ? pick(OFFERS).priceUnknown : row.price.spoken];
   return [row.name, row.words, ...reason, ...price].join(", ");
 }
 
 /** "3 products · Thu 20 Nov" and "until 21:40" (or "until 19 Nov, 21:40" on another day);
  * without offers, only the count. */
 export function heading(result: OffersResult, rows: Row[], now = new Date()) {
-  const count = `${rows.length} ${rows.length === 1 ? "product" : "products"}`;
+  const text = pick(OFFERS);
+  const count = text.products(rows.length);
   const first = result.offers[0];
   const exp = Math.min(...result.offers.map((o) => o.claims.exp));
+  const at = new Date(exp * 1000);
   return {
     title: first === undefined ? count : `${count} · ${day(first.claims.requestedDate)}`,
     until: Number.isFinite(exp)
-      ? `until ${when(new Date(exp * 1000), now).replace("Today ", "")}`
+      ? text.until(at.toDateString() === now.toDateString() ? timeOnly(at) : when(at, now))
       : null,
   };
 }
-
-const CHECKED_AGAIN = "The whole order is checked again when it is placed.";
 
 /** The line under the products: each row is checked on its own, so say that the whole
  * order is checked again, and by how much it is over the limit when that is known. */
 export function orderNote(rows: Row[], limit: number | null): string | null {
   if (!rows.some((row) => row.kind === "offered")) return null;
   const over = overLimit(rows, limit);
+  const text = pick(OFFERS);
   return over === null || limit === null
-    ? `Each product is checked on its own. ${CHECKED_AGAIN}`
-    : `Together ${money(over)} over your ${money(limit)} order limit, so the order needs your approval. ${CHECKED_AGAIN}`;
+    ? `${text.eachOnItsOwn} ${text.checkedAgain}`
+    : `${text.together(money(over), money(limit))} ${text.checkedAgain}`;
 }
-
-const NO_DATA = "No data";
 
 function approvalText(line: OfferLine): string {
   const check = line.precheck;
-  if (check === null) return "Not checked";
-  if (check.decision === "auto") return "Not needed for this product";
-  const head = check.decision === "rejected" ? "Would be rejected" : "Needed";
-  const reasons = check.reasons.map((r) => REASON_TEXT[r]).join(" ");
+  const approval = pick(OFFERS).approval;
+  if (check === null) return approval.notChecked;
+  if (check.decision === "auto") return approval.notNeeded;
+  const head = check.decision === "rejected" ? approval.rejected : approval.needed;
+  const reasonText = pick(CARD).reason;
+  const reasons = check.reasons.map((r) => reasonText[r]).join(" ");
   return reasons === "" ? head : `${head}. ${reasons}`;
 }
 
 function totalText(c: OfferClaims): string {
   const withDeposits = c.depositsIncluded !== false && c.deposits > 0;
-  return `${money(c.total.net)} net, ${money(c.total.gross)} incl. VAT${withDeposits ? " and deposits" : ""}`;
+  return pick(OFFERS).total(money(c.total.net), money(c.total.gross), withDeposits);
 }
 
 function depositText(c: OfferClaims): string {
-  if (c.depositsIncluded === false) return "Not given by the wholesaler, not in the total";
-  return c.deposits > 0 ? `${money(c.deposits)}, in the total` : "None";
+  const text = pick(OFFERS);
+  if (c.depositsIncluded === false) return text.depositsNotGiven;
+  return c.deposits > 0 ? text.depositsInTotal(money(c.deposits)) : text.depositsNone;
 }
+
+/** "95%" in English, "95 %" in Finnish. */
+const percent = (share: number) =>
+  new Intl.NumberFormat(intlLocale(), { style: "percent", maximumFractionDigits: 0 }).format(share);
 
 /** The details panel: the offer's facts; a missing value reads "No data", never 0. */
 export function details(line: OfferLine): [string, string][] {
   const c = line.claims;
   const pack = c.product.perSalesUnit;
   const origin = c.product.countryOfOrigin?.trim() ?? "";
+  const text = pick(OFFERS);
+  const label = text.labels;
+  const noData = text.noData;
+  const language = lang();
   return [
-    ["Total", totalText(c)],
-    ["Deposits", depositText(c)],
-    ["Amount", formatQuantity(c.quantity)],
-    ["Pack", pack === null ? NO_DATA : `${amount(pack)} each, ${money(c.unitPrice.net)} net`],
-    ["Price per l/kg", pricePerStdUnit(c)?.shown ?? NO_DATA],
-    ["Delivery", formatDeliveryDate(c.deliveryDate)],
-    ["Order by", c.cutoffAt === null ? NO_DATA : formatTimestamp(c.cutoffAt)],
-    ["Stock", c.stock === "confirmed" ? "Confirmed" : "Not confirmed"],
+    [label.total, totalText(c)],
+    [label.deposits, depositText(c)],
+    [label.amount, formatQuantity(c.quantity, language)],
+    [label.pack, pack === null ? noData : text.pack(amount(pack), money(c.unitPrice.net))],
+    [label.pricePerStd, pricePerStdUnit(c)?.shown ?? noData],
+    [label.delivery, formatDeliveryDate(c.deliveryDate, language)],
+    [label.orderBy, c.cutoffAt === null ? noData : formatTimestamp(c.cutoffAt, language)],
+    [label.stock, c.stock === "confirmed" ? text.confirmed : text.notConfirmed],
     [
-      "Reliability",
-      c.product.deliveryReliability === null
-        ? NO_DATA
-        : `${Math.round(c.product.deliveryReliability * 100)}%`,
+      label.reliability,
+      c.product.deliveryReliability === null ? noData : percent(c.product.deliveryReliability),
     ],
-    [
-      "CO2",
-      c.product.co2PerKg === null
-        ? NO_DATA
-        : `${number(c.product.co2PerKg)} (product-group average, kg CO2-eq/kg)`,
-    ],
-    ["Origin", origin === "" ? NO_DATA : origin.toUpperCase()],
-    ["Approval", approvalText(line)],
+    [label.co2, c.product.co2PerKg === null ? noData : text.co2(number(c.product.co2PerKg))],
+    [label.origin, origin === "" ? noData : origin.toUpperCase()],
+    [label.approval, approvalText(line)],
   ];
 }
 
 /** The chat text of a "Use": "For Test milk 1 l, use Test organic milk 1 l instead." */
 export const useText = (row: Row, option: Option) =>
-  `For ${row.name}, use ${option.line.claims.product.name} instead.`;
-export const askElseText = (row: Row) => `For ${row.name}, look for something else.`;
-export const retryText = (row: Row) => `Check the offer for ${row.name} again.`;
+  pick(OFFERS).useText(row.name, option.line.claims.product.name);
+export const askElseText = (row: Row) => pick(OFFERS).askElseText(row.name);
+export const retryText = (row: Row) => pick(OFFERS).retryText(row.name);
 
 // The open product and the messages asked, as pure transitions.
 
@@ -480,8 +458,8 @@ export type Ui = {
 
 export const closed: Ui = { open: null, asked: [], sending: null, error: null, canSteer: false };
 
-export const SEND_FAILED =
-  "This did not reach the chat. Type it in the chat yourself, or try again.";
+/** The English text of a message the chat did not take. */
+export const SEND_FAILED = OFFERS.en.sendFailed;
 
 /** Opens a product at its summary, or closes it when it is open. */
 export const toggle = (ui: Ui, key: string): Ui => ({
@@ -512,7 +490,7 @@ export const sent = (ui: Ui): Ui =>
 export const failed = (ui: Ui): Ui =>
   ui.sending === null
     ? ui
-    : { ...ui, sending: null, error: { key: ui.sending.key, message: SEND_FAILED } };
+    : { ...ui, sending: null, error: { key: ui.sending.key, message: pick(OFFERS).sendFailed } };
 
 /** A steering link: asked (✓), on its way, waiting while another message is, or enabled. */
 export function linkState(id: string, ui: Pick<Ui, "asked" | "sending">) {

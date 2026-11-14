@@ -655,7 +655,7 @@ export const VIEWS = [
 - Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. The approval card has no plain mode; its plain counterpart is the approval page.
 - The approval card shows a link to `approvalUrl` in every pending state.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
-- Views use `@app/ui` components and `@app/ui/theme.css`; a later restyle changes no data contract.
+- Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
 - The approval page is the screen `/approvals/<orderId>` of the orders context: one plain page with the approval actions, for unattended runs and hosts without Apps. The Apps approval card is the in-chat view; both call the same decision route (SPEC-011).
 
 ## SPEC-014 Discovery and OpenAPI

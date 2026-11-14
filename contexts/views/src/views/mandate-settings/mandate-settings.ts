@@ -1,19 +1,13 @@
 import { css, html } from "lit";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
-import {
-  parseResult,
-  plainPageUrl,
-  type ViewData,
-  type ViewEntryOf,
-  viewEntry,
-} from "../../shared/bridge.ts";
+import { plainPageUrl, type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
 import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
+import { loadMandate } from "./loader.ts";
 import {
   categoriesText,
   effectiveStatus,
-  isNoCurrentMandate,
   policyText,
   substitutionText,
   thresholdText,
@@ -135,7 +129,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
     this.source = null;
     super.connectedCallback();
     this.source = source;
-    if (source !== null) void this.reload();
+    if (source !== null) void this.reload(false);
   }
 
   override disconnectedCallback() {
@@ -155,17 +149,11 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
     );
   }
 
-  private async reload() {
+  private async reload(retry: boolean) {
     const source = this.source;
     if (source === null) return;
     this.state = { kind: "loading" };
-    try {
-      this.state = parseResult(this.entry, await source.load());
-    } catch (error) {
-      this.state = isNoCurrentMandate(error)
-        ? { kind: "empty" }
-        : { kind: "error", message: "Could not load the limits.", plainUrl: null };
-    }
+    this.state = await loadMandate(source, retry);
   }
 
   private header() {
@@ -201,7 +189,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
                   <h3>Agent limits could not be loaded</h3>
                   <p>Try again or open the limits page.</p>
                   <div class="actions">
-                    <button class="btn primary" @click=${() => this.reload()}>Try again</button
+                    <button class="btn primary" @click=${() => this.reload(true)}>Try again</button
                     ><a
                       class="btn ghost"
                       href=${plainPageUrl("mandate-settings", document.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ?? location.origin) ?? "/views/mandate-settings"}

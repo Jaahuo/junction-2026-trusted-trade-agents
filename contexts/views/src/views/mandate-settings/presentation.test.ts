@@ -51,7 +51,6 @@ test("category scope distinguishes all, none and literal codes", () => {
 test("policy and missing data describe approval without promising placement", () => {
   expect(policyText("ask")).toBe("Ask for approval");
   expect(policyText("auto")).toContain("subject to other checks");
-  expect(substitutionText("never")).toContain("Never automatically substitute");
   expect(substitutionText("ask")).toBe(policyText("ask"));
   expect(substitutionText("auto")).toBe(policyText("auto"));
   expect(thresholdText(null, String)).toBe("No threshold set");

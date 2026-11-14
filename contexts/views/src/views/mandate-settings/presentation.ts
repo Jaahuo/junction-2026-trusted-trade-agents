@@ -18,9 +18,7 @@ export function policyText(policy: "auto" | "ask") {
 }
 
 export function substitutionText(policy: MandateLimits["substitutions"]) {
-  return policy === "never"
-    ? "Never automatically substitute; ask for approval"
-    : policyText(policy);
+  return policy === "never" ? "Substitute offers are not allowed" : policyText(policy);
 }
 
 export function thresholdText(

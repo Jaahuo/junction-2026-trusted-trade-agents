@@ -25,21 +25,18 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
     steps:
-      # Deploy only the current main head, and only after its push gate passed:
-      # an older gate finishing late, a rerun or a manual run never rolls production back.
+      # Every run deploys the current main head once its push gate passed, whatever commit triggered it.
+      # A late gate, a rerun or a manual run never rolls back, and a pending run that the concurrency
+      # group replaces loses nothing: the run that executes deploys the latest gated head.
       - name: Choose the gated main head
         id: target
         env:
           CONFIGURED: ${{ secrets.DEPLOY_OUTPUTS != '' && secrets.DEPLOY_ENV != '' && secrets.DEPLOY_SSH_KEY != '' }}
-          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          main_sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
-          sha=${TRIGGER_SHA:-$main_sha}
+          sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
           gated=$(gh api "repos/$REPO/actions/workflows/gate.yml/runs?head_sha=$sha&event=push&status=success&per_page=1" --jq .total_count)
           if [ "$CONFIGURED" != "true" ]; then
             reason="deploy secrets are not set; see docs/deploy.md"
-          elif [ "$sha" != "$main_sha" ]; then
-            reason="$sha is no longer the main head ($main_sha)"
           elif [ "$gated" = "0" ]; then
             reason="$sha has no successful push gate run"
           fi

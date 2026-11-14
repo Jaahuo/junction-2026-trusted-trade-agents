@@ -9,10 +9,18 @@ The demo runs on one Vultr instance (Bun behind Caddy with automatic TLS) and on
 - An SSH key at `~/.ssh/id_ed25519.pub`, or set `TF_VAR_ssh_public_key_path`.
 - The challenge data files in `data/`.
 
-Put the credentials in ignored `.env` and export them as `TF_VAR_*`, never in Git:
+Put the credentials in the ignored `.env.tofu`, never in Git, and load them before each `tofu` command:
 
 ```sh
-export TF_VAR_vultr_api_key=... TF_VAR_ts_project_id=... TF_VAR_ts_access_key=... TF_VAR_ts_secret_key=...
+# .env.tofu
+TF_VAR_vultr_api_key=      # Vultr: Account > API; allow your IP under Access Control
+TF_VAR_ts_project_id=      # Tiger Console: project settings
+TF_VAR_ts_access_key=      # Tiger Console: Settings > Create credentials, public key
+TF_VAR_ts_secret_key=      # same dialog, secret key (shown once)
+```
+
+```sh
+set -a && . ./.env.tofu && set +a
 ```
 
 Create the app secrets once and keep them. A new offer key invalidates every offer issued before it:

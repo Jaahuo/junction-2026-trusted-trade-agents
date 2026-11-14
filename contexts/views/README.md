@@ -18,4 +18,4 @@ It also fails when an approval card for a pending order has no approve or reject
 The harness at `/views/harness?view=<view>` shows every fixture in a browser.
 
 Write a separate test only for behavior a fixture cannot show, such as a click that sends a request.
-`src/shared/template-text.ts` reads a rendered template without a DOM for those tests.
+`src/views/approval-card/template-walk.ts` finds a rendered button's click handler without a DOM.

@@ -7,8 +7,8 @@ import {
 } from "@app/contract";
 
 // The harness has no server, so it plays the decision locally to let a tester walk a flow:
-// approve and pick place the order, reject records it, edit makes a new version of the order.
-// Prices of edited lines scale with the quantity; nothing is checked again.
+// approve and pick place the order, reject declines it as the server does, edit makes a new
+// version of the order. Prices of edited lines scale with the quantity; nothing is checked again.
 
 const total = (lines: Order["lines"]) => ({
   net: lines.reduce((sum, l) => sum + l.claims.total.net, 0),
@@ -59,7 +59,7 @@ export function harnessDecide(order: Order, input: DecideApprovalInput, at: stri
   });
   switch (input.decision) {
     case "reject":
-      return decided(input.next === "stop" ? "rejected" : "declined");
+      return decided("declined");
     case "pick_alternative": {
       const pick = order.alternatives.find((a) => a.offerId === input.offerId);
       if (pick === undefined) return decided("placed");

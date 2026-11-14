@@ -53,28 +53,6 @@ export function markup(value: unknown): string {
     .join(" ");
 }
 
-/** The `@click` handler of the button whose markup contains `marker`, found without a DOM. */
-export const clickHandler = (value: unknown, marker: string): (() => void) | undefined => {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = clickHandler(item, marker);
-      if (found !== undefined) return found;
-    }
-    return undefined;
-  }
-  if (!isTemplate(value)) return undefined;
-  if (value.strings.join("").includes(marker)) {
-    const index = value.strings.findIndex((part) => part.trimEnd().endsWith("@click="));
-    const handler = value.values[index];
-    if (typeof handler === "function") return () => handler();
-  }
-  for (const nested of value.values) {
-    const found = clickHandler(nested, marker);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-};
-
 /** Elements whose text runs on inside the surrounding block. */
 const INLINE = new Set(["a", "abbr", "b", "code", "em", "i", "small", "span", "strong", "time"]);
 const VOID = new Set(["br", "hr", "img", "input", "meta", "source", "wbr"]);

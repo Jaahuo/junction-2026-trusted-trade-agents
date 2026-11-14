@@ -10,4 +10,11 @@ export {
   signOfferToken,
   verifyOfferToken,
 } from "./offer-token.ts";
+export {
+  appendAudit,
+  signOrderReceipt,
+  verifyAuditChain,
+  verifyOrderIntegrity,
+  verifyOrderReceipt,
+} from "./order-integrity.ts";
 export { principalOf } from "./principal.ts";

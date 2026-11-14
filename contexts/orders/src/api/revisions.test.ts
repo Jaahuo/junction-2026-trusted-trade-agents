@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 import {
+  type ErrorCode,
   fixtures,
   type OfferClaims,
   OfferClaimsSchema,
+  type OmitReason,
   type Order,
   type RequoteRequest,
 } from "@app/contract";
@@ -10,7 +12,16 @@ import { err, ok } from "@app/kernel";
 import type { AnyElysia } from "elysia";
 import type { RequotePort } from "../application/ports.ts";
 import { withDatabase } from "./test-database.ts";
-import { call, counts, errorOf, mount, orderOf, overLimit, place } from "./test-support.ts";
+import {
+  call,
+  counts,
+  errorOf,
+  inMinutes,
+  mount,
+  orderOf,
+  overLimit,
+  place,
+} from "./test-support.ts";
 
 const PRODUCT = fixtures.offerClaims.productId;
 const SUBSTITUTE = "prod_test_substitute";
@@ -27,12 +38,21 @@ type Sign = (changes?: Partial<OfferClaims>) => Promise<string>;
 
 /**
  * Stands in for the offers context's requote route: a fresh signed offer per token, with the
- * change applied and the total scaled to the new amount. `omit` leaves products out; `fail` makes
- * the call fail.
+ * quantity change applied and the total scaled to the new amount, under `mandate` when set (the
+ * real route signs under the current mandate). `omit` leaves products out with a reason (or with
+ * no omitted entry when the reason is null); `price` scales the unit price; `fail` makes the call
+ * fail; `reuse` answers with the token it was given; `broken` sends a token that fails verification.
  */
 const fakeOffers = (sign: Sign) => {
   const calls: RequoteRequest[] = [];
-  const state = { omit: new Set<string>(), fail: false };
+  const state = {
+    omit: new Map<string, OmitReason | null>(),
+    fail: false,
+    reuse: false,
+    broken: false,
+    price: 1,
+    mandate: null as { mandateId: string; version: number } | null,
+  };
   const port: RequotePort = {
     requote: async (request) => {
       calls.push(request);
@@ -42,25 +62,32 @@ const fakeOffers = (sign: Sign) => {
       for (const token of request.tokens) {
         const { iat: _iat, exp: _exp, offerId: _offerId, ...claims } = claimsOf(token);
         if (state.omit.has(claims.productId)) {
-          omitted.push({
-            productId: claims.productId,
-            reason: "INSUFFICIENT_STOCK" as const,
-            detail: "confirmed stock is below the requested quantity",
-          });
+          const reason = state.omit.get(claims.productId) ?? null;
+          if (reason !== null)
+            omitted.push({ productId: claims.productId, reason, detail: `test ${reason}` });
           continue;
         }
         const change = request.changes?.find((entry) => entry.productId === claims.productId);
         const quantity = change?.quantity ?? claims.quantity;
-        const ratio = quantity.value / claims.quantity.value;
-        const fresh = await sign({
-          ...claims,
-          quantity,
-          total: { net: cents(claims.total.net * ratio), gross: cents(claims.total.gross * ratio) },
-        });
+        const ratio = (quantity.value / claims.quantity.value) * state.price;
+        const fresh = state.reuse
+          ? token
+          : await sign({
+              ...claims,
+              quantity,
+              unitPrice: { ...claims.unitPrice, net: cents(claims.unitPrice.net * state.price) },
+              total: {
+                net: cents(claims.total.net * ratio),
+                gross: cents(claims.total.gross * ratio),
+              },
+              ...(state.mandate === null
+                ? {}
+                : { mandateId: state.mandate.mandateId, mandateVersion: state.mandate.version }),
+            });
         const freshClaims = claimsOf(fresh);
         offers.push({
           offerId: freshClaims.offerId,
-          token: fresh,
+          token: state.broken ? `${fresh.split(".").slice(0, 2).join(".")}.broken` : fresh,
           claims: freshClaims,
           precheck: null,
           rank: null,
@@ -245,10 +272,10 @@ test("an edit that cannot be re-offered, or offers that cannot be reached, leave
     const { app, sign, offers } = await mountWithOffers(db);
     const pending = await pendingOrder(app, [await sign(overLimit)]);
 
-    offers.state.omit.add(PRODUCT);
+    offers.state.omit.set(PRODUCT, "INSUFFICIENT_STOCK");
     const omitted = await decide(app, pending, { decision: "edit", changes: amount(2) });
     expect(omitted.status).toBe(409);
-    expect(await errorOf(omitted)).toBe("STALE_OFFER");
+    expect(await errorOf(omitted)).toBe("CONFLICT");
 
     offers.state.omit.clear();
     offers.state.fail = true;
@@ -288,4 +315,191 @@ test("the offer an edit replaced stays used: placing it again gives 400 OFFER_IN
     const replay = await place(app, [token]);
     expect(replay.status).toBe(400);
     expect(await errorOf(replay)).toBe("OFFER_INVALID");
+  }));
+
+test("an edit whose re-quote raises the unit price keeps the order pending with PRICE_CHANGED", async () =>
+  withDatabase(async (db) => {
+    const { app, sign, offers } = await mountWithOffers(db);
+    const pending = await pendingOrder(app, [await sign(overLimit)]);
+    offers.state.price = 1.5;
+
+    const response = await decide(app, pending, { decision: "edit", changes: amount(2) });
+    expect(response.status).toBe(200);
+    const order = await orderOf(response);
+    expect(order).toMatchObject({ status: "pending_approval", proposalVersion: 2, decision: null });
+    expect(order.reasons).toEqual(["PRICE_CHANGED"]);
+    const net = fixtures.offerClaims.unitPrice.net;
+    expect(edited(order)).toEqual([
+      `${fixtures.offerClaims.product.name}: 4 → 2 CT, unit price ${net} → ${cents(net * 1.5)} EUR net`,
+    ]);
+    expect(order.requotes.at(-1)?.reasons).toEqual(["PRICE_CHANGED"]);
+    expect((await counts(db)).history).toBe(0);
+  }));
+
+test("after a new mandate, an edit drops the alternatives made under the old one and goes through", async () =>
+  withDatabase(async (db) => {
+    const { app, sign, offers, register } = await mountWithOffers(db);
+    const pending = await pendingOrder(app, [await sign(overLimit)], {
+      alternatives: [await sign({ quantity: { value: 1, unit: "CT" } })],
+    });
+    const current = await register();
+    offers.state.mandate = current;
+
+    const response = await decide(app, pending, { decision: "edit", changes: amount(2) });
+    expect(response.status).toBe(200);
+    const order = await orderOf(response);
+    expect(order).toMatchObject({ status: "placed", mandateId: current.mandateId });
+    expect(order.alternatives).toEqual([]);
+  }));
+
+test("a line the re-quote omits answers by its reason and leaves the order as it was", async () =>
+  withDatabase(async (db) => {
+    const { app, sign, offers } = await mountWithOffers(db);
+    const pending = await pendingOrder(app, [await sign(overLimit)]);
+    const cases: [OmitReason | null, number, ErrorCode][] = [
+      ["INVALID_QUANTITY", 400, "BAD_REQUEST"],
+      ["CONSTRAINT_CONTRADICTED", 400, "BAD_REQUEST"],
+      ["SALES_BLOCKED", 409, "CONFLICT"],
+      ["NO_PRICE", 502, "UPSTREAM_FAILED"],
+      [null, 502, "UPSTREAM_FAILED"],
+    ];
+    for (const [reason, status, code] of cases) {
+      offers.state.omit.set(PRODUCT, reason);
+      const response = await decide(app, pending, { decision: "edit", changes: amount(2) });
+      expect({ reason, status: response.status, code: await errorOf(response) }).toEqual({
+        reason,
+        status,
+        code,
+      });
+    }
+    const stored = await orderOf(await call(app, "GET", `/${pending.orderId}`));
+    expect(stored).toMatchObject({ proposalVersion: 1, offerIds: pending.offerIds });
+  }));
+
+test("a re-quote that reuses an offer or sends a token that fails verification gives 502", async () =>
+  withDatabase(async (db) => {
+    const { app, sign, offers } = await mountWithOffers(db);
+    const pending = await pendingOrder(app, [await sign(overLimit)]);
+    for (const fault of ["reuse", "broken"] as const) {
+      offers.state[fault] = true;
+      // The same amount, so only the offer ID can show that the answer is stale.
+      const response = await decide(app, pending, { decision: "edit", changes: amount(4) });
+      expect({ fault, status: response.status, code: await errorOf(response) }).toEqual({
+        fault,
+        status: 502,
+        code: "UPSTREAM_FAILED",
+      });
+      offers.state[fault] = false;
+    }
+    const stored = await orderOf(await call(app, "GET", `/${pending.orderId}`));
+    expect(stored).toMatchObject({ proposalVersion: 1, offerIds: pending.offerIds });
+  }));
+
+test("an edit that changes a product twice, or a product on two lines, gives 400", async () =>
+  withDatabase(async (db) => {
+    const { app, sign, offers } = await mountWithOffers(db);
+    const twice = await pendingOrder(app, [await sign(overLimit)]);
+    const doubled = await decide(app, twice, {
+      decision: "edit",
+      changes: [...amount(2), ...amount(3)],
+    });
+    expect(doubled.status).toBe(400);
+    const twoLines = await pendingOrder(app, [await sign(overLimit), await sign()]);
+    const shared = await decide(app, twoLines, { decision: "edit", changes: amount(2) });
+    expect(shared.status).toBe(400);
+    expect(offers.calls).toEqual([]);
+  }));
+
+test("an edit of an order with a substitute line keeps SUBSTITUTION, and approve then places it", async () =>
+  withDatabase(async (db) => {
+    const { app, sign } = await mountWithOffers(db);
+    const substitute = await sign({
+      productId: SUBSTITUTE,
+      replaces: PRODUCT,
+      product: { ...fixtures.offerClaims.product, name: `Test ${SUBSTITUTE}` },
+    });
+    const pending = await pendingOrder(app, [await sign(), substitute]);
+    expect(pending.reasons).toContain("SUBSTITUTION");
+
+    const response = await decide(app, pending, { decision: "edit", changes: amount(2) });
+    const order = await orderOf(response);
+    expect(order.lines.map((line) => [line.claims.productId, line.claims.replaces])).toEqual([
+      [PRODUCT, null],
+      [SUBSTITUTE, PRODUCT],
+    ]);
+    expect(order.offerIds.filter((id) => pending.offerIds.includes(id))).toEqual([]);
+    expect(order).toMatchObject({ status: "pending_approval", proposalVersion: 2 });
+    expect(order.reasons).toContain("SUBSTITUTION");
+    expect((await orderOf(await decide(app, order, { decision: "approve" }))).status).toBe(
+      "placed",
+    );
+  }));
+
+test("an alternative already placed in another order is refused when picked", async () =>
+  withDatabase(async (db) => {
+    const { app, sign } = await mountWithOffers(db);
+    const shared = await sign({ quantity: { value: 1, unit: "CT" } });
+    const first = await pendingOrder(app, [await sign(overLimit)], { alternatives: [shared] });
+    const second = await pendingOrder(app, [await sign(overLimit)], { alternatives: [shared] });
+    const offerId = claimsOf(shared).offerId;
+    expect((await decide(app, first, { decision: "pick_alternative", offerId })).status).toBe(200);
+
+    const response = await decide(app, second, { decision: "pick_alternative", offerId });
+    expect(response.status).toBe(400);
+    expect(await errorOf(response)).toBe("OFFER_INVALID");
+    const stored = await orderOf(await call(app, "GET", `/${second.orderId}`));
+    expect(stored).toMatchObject({ status: "pending_approval", proposalVersion: 1 });
+  }));
+
+test("an edit after the mandate was revoked rejects the order with MANDATE_INVALID", async () =>
+  withDatabase(async (db) => {
+    const { app, sign, mandates, mandate } = await mountWithOffers(db);
+    const pending = await pendingOrder(app, [await sign(overLimit)]);
+    const revoked = await mandates.handle(
+      new Request(`http://localhost/mandates/${mandate.mandateId}/revoke`, { method: "POST" }),
+    );
+    expect(revoked.ok).toBe(true);
+
+    const order = await orderOf(
+      await decide(app, pending, { decision: "edit", changes: amount(2) }),
+    );
+    expect(order).toMatchObject({ status: "rejected", decision: { action: "edit" } });
+    expect(order.reasons).toContain("MANDATE_INVALID");
+    expect((await counts(db)).history).toBe(0);
+  }));
+
+test("an edit or pick of an order that is no longer pending gives 409", async () =>
+  withDatabase(async (db) => {
+    const { app, sign, offers } = await mountWithOffers(db);
+    const pending = await pendingOrder(app, [await sign(overLimit)]);
+    const placed = await orderOf(await decide(app, pending, { decision: "approve" }));
+    expect(placed.status).toBe("placed");
+    for (const body of [
+      { decision: "edit", changes: amount(2) },
+      { decision: "pick_alternative", offerId: "off_other" },
+    ]) {
+      const response = await decide(app, pending, body, placed.proposalVersion);
+      expect(response.status).toBe(409);
+      expect(await errorOf(response)).toBe("CONFLICT");
+    }
+    expect(offers.calls).toEqual([]);
+  }));
+
+test("picking an alternative that has expired gives 409 OFFER_EXPIRED and leaves the order pending", async () =>
+  withDatabase(async (db) => {
+    const { app, sign, clock } = await mountWithOffers(db);
+    const alternative = await sign({ quantity: { value: 2, unit: "CT" } }, inMinutes(1));
+    const pending = await pendingOrder(app, [await sign(overLimit, inMinutes(60))], {
+      alternatives: [alternative],
+    });
+    clock.now = inMinutes(5);
+
+    const response = await decide(app, pending, {
+      decision: "pick_alternative",
+      offerId: claimsOf(alternative).offerId,
+    });
+    expect(response.status).toBe(409);
+    expect(await errorOf(response)).toBe("OFFER_EXPIRED");
+    const stored = await orderOf(await call(app, "GET", `/${pending.orderId}`));
+    expect(stored).toMatchObject({ status: "pending_approval", proposalVersion: 1 });
   }));

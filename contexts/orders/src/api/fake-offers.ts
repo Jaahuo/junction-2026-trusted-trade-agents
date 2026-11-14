@@ -17,6 +17,9 @@ export const cents = (value: number) => Math.round(value * 100) / 100;
 
 type Sign = (changes?: Partial<OfferClaims>, exp?: Date) => Promise<string>;
 
+/** Offer claims before signing: the signer adds the offer ID, iat and exp. */
+type Unsigned = Omit<OfferClaims, "offerId" | "iat" | "exp">;
+
 /**
  * Stands in for the offers context's requote route: a fresh signed offer per token, valid for ten
  * minutes from the orders clock, with the quantity and date changes applied and the total scaled
@@ -24,7 +27,9 @@ type Sign = (changes?: Partial<OfferClaims>, exp?: Date) => Promise<string>;
  * `omit` leaves products out with a reason (or with no omitted entry when the reason is null);
  * `price` scales every unit price and `priceOf` one product's; `fail` makes the call fail; `reuse`
  * answers with the token it was given; `broken` sends a token that fails verification; `ignore`
- * leaves the asked amount or date unapplied; `deliveryDate` moves every delivery to that date.
+ * leaves the asked amount or date unapplied; `deliveryDate` moves every delivery to that date;
+ * `tweak` rewrites the claims before they are signed; `signAs` signs a token with other claims than
+ * the copy the response reports, as an offers side that mixed up its tokens would.
  */
 const fakeOffers = (sign: Sign, clock: { now: Date }) => {
   const calls: RequoteRequest[] = [];
@@ -38,6 +43,8 @@ const fakeOffers = (sign: Sign, clock: { now: Date }) => {
     priceOf: new Map<string, number>(),
     mandate: null as { mandateId: string; version: number } | null,
     deliveryDate: null as string | null,
+    tweak: null as ((claims: Unsigned) => Unsigned) | null,
+    signAs: null as ((claims: OfferClaims) => OfferClaims) | null,
   };
   const port: RequotePort = {
     requote: async (request) => {
@@ -62,29 +69,29 @@ const fakeOffers = (sign: Sign, clock: { now: Date }) => {
             : (change?.deliverBy ?? claims.requestedDate);
         const price = state.price * (state.priceOf.get(claims.productId) ?? 1);
         const ratio = (quantity.value / claims.quantity.value) * price;
-        const fresh = state.reuse
-          ? token
-          : await sign(
-              {
-                ...claims,
-                quantity,
-                requestedDate,
-                ...(state.deliveryDate === null ? {} : { deliveryDate: state.deliveryDate }),
-                unitPrice: { ...claims.unitPrice, net: cents(claims.unitPrice.net * price) },
-                total: {
-                  net: cents(claims.total.net * ratio),
-                  gross: cents(claims.total.gross * ratio),
-                },
-                ...(state.mandate === null
-                  ? {}
-                  : { mandateId: state.mandate.mandateId, mandateVersion: state.mandate.version }),
-              },
-              new Date(clock.now.getTime() + 10 * 60_000),
-            );
+        const scaled = {
+          ...claims,
+          quantity,
+          requestedDate,
+          ...(state.deliveryDate === null ? {} : { deliveryDate: state.deliveryDate }),
+          unitPrice: { ...claims.unitPrice, net: cents(claims.unitPrice.net * price) },
+          total: {
+            net: cents(claims.total.net * ratio),
+            gross: cents(claims.total.gross * ratio),
+          },
+          ...(state.mandate === null
+            ? {}
+            : { mandateId: state.mandate.mandateId, mandateVersion: state.mandate.version }),
+        };
+        const base = state.tweak === null ? scaled : state.tweak(scaled);
+        const exp = new Date(clock.now.getTime() + 10 * 60_000);
+        const fresh = state.reuse ? token : await sign(base, exp);
+        // The response's copy of the claims; with `signAs` the token says something else.
         const freshClaims = claimsOf(fresh);
+        const signed = state.signAs === null ? fresh : await sign(state.signAs(freshClaims), exp);
         offers.push({
           offerId: freshClaims.offerId,
-          token: state.broken ? `${fresh.split(".").slice(0, 2).join(".")}.broken` : fresh,
+          token: state.broken ? `${signed.split(".").slice(0, 2).join(".")}.broken` : signed,
           claims: freshClaims,
           precheck: null,
           rank: null,

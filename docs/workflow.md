@@ -64,9 +64,7 @@ The `gate` workflow keeps one aggregate `gate` check for required-check consumer
 | Publish      | Verify a trusted main-push gate artifact and publish that same image        |
 | Deploy       | Deploy its digest with production-only credentials and verify health        |
 
-Quality, tests, secrets, dependencies, image builds and deployment use [CRACI runners](https://docs.craci.com/guides/runner-workflows/) with the default image and size. The aggregate gate, target selection and artifact-only publication stay on GitHub-hosted runners. The CRACI GitHub App must have access to this repository before jobs can start. A missing connection leaves jobs queued.
-
-CRACI generates an additional build SBOM automatically. This migration does not configure a blocking egress policy or claim complete SBOM coverage. The existing image scans and delivery evidence remain required.
+All gate and deployment jobs use GitHub-hosted `ubuntu-24.04` runners. Image builds and publication use the same runner baseline to avoid Docker image-store differences during artifact validation. The image SBOM, vulnerability scans and delivery evidence remain required.
 
 PR and main-push gates run without production credentials. Scheduled gates refresh security evidence but cannot publish or deploy. Actions and container bases use immutable digests or commit pins. Update these pins deliberately and review the resulting security reports.
 

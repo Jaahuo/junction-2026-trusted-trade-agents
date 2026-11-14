@@ -2,14 +2,14 @@
 // Usage: bun scripts/chat-check.ts [--only <name>] [--scenarios <file>] [--api <url>] [--no-reset] [--headed] [--timeout <seconds>]
 // The host must run (bun scripts/openwebui.ts up) and point at the server under test.
 import { chromium, type Page } from "playwright-core";
-import { parseEnv } from "./openwebui.ts";
+import { settings } from "./openwebui.ts";
 import { loadRuntime } from "./runtime.ts";
 
 const ROOT = `${import.meta.dir}/..`;
 const HOST_DIR = `${ROOT}/hosts/openwebui`;
 const OUT_DIR = `${ROOT}/.local/chat-check`;
 const SERVER_ID = "trusted-trade";
-const MODEL_ID = "buyer-agent";
+const MODEL_ID = "restaurant-buyer";
 const USAGE =
   "Usage: bun scripts/chat-check.ts [--only <name>] [--scenarios <file>] [--api <url>] [--no-reset] [--headed] [--timeout <seconds>]";
 
@@ -397,7 +397,12 @@ const reachable = (url: string): Promise<boolean> =>
     .catch(() => false);
 
 /** Stops with the cause when the host cannot give a result that says something about `api`. */
-async function preflight(host: string, api: string): Promise<string> {
+async function preflight(
+  host: string,
+  api: string,
+  email: string,
+  password: string,
+): Promise<string> {
   if (!(await reachable(`${api}/api/health`)))
     fail(`The server under test does not answer at ${api}. Start it with bun run production.`);
   const tools = await fetch(`${api}/mcp`, {
@@ -414,11 +419,12 @@ async function preflight(host: string, api: string): Promise<string> {
   const signin = await fetch(`${host}/api/v1/auths/signin`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "", password: "" }),
+    body: JSON.stringify({ email, password }),
   });
   const session: unknown = await signin.json().catch(() => null);
   const token = isObject(session) ? asString(session["token"]) : "";
-  if (token === "") fail("Open WebUI gave no session. This check needs WEBUI_AUTH=False.");
+  if (token === "")
+    fail("Open WebUI gave no session. Check the stored operator email and password.");
 
   const servers = await getJson(`${host}/api/v1/configs/tool_servers`, token);
   const connection = asArray(isObject(servers) ? servers["TOOL_SERVER_CONNECTIONS"] : [])
@@ -442,7 +448,7 @@ async function preflight(host: string, api: string): Promise<string> {
     ),
   );
   if (!ids.has(MODEL_ID))
-    fail('Open WebUI has no "Buyer agent" model. Run bun scripts/openwebui.ts setup.');
+    fail('Open WebUI has no "Acme Kitchens" model. Run bun scripts/openwebui.ts setup.');
   const model = await getJson(`${host}/api/v1/models/model?id=${MODEL_ID}`, token);
   const base = isObject(model) ? asString(model["base_model_id"]) : "";
   if (!ids.has(base))
@@ -619,15 +625,16 @@ async function main(): Promise<void> {
   if (scenarios.length === 0)
     fail(`No scenario named ${options.only}. Known: ${all.map((s) => s.name).join(", ")}.`);
 
-  const envFile = Bun.file(`${HOST_DIR}/.env`);
-  const env = (await envFile.exists()) ? parseEnv(await envFile.text()) : {};
+  const env = await settings();
   const host = `http://127.0.0.1:${env["OPENWEBUI_PORT"] || "38090"}`;
   let api = options.api;
   if (api === undefined) {
     await loadRuntime();
     api = `http://127.0.0.1:${process.env["PORT"]}`;
   }
-  const token = await preflight(host, api);
+  const email = env["WEBUI_ADMIN_EMAIL"] ?? "";
+  const password = env["WEBUI_ADMIN_PASSWORD"] ?? "";
+  const token = await preflight(host, api, email, password);
   // This worktree can reset only its own database.
   const reset = options.reset && options.api === undefined;
   console.log(
@@ -641,6 +648,11 @@ async function main(): Promise<void> {
   let passed = 0;
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    await page.goto(`${host}/auth`, { waitUntil: "domcontentloaded" });
+    await page.locator('input[name="email"]').fill(email);
+    await page.locator('input[name="password"]').fill(password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.locator("#chat-input").waitFor({ timeout: 60_000 });
     for (const scenario of scenarios) {
       if (reset) await resetDatabase();
       const run = await runScenario(page, scenario, host, token, options.timeoutMs);

@@ -79,6 +79,8 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "Place an order from signed offer tokens with an idempotency key. The order is placed, pending human approval or rejected, with reason codes. A pending order has an approvalUrl for the human; do not approve it yourself.",
   get_order_status: "Get the current status and the audit record of an order.",
   get_mandate: "Get the purchasing limits currently in force for this agent.",
+  draft_mandate:
+    "Draft new purchasing limits (a mandate) from the terms the human gave, to set or change the limits or after MANDATE_INVALID. Nothing is registered: the mandate view shows the draft next to the current limits, and only the human registers it there with the Register button. The limits are not in force until get_mandate shows them.",
   list_pending_approvals: "List the orders that wait for a human approval decision.",
   decide_approval:
     "Record a human approval decision on a pending order. Only the approval view calls this tool.",

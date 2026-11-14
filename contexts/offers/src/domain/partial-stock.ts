@@ -10,18 +10,38 @@ import type {
 import { err, ok, type Result } from "@app/kernel";
 import { checkQuantity } from "./offer-rules.ts";
 
-const TOLERANCE = 1e-12;
 const safe = (value: number): boolean =>
   Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
 const positive = (value: number): boolean => safe(value) && value > 0;
+
+// Bound the adjustment in lot counts: relative floating-point noise must never
+// grow large enough to erase a real fractional lot at large quantities.
+function normalizeLots(lots: number): number {
+  const nearest = Math.round(lots);
+  const tolerance = Math.min(1e-9, 4 * Number.EPSILON * Math.max(1, lots));
+  return (nearest > 0 || lots === 0) && Math.abs(lots - nearest) <= tolerance ? nearest : lots;
+}
+
+export function stockCovers(available: number, required: number, lotSize: number): boolean {
+  if (!safe(available) || available < 0 || !safe(required) || required < 0 || !positive(lotSize))
+    return false;
+  const availableLots = available / lotSize;
+  const requiredLots = required / lotSize;
+  if (!safe(availableLots) || !safe(requiredLots)) return false;
+  const availableCount = Math.floor(normalizeLots(availableLots));
+  const requiredCount = Math.ceil(normalizeLots(requiredLots));
+  return (
+    Number.isSafeInteger(availableCount) &&
+    Number.isSafeInteger(requiredCount) &&
+    availableCount >= requiredCount
+  );
+}
 
 export function floorToLot(amount: number, lotSize: number): number | null {
   if (!safe(amount) || amount < 0 || !positive(lotSize)) return null;
   const lots = amount / lotSize;
   if (!safe(lots)) return null;
-  const nearest = Math.round(lots);
-  const count =
-    Math.abs(lots - nearest) <= TOLERANCE * Math.max(1, nearest) ? nearest : Math.floor(lots);
+  const count = Math.floor(normalizeLots(lots));
   if (!Number.isSafeInteger(count)) return null;
   const result = count * lotSize;
   return safe(result) ? result : null;
@@ -84,12 +104,10 @@ export function quantityForShortfall(
   }
   const lots = units / substitute.allowedLotSize;
   if (!positive(units) || !positive(lots)) return null;
-  const nearest = Math.round(lots);
-  const tolerance = Math.min(1e-9, 4 * Number.EPSILON * Math.max(1, lots));
-  const count = nearest > 0 && Math.abs(lots - nearest) <= tolerance ? nearest : Math.ceil(lots);
+  const count = Math.ceil(normalizeLots(lots));
   if (!Number.isSafeInteger(count)) return null;
   const value = count * substitute.allowedLotSize;
-  if (!positive(value) || lots - count > tolerance) return null;
+  if (!positive(value)) return null;
   return { value, unit: substitute.salesUnit };
 }
 

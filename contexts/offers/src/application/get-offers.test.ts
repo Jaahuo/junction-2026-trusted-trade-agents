@@ -186,6 +186,66 @@ describe("getOffers", () => {
     ).toEqual([[OAT, RYE]]);
   });
 
+  test("fractional substitute stock covers three lots despite multiplication noise", async () => {
+    const sub = "prod_test_fractional_sub";
+    const setup = fakeOffersDeps({
+      products: [
+        fakeProduct(OAT, { perSalesUnit: { value: 0.1, unit: "LTR" }, substitutes: [sub] }),
+        fakeProduct(sub, { perSalesUnit: { value: 1, unit: "LTR" }, allowedLotSize: 0.1 }),
+      ],
+      live: {
+        ...quoted(OAT, { amount: 1 }),
+        ...quoted(sub, { amount: 0.3, stock: "confirmed" }),
+      },
+    });
+
+    const result = valueOf(await getOffers(setup.deps, principal, request()));
+    const substitute = result.offers.find((offer) => offer.claims.productId === sub);
+    expect(substitute?.claims.quantity.value).toBeCloseTo(0.3, 12);
+    expect(substitute?.claims.replaces).toBe(OAT);
+    expect(
+      setup.signer.signed.find((entry) => entry.claims.productId === sub)?.claims.replaces,
+    ).toBe(OAT);
+  });
+
+  test("generated decimal substitute lots require full confirmed stock", async () => {
+    const sub = "prod_test_generated_sub";
+    const scale = 1000;
+    for (const lotTicks of [10, 25, 100, 125, 250]) {
+      for (const lots of [2, 3, 7, 11]) {
+        const lot = lotTicks / scale;
+        const required = (lotTicks * lots) / scale;
+        for (const covered of [true, false]) {
+          const setup = fakeOffersDeps({
+            products: [
+              fakeProduct(OAT, { perSalesUnit: { value: lot, unit: "LTR" }, substitutes: [sub] }),
+              fakeProduct(sub, { perSalesUnit: { value: 1, unit: "LTR" }, allowedLotSize: lot }),
+            ],
+            live: {
+              ...quoted(OAT, { amount: 1 }),
+              ...quoted(sub, {
+                amount: covered ? required : (lotTicks * lots - lotTicks / 2) / scale,
+                stock: "confirmed",
+              }),
+            },
+          });
+          const result = valueOf(
+            await getOffers(setup.deps, principal, request({ lines: [line(OAT, lots + 1)] })),
+          );
+          const substitutes = result.offers.filter((offer) => offer.claims.replaces === OAT);
+          expect(substitutes).toHaveLength(covered ? 1 : 0);
+          expect(result.offers.some((offer) => offer.claims.productId === OAT)).toBe(true);
+          if (covered) {
+            expect(substitutes[0]?.claims.quantity.value).toBeCloseTo(required, 12);
+            expect(setup.signer.signed.some((entry) => entry.claims.replaces === OAT)).toBe(true);
+          } else {
+            expect(setup.signer.signed.some((entry) => entry.claims.replaces === OAT)).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
   test("shared substitutes are looked up once but ranked and signed for each requested occurrence", async () => {
     const sub = "prod_test_sub";
     const perSalesUnit = { value: 1, unit: "LTR" };

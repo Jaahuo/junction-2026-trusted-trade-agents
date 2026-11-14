@@ -24,6 +24,7 @@ import {
   planOriginalQuantity,
   quantityForShortfall,
   rankSubstitutes,
+  stockCovers,
 } from "../domain/partial-stock.ts";
 import type { CachedQuote, OffersDeps } from "./ports.ts";
 
@@ -333,7 +334,9 @@ export async function getOffers(
     if (
       quote === undefined ||
       quote.availableDate === null ||
-      availabilityOmitReason(quote, quantity.value) !== null
+      availabilityOmitReason(quote, 0) !== null ||
+      (quote.stock === "confirmed" &&
+        !stockCovers(quote.amount, quantity.value, product.allowedLotSize))
     )
       continue;
     substituteDated.push({

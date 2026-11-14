@@ -6,6 +6,7 @@ import {
   pricePerStdUnit,
   quantityForShortfall,
   rankSubstitutes,
+  stockCovers,
   type QuotedProduct,
 } from "./partial-stock.ts";
 
@@ -144,6 +145,98 @@ describe("partial stock quantities", () => {
     expect(
       quantityForShortfall({ value: Number.MAX_SAFE_INTEGER, unit: "LTR" }, original, fractional),
     ).toBeNull();
+  });
+  test("generated decimal lot rules agree with a scaled-integer oracle", () => {
+    const scale = 1000;
+    for (const lotTicks of [100, 250, 500, 1000]) {
+      const lot = lotTicks / scale;
+      for (const count of [1, 3, 7, 25]) {
+        for (const extraTicks of [0, Math.floor(lotTicks / 3)]) {
+          const stockTicks = count * lotTicks + extraTicks;
+          const requestedTicks = (count + 2) * lotTicks;
+          const availableTicks = Math.floor(stockTicks / lotTicks) * lotTicks;
+          const item = product({ allowedLotSize: lot, perSalesUnit: null });
+          const plan = planOriginalQuantity({ value: requestedTicks / scale, unit: "CASE" }, item, {
+            stock: "confirmed",
+            amount: stockTicks / scale,
+          });
+          expect(plan.ok).toBe(true);
+          if (!plan.ok || plan.value.shortfall === null) throw new Error("Expected shortfall");
+          expect(plan.value.quantity.value).toBeCloseTo(availableTicks / scale, 10);
+          expect(plan.value.shortfall.value).toBeCloseTo(
+            (requestedTicks - availableTicks) / scale,
+            10,
+          );
+          expect(stockCovers(stockTicks / scale, availableTicks / scale, lot)).toBe(true);
+          expect(stockCovers(stockTicks / scale, (availableTicks + lotTicks) / scale, lot)).toBe(
+            false,
+          );
+        }
+        for (const conversionTicks of [100, 250, 1000]) {
+          for (const excessTicks of [0, 1]) {
+            // Standard amounts use integer millionths so the oracle stays integral.
+            const standardTicks = count * lotTicks * conversionTicks + excessTicks * scale;
+            const expectedLots = Math.ceil(standardTicks / (lotTicks * conversionTicks));
+            const substitute = product({
+              salesUnit: "PACK",
+              allowedLotSize: lot,
+              perSalesUnit: { value: conversionTicks / scale, unit: "LTR" },
+            });
+            const quantity = quantityForShortfall(
+              { value: standardTicks / (scale * scale), unit: "LTR" },
+              product(),
+              substitute,
+            );
+            expect(quantity).not.toBeNull();
+            expect(quantity?.value).toBeCloseTo((expectedLots * lotTicks) / scale, 10);
+          }
+        }
+      }
+    }
+    for (const count of [100000000000, 600000000000]) {
+      const stockTicks = count * scale + 600;
+      const requestedTicks = (count + 1) * scale;
+      const availableTicks = Math.floor(stockTicks / scale) * scale;
+      const plan = planOriginalQuantity(
+        { value: requestedTicks / scale, unit: "CASE" },
+        product({ perSalesUnit: null }),
+        { stock: "confirmed", amount: stockTicks / scale },
+      );
+      expect(plan).toEqual({
+        ok: true,
+        value: {
+          quantity: { value: availableTicks / scale, unit: "CASE" },
+          shortfall: { value: (requestedTicks - availableTicks) / scale, unit: "CASE" },
+        },
+      });
+      expect(stockCovers(stockTicks / scale, requestedTicks / scale, 1)).toBe(false);
+      expect(
+        quantityForShortfall(
+          { value: (count * scale + 600) / scale, unit: "CASE" },
+          product({ perSalesUnit: null }),
+          product({ perSalesUnit: null }),
+        ),
+      ).toEqual({ value: count + 1, unit: "CASE" });
+    }
+    expect(stockCovers(0.3, 3 * 0.1, 0.1)).toBe(true);
+    expect(stockCovers(0.3, 0.3 + 1e-10, 0.1)).toBe(false);
+    expect(stockCovers(NaN, 1, 1)).toBe(false);
+    expect(stockCovers(1, Infinity, 1)).toBe(false);
+    expect(stockCovers(1, 1, 0)).toBe(false);
+    expect(stockCovers(Number.MAX_SAFE_INTEGER, 1, 0.1)).toBe(false);
+    expect(floorToLot(600000000000.6, 1)).toBe(600000000000);
+    expect(
+      planOriginalQuantity({ value: 600000000001, unit: "CASE" }, product({ perSalesUnit: null }), {
+        stock: "confirmed",
+        amount: 600000000000.6,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        quantity: { value: 600000000000, unit: "CASE" },
+        shortfall: { value: 1, unit: "CASE" },
+      },
+    });
   });
 });
 

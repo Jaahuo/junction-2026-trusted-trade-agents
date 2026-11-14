@@ -72,9 +72,13 @@ const GetSkillRequestSchema = z.object({
 
 const DESCRIPTIONS: Record<ToolName, string> = {
   search_products:
-    "Find candidate products for a structured need: search terms, hard and soft constraints, a quantity with unit and a deliver-by date. Returns each candidate with a per-constraint match and the quantity in sales units. Uses static data only.",
+    "Show the user candidate products for a structured need: search terms, hard and soft constraints, a quantity with unit and a deliver-by date. Returns each candidate with a per-constraint match and the quantity in sales units, and opens the search results view. Use it when the user asks to see or browse products; when the user asks you to order, use find_products. Uses static data only.",
+  find_products:
+    "The same search as search_products, without a view. Use it while you prepare or place an order the user asked for, so the chat shows only the order. Same input and result as search_products.",
   get_offers:
-    "Get one signed offer per shortlisted product, with price, delivery date, stock and a pre-check result. Pass the offer tokens to place_order.",
+    "Show the user one signed offer per shortlisted product, with price, delivery date, stock and a pre-check result, in the offer comparison view. Use it when the user asks to compare offers; when the user asks you to order, use quote_offers. Pass the offer tokens to place_order.",
+  quote_offers:
+    "The same signed offers as get_offers, without a view. Use it while you prepare or place an order the user asked for, so the chat shows only the order. Same input and result as get_offers; pass the offer tokens to place_order.",
   place_order:
     "Place an order from signed offer tokens with an idempotency key. The order is placed, pending human approval or rejected, with reason codes. A pending order has an approvalUrl for the human; do not approve it yourself.",
   get_order_status: "Get the current status and the audit record of an order.",

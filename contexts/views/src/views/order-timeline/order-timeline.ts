@@ -1,16 +1,18 @@
 import { type Order, REASON_TEXT } from "@app/contract";
+import {
+  formatDeliveryDate,
+  formatMoney,
+  formatOrderNumber,
+  formatQuantity,
+  formatTimestamp,
+  ORDER_ACTORS,
+  ORDER_OUTCOMES,
+  ORDER_STATUS_LABELS,
+} from "@app/ui/format";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
-
-const statuses: Record<Order["status"], string> = {
-  pending_approval: "Pending approval",
-  awaiting_payment: "Awaiting payment",
-  placed: "Placed",
-  rejected: "Rejected",
-  declined: "Declined",
-};
 
 const events: Record<Order["audit"][number]["event"], string> = {
   order_requested: "Order requested",
@@ -29,12 +31,6 @@ const events: Record<Order["audit"][number]["event"], string> = {
   rejected: "Order rejected",
 };
 
-const actors: Record<Order["audit"][number]["actor"], string> = {
-  agent: "Agent",
-  server: "Server",
-  approver: "Approver",
-};
-
 /** Render the order record without adding actions to the audit view. */
 export function renderOrderTimeline(order: Order): TemplateResult {
   const decision = order.decision;
@@ -42,10 +38,27 @@ export function renderOrderTimeline(order: Order): TemplateResult {
     <header class="header">
       <div>
         <p class="eyebrow">Order timeline</p>
-        <h2>Order ${order.orderId}</h2>
+        <h2 title=${order.orderId}>Order ${formatOrderNumber(order.orderId)}</h2>
       </div>
-      <p class="status">${statuses[order.status]}</p>
+      <p class="status">${ORDER_STATUS_LABELS[order.status]}</p>
     </header>
+    <section class="decision" aria-label="Order summary">
+      <h3>Order summary</h3>
+      <p>Total: ${formatMoney(order.total.gross, "EUR", "gross")}</p>
+      <ul>
+        ${order.lines.map(
+          ({ claims }) =>
+            html`<li>
+              <p class="strong" title=${claims.productId}>${claims.product.name}</p>
+              <p>
+                <span title=${claims.quantity.unit}>${formatQuantity(claims.quantity)}</span> ·
+                ${formatDeliveryDate(claims.deliveryDate)}
+              </p>
+            </li>`,
+        )}
+      </ul>
+    </section>
+    ${order.status === "placed" ? html`<p class="decision">${ORDER_OUTCOMES.placed}</p>` : nothing}
     ${
       decision?.action === "reject"
         ? html`<div class="decision">
@@ -53,9 +66,9 @@ export function renderOrderTimeline(order: Order): TemplateResult {
             <p>
               ${
                 decision.next === "stop"
-                  ? "The agent stops."
+                  ? ORDER_OUTCOMES.stop
                   : decision.next === "alternatives"
-                    ? "The agent may seek alternatives."
+                    ? ORDER_OUTCOMES.alternatives
                     : "The next action was not recorded."
               }
             </p>
@@ -75,12 +88,12 @@ export function renderOrderTimeline(order: Order): TemplateResult {
                     <div class="event-heading">
                       <h4>${events[event.event]}</h4>
                       <span class="secondary body-small">
-                        <time datetime=${event.at}>${new Date(event.at).toLocaleString()}</time>
+                        <time datetime=${event.at}>${formatTimestamp(event.at)}</time>
                       </span>
                     </div>
-                    <p class="secondary body-small">${actors[event.actor]}</p>
+                    <p class="secondary body-small">${ORDER_ACTORS[event.actor]}</p>
                     ${event.reason ? html`<p>${REASON_TEXT[event.reason]}</p>` : nothing}
-                    ${event.rule ? html`<p class="body-small">Rule: ${event.rule}</p>` : nothing}
+                    ${event.rule ? html`<span class="body-small" title=${event.rule}>Support rule available</span>` : nothing}
                     ${event.detail ? html`<p class="body-small">${event.detail}</p>` : nothing}
                   </li>`,
               )}
@@ -96,27 +109,30 @@ export function renderOrderTimeline(order: Order): TemplateResult {
               ${order.requotes.map(
                 (quote) =>
                   html`<li>
-                    <p class="strong">${quote.current.product.name} (${quote.current.productId})</p>
+                    <p class="strong" title=${quote.current.productId}>
+                      ${quote.current.product.name}
+                    </p>
                     ${
                       quote.previous.productId !== quote.current.productId
-                        ? html`<p class="body-small">
+                        ? html`<p class="body-small" title=${quote.previous.productId}>
                             Previous product: ${quote.previous.product.name}
-                            (${quote.previous.productId})
                           </p>`
                         : nothing
                     }
                     <p>
-                      Unit price, net: ${quote.previous.unitPrice.net.toFixed(2)}
-                      ${quote.previous.unitPrice.currency} →
-                      ${quote.current.unitPrice.net.toFixed(2)} ${quote.current.unitPrice.currency}
+                      Unit price:
+                      ${formatMoney(quote.previous.unitPrice.net, quote.previous.unitPrice.currency, "net")}
+                      →
+                      ${formatMoney(quote.current.unitPrice.net, quote.current.unitPrice.currency, "net")}
                     </p>
                     <p>
-                      Total, gross: ${quote.previous.total.gross.toFixed(2)}
-                      ${quote.previous.unitPrice.currency} → ${quote.current.total.gross.toFixed(2)}
-                      ${quote.current.unitPrice.currency}
+                      Total:
+                      ${formatMoney(quote.previous.total.gross, quote.previous.unitPrice.currency, "gross")}
+                      →
+                      ${formatMoney(quote.current.total.gross, quote.current.unitPrice.currency, "gross")}
                     </p>
                     <p class="secondary body-small">
-                      <time datetime=${quote.at}>${new Date(quote.at).toLocaleString()}</time>
+                      <time datetime=${quote.at}>${formatTimestamp(quote.at)}</time>
                     </p>
                     ${quote.reasons.map((reason) => html`<p>${REASON_TEXT[reason]}</p>`)}
                   </li>`,

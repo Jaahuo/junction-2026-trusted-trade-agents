@@ -1,6 +1,8 @@
 # Order timeline
 
-The timeline shows the order status and audit events in their recorded order. Each event includes its actor, local date and time, and any recorded reason, rule, or detail. Requoted offers appear separately with their product, old and new net unit prices, gross totals, and reasons. A recorded rejection decision shows whether the agent must stop or may seek alternatives, plus any note. This view has no approval actions.
+The timeline shows the order status, gross total, and lines. Each line shows the product, quantity, and delivery date. The timeline lists audit events in their recorded order. Each event includes its actor, timestamp, and any recorded reason or detail. Requoted offers show the product, old and new net unit prices, gross totals, and reasons. A rejection decision shows the next step and any note. This view has no approval actions.
+
+The view uses `@app/ui` for shared order wording and formatting. It uses the `en-FI` locale and displays timestamps in UTC. Delivery dates include the weekday. The full order ID, product IDs, quantity unit codes, and rule codes are available in support titles rather than visible text.
 
 The shared view shell handles loading and errors. The timeline supports pending approval, awaiting payment, placed, rejected, and declined orders.
 

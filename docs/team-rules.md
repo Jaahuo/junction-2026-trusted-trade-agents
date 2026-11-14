@@ -32,7 +32,7 @@ These rules are for every person and agent who works on an issue of the product 
 
 Each issue has exactly one label of each family `area:`, `wave:`, `kind:` and `risk:` (R-10).
 
-Each `area:` label belongs to exactly one lane, so the area label names the lane that owns the issue. The label description starts with its lane.
+Each `area:` label belongs to exactly one lane. The table gives the default lane for an issue. The label description starts with its lane.
 
 | Lane                          | Areas                                                                   |
 | ----------------------------- | ----------------------------------------------------------------------- |
@@ -40,6 +40,8 @@ Each `area:` label belongs to exactly one lane, so the area label names the lane
 | 2 Offers and MCP              | `area:offers`, `area:mcp`                                               |
 | 3 Contract helpers and orders | `area:contract`, `area:orders`                                          |
 | 4 Host integration and views  | `area:views`                                                            |
+
+Issue #9 remains assigned in lane 3 as an exception. Do not change an existing assignee to match the table (R-02).
 
 | Label                                                                                                                                            | When it applies                                                                                                                                                                                                       |
 | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

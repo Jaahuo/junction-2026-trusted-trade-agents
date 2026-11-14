@@ -796,9 +796,9 @@ export interface DemoProducts {
 }
 ```
 
-- `DEMO_ACCOUNT`: `{ accountId: "acct_demo", label: "Demo kitchen (invoice)", customer: "cust_invoice_01", agentId: "agent_demo", paymentTerms: "invoice", creditLimit: 5000 }`.
+- `DEMO_ACCOUNT`: `{ accountId: "acct_demo", label: "Demo kitchen (invoice)", customer: "cust_invoice_01", agentId: "agent_demo", paymentTerms: "invoice", creditLimit: null }`.
 - Later (SPEC-002): `acct_pay` (customer `cust_pay_01`, agent `agent_pay`, pay-on-order, creditLimit null).
 - Mandate: maxOrderTotal 1000 EUR gross; categories null; substitutions ask; newProducts ask; reliability 0.9 with ifNoData auto; CO2 3.0 with ifNoData auto; allergenData ifNoData ask; payment terms invoice auto, pay_on_order ask; standing soft constraint countryOfOrigin fi. Demo users may change every value.
 - Demo products: the tracked file `data/demo-products.json`, parsed with `DemoProductsSchema`. It holds product ids, quantities, observation time and scenario status only, as the one allowed exception to the dataset rule in [team rules](team-rules.md) R-23. Seeds and scripts read it; when it is absent, seeds add no history and log one warning.
 - Order history rows (SPEC-010), in sales units derived from the demo file: S1 product, 3 rows of `s1.quantity`; S2 product, 3 rows of `s2.quantity` / 5, rounded up to a whole sales unit; S3 product (when `s3` is set), 3 rows of `s3.quantity` / 5, rounded up. With `s3Substitute` also set: 2 rows of the same amount for the substitute and 2 approved, placed orders of the substitute alone (`replaces` the S3 product), so the demo's approval of the pair is the third. Scenario 1 (`s1.quantity`) gives no reason; scenario 2 (`s2.quantity`, the 1000 LTR request, gross above 1000 EUR) gives exactly `SPEND_OVER_LIMIT`.
-- Credit: placed orders use up the 5000 EUR credit. `bun run db:reset` restores it; run it before each rehearsal.
+- Credit: the demo account has no credit check (`creditLimit: null`), so placed orders never use up credit.

@@ -31,20 +31,28 @@ const attributeName = (attribute: string) =>
   attribute === "countryOfOrigin" ? pick(RESULTS).countryOfOrigin : words(attribute);
 
 // Every hard constraint is "free_from" (SPEC-004). Any attribute, so new allergens (#71) need no change.
-type Hard = { attribute: string };
 type Results = Omit<ViewData<"search-results">, "constraints"> & {
-  constraints: Omit<ViewData<"search-results">["constraints"], "hard"> & { hard: Hard[] };
+  constraints: Omit<ViewData<"search-results">["constraints"], "hard"> & {
+    hard: { attribute: string }[];
+  };
 };
-const required = ({ attribute }: Hard) =>
+const required = (attribute: string) =>
   attribute === "lactose" ? pick(RESULTS).lactoseFree : pick(RESULTS).free(words(attribute));
 const preferred = (attribute: string, prefer: string) =>
   `${attributeName(attribute)}: ${attribute === "countryOfOrigin" ? country(prefer) : words(prefer)}`;
+const decode = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
 /** Match keys are a hard attribute ("lactose") or "soft:<attribute>:<encoded value>" (SPEC-004). */
-const matchLabel = (key: string, hard: Hard[]) => {
+const matchLabel = (key: string) => {
   const [kind, attribute, value] = key.split(":");
-  if (kind === "soft" && attribute && value) return preferred(attribute, decodeURIComponent(value));
-  const constraint = hard.find((c) => c.attribute === key);
-  return constraint ? required(constraint) : words(key);
+  return kind === "soft" && attribute && value
+    ? preferred(attribute, decode(value))
+    : required(key);
 };
 const TONE: Record<MatchState, string> = {
   confirmed: "success",
@@ -58,7 +66,7 @@ const frame = (part: string, title: string, body: TemplateResult) =>
     <div class="body">${body}</div>
   </article>`;
 
-const candidateCard = (candidate: SearchCandidate, hard: Hard[]) => {
+const candidateCard = (candidate: SearchCandidate) => {
   const text = pick(RESULTS);
   const l = lang();
   const order = candidate.orderQuantity;
@@ -68,12 +76,16 @@ const candidateCard = (candidate: SearchCandidate, hard: Hard[]) => {
   });
   return html`<li class="candidate">
     <h3 class="strong">${candidate.name}</h3>
-    <ul class="matches">
-      ${Object.entries(candidate.match).map(
-        ([key, state]) =>
-          html`<li class="pill ${TONE[state]}">${matchLabel(key, hard)} · ${text[state]}</li>`,
-      )}
-    </ul>
+    ${
+      Object.keys(candidate.match).length === 0
+        ? html`<p class="secondary body-small">${text.noMatchInfo}</p>`
+        : html`<ul class="matches">
+            ${Object.entries(candidate.match).map(
+              ([key, state]) =>
+                html`<li class="pill ${TONE[state]}">${matchLabel(key)} · ${text[state]}</li>`,
+            )}
+          </ul>`
+    }
     ${rows([
       [
         text.order,
@@ -111,7 +123,10 @@ export function renderSearchResults(data: Results): TemplateResult {
     html`<section class="constraints" aria-labelledby="constraints-heading">
         <h3 id="constraints-heading" class="label-small secondary">${text.applied}</h3>
         ${rows([
-          [text.required, hard.length === 0 ? text.none : hard.map(required).join(", ")],
+          [
+            text.required,
+            hard.length === 0 ? text.none : hard.map((c) => required(c.attribute)).join(", "),
+          ],
           [
             text.preferred,
             soft.length === 0
@@ -121,7 +136,7 @@ export function renderSearchResults(data: Results): TemplateResult {
         ])}
       </section>
       <ul class="candidates">
-        ${data.candidates.map((candidate) => candidateCard(candidate, hard))}
+        ${data.candidates.map(candidateCard)}
       </ul>`,
   );
 }
@@ -158,13 +173,10 @@ class SearchResults extends ViewElement<ViewEntryOf<"search-results">> {
       .candidate {
         display: flex;
         flex-direction: column;
-        gap: var(--spacing-sm);
         min-width: 0;
       }
-      .candidates {
-        gap: 0;
-      }
       .candidate {
+        gap: var(--spacing-sm);
         padding-block: var(--spacing-lg);
         border-top: 1px solid var(--color-border);
       }

@@ -72,6 +72,7 @@ type Row = ReturnType<typeof mapRow> & { volume: number | null; substitutes: str
 
 /** The mock reports unlimited stock as 999999 (unconfirmed) or as a very large confirmed amount. */
 const UNLIMITED = 999999;
+/** A safe upper bound for scenario 3; the demo account itself has no credit check (SPEC-015). */
 const CREDIT_LIMIT_GROSS = 5000;
 
 /** A requested quantity in sales units, or litres through the sales-unit volume. */

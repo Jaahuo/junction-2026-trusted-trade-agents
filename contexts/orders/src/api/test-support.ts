@@ -1,4 +1,5 @@
 import {
+  DEMO_ACCOUNT,
   ErrorEnvelopeSchema,
   fixtures,
   type MandateLimits,
@@ -22,6 +23,9 @@ import { offerVerifier } from "../infra/offer-verifier.ts";
 import { type ApiDeps, context, createApi } from "./index.ts";
 
 const now = new Date("2026-11-16T08:00:00Z");
+
+/** The demo account with a 5000 EUR credit limit, so route tests can prove the credit rule. */
+const CREDIT_ACCOUNT = { ...DEMO_ACCOUNT, creditLimit: 5000 };
 export const inMinutes = (minutes: number) => new Date(now.getTime() + minutes * 60_000);
 
 const testKey = async (): Promise<OfferSigningKey> => {
@@ -73,6 +77,7 @@ export const mount = async (db: Db) => {
       mandates: mandateClient(mandates),
       now: () => clock.now,
       publicBaseUrl: () => publicBase.url,
+      principal: async () => CREDIT_ACCOUNT,
       ...changes,
     });
   const app = appWith();

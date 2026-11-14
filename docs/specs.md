@@ -160,7 +160,7 @@ export const TOOL_INPUT = {
 - `DecideApprovalInput` is flat because a tool input schema is one object. The MCP binding drops `orderId`, keeps the fields that belong to `decision`, and the REST route validates the result as `DecideApprovalRequest`; a field that does not belong to the decision → 400.
 - No tool input has a customer, account, agent, password or passcode field.
 - Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not in `HARD_CONSTRAINT_VALUES` for that attribute, → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` (`standingConstraints.hard`) and the `facts` route.
-- Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
+- Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` and `GET /skills/trusted-trade-ordering/:file` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
 
 Verification: a contract test that `ROUTES` keys, tools, `TOOL_INPUT` and `TOOL_OUTPUT` match this table and that every `TOOL_INPUT` schema is a JSON object schema.
 
@@ -243,7 +243,7 @@ export const ALLERGEN_ATTRIBUTES = ["lactose"] as const; // hard constraint attr
 - Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the values in `HARD_CONSTRAINT_VALUES`. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
 - Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
-- A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by soft matches, then reliability.
+- A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, then soft matches, then reliability.
 - Quantity: consumer-unit volume × units per sales unit gives `perSalesUnit`; `GRM` converts to `KGM`; the order quantity rounds up to a multiple of `allowedLotSize`. No volume → `orderQuantity` and `equals` are null.
 - The index loads once per process; parallel first requests share one load.
 
@@ -585,10 +585,10 @@ Approve and remember: the approver raises the mandate's order limit and approves
 PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 
 - `ALL /mcp`: stateless streamable HTTP, a new server and transport per request, JSON responses. No authentication in the first build (SPEC-002).
-- Every tool of SPEC-003 is registered with `inputSchema` = `TOOL_INPUT[tool]` and `outputSchema` = `TOOL_OUTPUT[tool]`. The result has `content` (a text summary) and `structuredContent` (the REST 2xx body). Text of a pending order includes its `approvalUrl`. A REST error → `isError: true`, the error code in the text, the envelope as `structuredContent`. Hosts without Apps complete the flow from text, structured content and the approval page.
+- Every tool of SPEC-003 is registered with `inputSchema` = `TOOL_INPUT[tool]` and `outputSchema` = `TOOL_OUTPUT[tool]`. The result has `content` (a text summary) and `structuredContent` (the REST 2xx body). Text of a pending order includes its `approvalUrl`. A REST error, or input that `TOOL_INPUT[tool]` refuses (`BAD_REQUEST`), → `isError: true` and no `structuredContent`; the text has the error code, the message and the envelope as JSON. Reason: an MCP SDK client validates any `structuredContent` against `outputSchema`, also when `isError` is set. So every result with `structuredContent` parses with `TOOL_OUTPUT[tool]`. Hosts without Apps complete the flow from text, structured content and the approval page.
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
 - Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
-- Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares the extension, answers its discovery methods with entries that carry a file manifest (path, digest, size), and serves each file through `resources/read`.
+- Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
 
 ## SPEC-013 Views
 
@@ -650,7 +650,7 @@ export const VIEWS = [
 ] as const; // priority order
 ```
 
-- The `structuredContent` of a tool is the only input of its view. A view parses it with `TOOL_OUTPUT`; a failed parse shows the error state.
+- The `structuredContent` of a tool is the only input of its view. A view parses it with `TOOL_OUTPUT`; a failed parse, or a result with `isError: true` and no `structuredContent` (SPEC-012), shows the error state.
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
 - Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. The approval card has no plain mode; its plain counterpart is the approval page.
 - The approval card shows a link to `approvalUrl` in every pending state.
@@ -662,7 +662,7 @@ export const VIEWS = [
 
 PRD: [Open contract and adapters](prd.md#open-contract-and-adapters).
 
-- `GET /.well-known/trusted-trade.json` → `{ endpoint, mcp, jwksUri, openapi, authorization: null, guardrails: GUARDRAILS, paymentTerms: PAYMENT_TERMS, reasonCodes, tools: { model, view }, views }`. `authorization` is null while the build has no authentication (SPEC-002).
+- `GET /.well-known/trusted-trade.json` → `{ endpoint, mcp, jwksUri, openapi, skill?, authorization: null, guardrails: GUARDRAILS, paymentTerms: PAYMENT_TERMS, reasonCodes, tools: { model, view }, views }`. `skill` is the optional absolute URL of `/skills/trusted-trade-ordering/SKILL.md`. `authorization` is null while the build has no authentication (SPEC-002).
 - `GET /api/discovery/openapi.json`: OpenAPI 3.1 with every `/api` route of `ROUTES`, request and response schemas generated from the contract schemas.
 
 ## SPEC-015 Demo seed values

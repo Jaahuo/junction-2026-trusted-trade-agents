@@ -1,4 +1,6 @@
 import { afterAll, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   DEMO_ACCOUNT,
   type ErrorEnvelope,
@@ -7,7 +9,7 @@ import {
   type RouteInput,
   type RouteKey,
 } from "@app/contract";
-import { closeDb, discoverContexts, openDb } from "@app/server-kit";
+import { closeDb, contextsDir, discoverContexts, openDb } from "@app/server-kit";
 import type { Api as OrdersApi } from "@ctx/orders/api";
 import { treaty } from "@elysia/eden";
 import { Elysia } from "elysia";
@@ -31,14 +33,17 @@ const inputs: { [K in RouteKey]: RouteInput<K> } = {
   account: {},
   openapi: {},
 };
-const implemented = new Set<RouteKey>(["offers"]);
+const implemented = new Set<RouteKey>(["search", "facts", "offers"]);
 
-// The stub contexts have no migrations, so the database is never contacted.
+// A context leaves this test when it adds migrations: its own route tests then cover its routes
+// against a real database. The remaining stub contexts never contact the database.
 const db = openDb("postgres://127.0.0.1:1/unused");
 afterAll(async () => {
   await closeDb(db);
 });
-const routeContexts = new Set<string>(ROUTES.map((route) => route.context));
+const isStub = (name: string): boolean => !existsSync(resolve(contextsDir, name, "migrations"));
+const stubRoutes = ROUTES.filter((route) => isStub(route.context));
+const routeContexts = new Set<string>(stubRoutes.map((route) => route.context));
 const app = await createApp(
   db,
   (await discoverContexts()).filter((context) => routeContexts.has(context.name)),
@@ -65,8 +70,8 @@ const inProcessFetch = Object.assign(
   { preconnect: fetch.preconnect },
 );
 
-test("every ROUTES entry except the implemented routes answers 501 NOT_IMPLEMENTED with the error envelope, and GET /api/accounts/current returns DEMO_ACCOUNT", async () => {
-  for (const route of ROUTES) {
+test("every route of a stub context except the implemented routes answers 501 NOT_IMPLEMENTED with the error envelope, and GET /api/accounts/current returns DEMO_ACCOUNT", async () => {
+  for (const route of stubRoutes) {
     if (implemented.has(route.key)) continue;
     const response = await app.handle(toRequest(route, inputs[route.key]));
     const body: unknown = await response.json();
@@ -86,8 +91,8 @@ test("every ROUTES entry except the implemented routes answers 501 NOT_IMPLEMENT
   }
 });
 
-test("every POST route answers 400 BAD_REQUEST with the envelope for a body field customer", async () => {
-  for (const route of ROUTES.filter((entry) => entry.method === "POST")) {
+test("every POST route of a stub context answers 400 BAD_REQUEST with the envelope for a body field customer", async () => {
+  for (const route of stubRoutes.filter((entry) => entry.method === "POST")) {
     const response = await app.handle(
       toRequest(route, { ...inputs[route.key], customer: DEMO_ACCOUNT.customer }),
     );

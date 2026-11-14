@@ -13,6 +13,8 @@ import {
 import { err, ok, type Result } from "@app/kernel";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { z } from "zod";
 import type { TradeRest, ViewName, ViewPages } from "../application/tools.ts";
 import { createRoot } from "./index.ts";
@@ -305,12 +307,159 @@ describe("resources", () => {
   });
 });
 
+const skillDir = resolve(import.meta.dir, "../../../../skills/trusted-trade-ordering");
+const diskFile = (name: string) => Bun.file(resolve(skillDir, name)).bytes();
+const sha256 = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+
+const ResultSchema = <T extends z.ZodType>(result: T) => z.looseObject({ result });
+const EntrySchema = z.looseObject({
+  uri: z.string(),
+  frontmatter: z.looseObject({ name: z.string(), description: z.string() }),
+  resources: z.array(z.looseObject({ uri: z.string(), digest: z.string(), size: z.number() })),
+});
+const CacheSchema = { resultType: z.literal("complete"), ttlMs: z.number().min(0) };
+const CapabilitiesSchema = z.looseObject({
+  resources: z.looseObject({}),
+  extensions: z.looseObject({ "io.modelcontextprotocol/skills": z.looseObject({}) }),
+});
+
+describe("Skills extension", () => {
+  test("initialize declares the Skills extension", async () => {
+    const body = ResultSchema(z.looseObject({ capabilities: CapabilitiesSchema })).parse(
+      await mcp().rpc("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test-host", version: "0.0.0" },
+      }),
+    );
+    expect(body.result.capabilities.extensions["io.modelcontextprotocol/skills"]).toEqual({});
+  });
+
+  test("server/discover declares the io.modelcontextprotocol/skills extension and the resources capability", async () => {
+    const { result } = ResultSchema(
+      z.looseObject({
+        ...CacheSchema,
+        supportedVersions: z.array(z.string()).min(1),
+        capabilities: CapabilitiesSchema,
+        cacheScope: z.enum(["public", "private"]),
+      }),
+    ).parse(await mcp().rpc("server/discover"));
+    expect(result.supportedVersions).not.toContain("2026-07-28");
+    const init = ResultSchema(z.looseObject({ capabilities: CapabilitiesSchema })).parse(
+      await mcp().rpc("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test-host", version: "0.0.0" },
+      }),
+    );
+    expect(result.capabilities).toEqual(init.result.capabilities);
+    expect(result.capabilities.extensions["io.modelcontextprotocol/skills"]).toEqual({});
+  });
+
+  test("skills/list returns one entry whose resources manifest lists every file, SKILL.md included, with digest and size matching each file", async () => {
+    const { result } = ResultSchema(
+      z.looseObject({ ...CacheSchema, skills: z.array(EntrySchema), cacheScope: z.string() }),
+    ).parse(await mcp().rpc("skills/list"));
+    const [entry] = result.skills;
+    expect(result.skills).toHaveLength(1);
+    expect(entry?.frontmatter.name).toBe("trusted-trade-ordering");
+    expect(entry?.resources).toHaveLength(2);
+    for (const resource of entry?.resources ?? []) {
+      const bytes = await diskFile(resource.uri.replace("skill://trusted-trade-ordering/", ""));
+      expect({ digest: resource.digest, size: resource.size }).toEqual({
+        digest: sha256(bytes),
+        size: bytes.byteLength,
+      });
+    }
+    expect(entry?.resources.map(({ uri }) => uri).toSorted()).toEqual([
+      "skill://trusted-trade-ordering/SKILL.md",
+      "skill://trusted-trade-ordering/reason-codes.md",
+    ]);
+  });
+
+  test("skills/get with the SKILL.md uri returns the entry in skill", async () => {
+    const { rpc } = mcp();
+    const listed = ResultSchema(z.looseObject({ skills: z.array(EntrySchema) })).parse(
+      await rpc("skills/list"),
+    );
+    const { result } = ResultSchema(
+      z.looseObject({ ...CacheSchema, skill: EntrySchema, cacheScope: z.string() }),
+    ).parse(await rpc("skills/get", { uri: "skill://trusted-trade-ordering/SKILL.md" }));
+    expect(listed.result.skills).toEqual([result.skill]);
+  });
+
+  test("skills/get with an unknown uri gives -32602", async () => {
+    expect(await mcp().rpc("skills/get", { uri: "skill://other/SKILL.md" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32602, message: expect.stringContaining("skill://other/SKILL.md") },
+    });
+  });
+
+  test("skills/get without a uri gives -32602", async () => {
+    expect(await mcp().rpc("skills/get")).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32602, message: expect.any(String) },
+    });
+  });
+
+  test("resources/read of each manifest skill:// uri returns bytes equal to the file", async () => {
+    const { rpc } = mcp();
+    const { result } = ResultSchema(z.looseObject({ skills: z.array(EntrySchema) })).parse(
+      await rpc("skills/list"),
+    );
+    for (const { uri } of result.skills[0]?.resources ?? []) {
+      const read = ResultSchema(
+        z.looseObject({
+          contents: z.array(
+            z.looseObject({ uri: z.string(), mimeType: z.string(), text: z.string() }),
+          ),
+        }),
+      ).parse(await rpc("resources/read", { uri }));
+      const [content] = read.result.contents;
+      const bytes = await diskFile(uri.replace("skill://trusted-trade-ordering/", ""));
+      expect(content?.uri).toBe(uri);
+      expect(content?.mimeType).toBe("text/markdown");
+      expect(new TextEncoder().encode(content?.text)).toEqual(bytes);
+    }
+  });
+
+  test("resources/read of an unlisted skill file gives -32602", async () => {
+    expect(
+      await mcp().rpc("resources/read", { uri: "skill://trusted-trade-ordering/x.md" }),
+    ).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32602, message: expect.stringContaining("x.md") },
+    });
+  });
+
+  test("a missing skill file gives -32603 on skills/list", async () => {
+    const skills = { snapshot: async () => err("UNAVAILABLE" as const) };
+    expect(await mcp({ skills }).rpc("skills/list")).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32603, message: expect.stringContaining("UNAVAILABLE") },
+    });
+  });
+
+  test("resources/list still lists only the views", async () => {
+    const body = z
+      .looseObject({
+        result: z.looseObject({ resources: z.array(z.looseObject({ uri: z.string() })) }),
+      })
+      .parse(await mcp().rpc("resources/list"));
+    expect(body.result.resources.every(({ uri }) => uri.startsWith("ui://"))).toBe(true);
+  });
+});
+
 test("GET /mcp answers 405 because the server is stateless", async () => {
   const response = await mcp().app.handle(new Request("http://localhost/mcp"));
   expect(response.status).toBe(405);
 });
 
-const connectClient = async (deps: McpDeps) => {
+const connectClient = async (deps: Omit<McpDeps, "skills">) => {
   const app = createRoot(deps);
   const client = new Client({ name: "test-host", version: "0.0.0" });
   await client.connect(

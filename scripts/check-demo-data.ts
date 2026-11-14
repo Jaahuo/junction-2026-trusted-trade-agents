@@ -1,4 +1,6 @@
+import type { DemoProducts } from "../packages/contract/src/index.ts";
 import { loadCatalogProducts, readDemoProducts } from "../contexts/catalog/src/api/index.ts";
+import { createCatalog } from "../contexts/catalog/src/domain/catalog.ts";
 import { closeDb, env, openDb } from "../packages/server-kit/src/index.ts";
 import { currentDatabase } from "./runtime.ts";
 
@@ -17,6 +19,36 @@ type Price = {
   comparisonPrice?: { value: number } | null;
   comparisonUnit?: string | null;
 };
+
+/** The scenario 1 chat sentence and the search words an agent sends for it (docs/buyer-agent-prompt.md). */
+export const SCENARIO_1 = {
+  sentence: "We need 20 litres of whole milk on Monday.",
+  terms: ["whole milk"],
+} as const;
+
+/**
+ * The product the scenario 1 sentence finds first: the catalogue's own ranking with the demo
+ * mandate's standing preference for Finnish origin. Scenario 1 places without approval only when
+ * this is the S1 product, the one with seeded order history.
+ */
+export function scenario1TopProduct(
+  products: Parameters<typeof createCatalog>[0],
+  s1: DemoProducts["s1"],
+  date: string,
+): string | null {
+  const [top] = createCatalog(products).searchCatalog(
+    {
+      terms: [...SCENARIO_1.terms],
+      hard: [],
+      soft: [{ attribute: "countryOfOrigin", prefer: "fi" }],
+      quantity: s1.quantity,
+      deliverBy: date,
+      paymentTerms: "invoice",
+    },
+    1,
+  );
+  return top?.productId ?? null;
+}
 
 const USAGE =
   "Usage: check-demo-data.ts --date YYYY-MM-DD [--ids id1,id2,...] [--database-env NAME]";
@@ -223,6 +255,10 @@ async function main() {
     return row;
   });
   if (demo) {
+    const found = scenario1TopProduct(products, demo.s1, date);
+    const sentenceOk = found === demo.s1.productId;
+    console.log(`S1 sentence ${sentenceOk ? "ok" : `not ok (finds ${found ?? "nothing"} first)`}`);
+    if (!sentenceOk) process.exitCode = 1;
     for (const [label, scenario, expected] of [
       ["S1", demo.s1, 20],
       ["S2", demo.s2, 1000],

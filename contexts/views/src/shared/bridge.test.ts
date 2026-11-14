@@ -149,6 +149,16 @@ test("plain mode has no chat to message", () => {
   expect(source.message).toBeUndefined();
 });
 
+test("host mode gives the tool's arguments before the result", async () => {
+  const { host } = fakeHost({});
+  const source = hostSource({
+    ...host,
+    onToolInput: (listener) => listener({ originalRequest: "Oat drink" }),
+  });
+  expect(await source.input).toEqual({ originalRequest: "Oat drink" });
+  expect(hostSource(host).input).toBeUndefined();
+});
+
 test("host mode tells the model about a decision without a chat message", async () => {
   const { host, messages, contexts } = fakeHost({});
   await hostSource(host).context?.("The approver rejected order ord_test_1.");

@@ -8,7 +8,6 @@ import {
   viewEntry,
 } from "../../shared/bridge.ts";
 import checkCircle from "../../shared/icons/check-circle-32.svg?raw";
-import loadingIcon from "../../shared/icons/loading.svg?raw";
 import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 import warningSmall from "../../shared/icons/warning-16.svg?raw";
 import warningLarge from "../../shared/icons/warning-32.svg?raw";
@@ -29,21 +28,53 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     busyId: { state: true },
     updatingId: { state: true },
     orderLimit: { state: true },
+    pending: { state: true },
   };
 
   static override styles = [
     base,
     cardStyles,
     css`
+      /* An Aimo shimmer moves across the placeholders: a light purple sweep over a petrol tint,
+         and a lime sweep in the petrol header. */
       .skeleton {
+        --shimmer-base: color-mix(in srgb, var(--color-bg-brand) 10%, var(--color-white));
+        --shimmer-sweep: var(--color-light-purple-aimo);
         display: block;
         height: 14px;
         border-radius: 0;
-        background: var(--color-bg-subtle);
+        background:
+          linear-gradient(90deg, transparent 0%, var(--shimmer-sweep) 50%, transparent 100%) 0 0 /
+            200% 100% no-repeat,
+          var(--shimmer-base);
+        animation: shimmer 1.4s ease-in-out infinite;
+      }
+      @keyframes shimmer {
+        from {
+          background-position:
+            150% 0,
+            0 0;
+        }
+        to {
+          background-position:
+            -50% 0,
+            0 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .skeleton {
+          animation: none;
+        }
+      }
+      .loading-text {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
       }
       .header .skeleton {
+        --shimmer-base: color-mix(in srgb, var(--color-text-on-brand) 20%, transparent);
+        --shimmer-sweep: color-mix(in srgb, var(--color-button) 55%, transparent);
         height: 18px;
-        background: color-mix(in srgb, var(--color-text-on-brand) 25%, transparent);
       }
       .w-60 {
         width: 60%;
@@ -63,14 +94,6 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       }
       .skeleton.button.small {
         width: 96px;
-      }
-      .loading-title {
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-sm);
-      }
-      .loading-title .icon {
-        animation: spin 1s linear infinite;
       }
       .center {
         display: flex;
@@ -163,6 +186,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   /** The mandate's order limit (gross EUR) for the Order total block; null when unknown. */
   declare private orderLimit: number | null;
   private limitAsked = false;
+  /** What the tool is doing, from its arguments, while the result is on its way. */
+  declare private pending: { placing: boolean; request: string | null };
 
   constructor() {
     super();
@@ -170,6 +195,17 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     this.busyId = null;
     this.updatingId = null;
     this.orderLimit = null;
+    this.pending = { placing: false, request: null };
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    void this.source?.input?.then((args) => {
+      this.pending = {
+        placing: Array.isArray(args["offers"]),
+        request: typeof args["originalRequest"] === "string" ? args["originalRequest"] : null,
+      };
+    });
   }
 
   /** Reads the order limit once, when the first order is shown; without it the block shows no limit. */
@@ -250,15 +286,31 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     </article>`;
   }
 
+  /**
+   * While the tool runs: what it is doing (from its arguments when the host sends them) and
+   * shimmering placeholders. The server reports no steps, so this names them.
+   */
   private loading() {
+    const { placing, request } = this.pending;
+    const title = placing ? "Checking your order…" : "Loading approvals…";
     return html`<article class="card" part="loading" aria-busy="true">
       ${brandHeader(
-        "Loading approval…",
+        title,
         html`<span class="skeleton w-60"></span>`,
         html`<span class="skeleton w-45"></span>`,
       )}
       <div class="body">
-        <p class="loading-title strong" role="status">${icon(loadingIcon)} Loading approval…</p>
+        <div class="loading-text" role="status">
+          <p class="strong">${title}</p>
+          ${
+            placing
+              ? html`<p class="body-small secondary">
+                  Verifying the signed offers and checking them against your limits.
+                </p>`
+              : nothing
+          }
+          ${request === null ? nothing : html`<p class="body-small">“${request}”</p>`}
+        </div>
         <span class="skeleton w-80"></span><span class="skeleton w-60"></span
         ><span class="skeleton w-75"></span>
         <div class="actions">

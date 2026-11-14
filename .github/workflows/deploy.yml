@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   actions: read
+  packages: write
 jobs:
   deploy:
     name: deploy
@@ -57,6 +58,36 @@ jobs:
         if: steps.target.outputs.ready == 'true'
       - if: steps.target.outputs.ready == 'true'
         run: bun install --frozen-lockfile
+      - name: Reuse or publish the selected image
+        if: steps.target.outputs.ready == 'true'
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid selected SHA" >&2; exit 1; }
+          repository=jaahuo/junction-2026-trusted-trade-agents
+          image="ghcr.io/$repository:$SHA"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
+          token=$(curl --fail --silent --show-error --user "$REGISTRY_USER:$GH_TOKEN" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:$repository:pull" | jq -er .token)
+          response=$(mktemp)
+          trap 'rm -f "$response"' EXIT
+          status=$(curl --silent --show-error -o "$response" -w '%{http_code}' \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/$repository/manifests/$SHA")
+          if [ "$status" = 200 ]; then
+            echo "Reusing $image"
+          elif [ "$status" = 404 ] && jq -e 'any(.errors[]?; .code == "MANIFEST_UNKNOWN")' "$response" > /dev/null; then
+            docker buildx build --platform linux/amd64 \
+              --label "org.opencontainers.image.source=https://github.com/jaahuo/junction-2026-trusted-trade-agents" \
+              --label "org.opencontainers.image.revision=$SHA" \
+              --tag "$image" --push .
+          else
+            echo "Registry manifest lookup failed (HTTP $status)" >&2
+            cat "$response" >&2
+            exit 1
+          fi
       - name: Push to the hosted demo
         if: steps.target.outputs.ready == 'true'
         env:
@@ -65,13 +96,20 @@ jobs:
           DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          VERDA_INFERENCE_KEY: ${{ secrets.VERDA_INFERENCE_KEY }}
+          OPENWEBUI_SECRET_KEY: ${{ secrets.OPENWEBUI_SECRET_KEY }}
+          OPENWEBUI_ADMIN_EMAIL: ${{ secrets.OPENWEBUI_ADMIN_EMAIL }}
+          OPENWEBUI_ADMIN_PASSWORD: ${{ secrets.OPENWEBUI_ADMIN_PASSWORD }}
+          DEPLOY_IMAGE: ghcr.io/jaahuo/junction-2026-trusted-trade-agents:${{ steps.target.outputs.sha }}
+          DEPLOY_REGISTRY_USER: ${{ github.actor }}
+          DEPLOY_REGISTRY_TOKEN: ${{ github.token }}
         run: |
-          if [ "$(gh api "repos/$REPO/commits/main" --jq .sha)" != "$SHA" ]; then
-            echo "Skipped: main moved past $SHA; the newer run deploys." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           install -d -m 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          if [ "$(gh api "repos/$REPO/commits/main" --jq .sha)" != "$SHA" ]; then
+            echo "Skipped: main moved past $SHA; the newer run deploys." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           bun scripts/deploy.ts push

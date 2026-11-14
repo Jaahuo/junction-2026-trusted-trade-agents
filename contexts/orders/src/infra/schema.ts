@@ -1,4 +1,5 @@
 import type { AuditEvent, Order, OrderLine, Quantity, ReasonCode } from "@app/contract";
+import { sql } from "drizzle-orm";
 import {
   doublePrecision,
   index,
@@ -42,6 +43,10 @@ export const orders = pgTable(
   },
   (table) => [
     uniqueIndex("orders_orders_customer_idempotency_key").on(table.customer, table.idempotencyKey),
+    index("orders_orders_lines_offer_ids").using(
+      "gin",
+      sql`((${table.lines} #>> '{}')::jsonb) jsonb_path_ops`,
+    ),
   ],
 );
 

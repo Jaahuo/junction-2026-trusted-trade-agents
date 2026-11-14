@@ -1,17 +1,21 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { $ } from "bun";
 import { expect, test } from "bun:test";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  CHAT_SERVICE,
+  chatEnv,
+  chatSettings,
   deployEnv,
   type Outputs,
   parseEnv,
+  push,
   parseOutputs,
   renderCaddyfile,
   renderEnvFile,
+  renderService,
   resetEnv,
-  RSYNC_EXCLUDES,
+  transferData,
 } from "./deploy.ts";
 
 const outputs: Outputs = {
@@ -47,11 +51,22 @@ test("the env file keeps a JSON key literal and adds the hosted settings", async
   const file = renderEnvFile(
     await deployEnv(outputs, parseEnv(`# keys\n${keys}MCP_VIEW_TOOLS="app"\n`)),
   );
-  expect(file).toContain(`OFFER_SIGNING_JWK='${jwk}'`);
-  expect(file).toContain("MCP_VIEW_TOOLS='app'");
-  expect(file).toContain("NODE_ENV='production'");
-  expect(file).toContain("PUBLIC_BASE_URL='https://203-0-113-7.sslip.io'");
-  expect(file).toContain(`DATABASE_URL='${outputs.database_url}'`);
+  const entries = new Map(
+    file
+      .trimEnd()
+      .split("\n")
+      .map((line) => {
+        const at = line.indexOf("=");
+        return [line.slice(0, at), line.slice(at + 1)];
+      }),
+  );
+  expect(entries.get("OFFER_SIGNING_JWK")).toBe(jwk);
+  expect(entries.get("MCP_VIEW_TOOLS")).toBe("app");
+  expect(entries.get("NODE_ENV")).toBe("production");
+  expect(entries.get("PUBLIC_BASE_URL")).toBe(outputs.public_base_url);
+  expect(entries.get("DATABASE_URL")).toBe(outputs.database_url);
+  expect(entries.get("APP_ROOT")).toBe("/app");
+  expect(entries.get("PORT")).toBe("3000");
 });
 
 test("a hosted setting wins over the same name in the secrets file", async () => {
@@ -62,15 +77,16 @@ test("a hosted setting wins over the same name in the secrets file", async () =>
   expect(file.match(/^DATABASE_URL=/gm)).toHaveLength(1);
 });
 
-test("a missing setting or a quote in a value fails before anything ships", async () => {
+test("a missing setting or a newline in a value fails before anything ships", async () => {
   expect(await failure(deployEnv(outputs, parseEnv("OFFER_SIGNING_KID=k1\n")))).toMatch(
     /lacks OFFER_SIGNING_JWK, BUYER_SIGNING_JWK/,
   );
   expect(await failure(deployEnv(outputs, parseEnv(`${keys}OFFER_SIGNING_KID= \n`)))).toMatch(
     /lacks OFFER_SIGNING_KID/,
   );
-  const env = await deployEnv(outputs, parseEnv(`${keys}NOTE=it's\n`));
-  expect(() => renderEnvFile(env)).toThrow(/NOTE/);
+  expect(renderEnvFile(new Map([["NOTE", "it's"]]))).toBe("NOTE=it's\n");
+  expect(() => renderEnvFile(new Map([["NOTE", "first\nsecond"]]))).toThrow(/NOTE/);
+  expect(() => renderEnvFile(new Map([["NOTE", "first\rsecond"]]))).toThrow(/NOTE/);
   expect(() => parseEnv("not a pair")).toThrow(/KEY=VALUE/);
 });
 
@@ -111,6 +127,60 @@ test("Caddy serves the hostname with automatic TLS and proxies to the app port",
   );
 });
 
+const chatSecrets = {
+  VERDA_INFERENCE_KEY: "inference-key",
+  OPENWEBUI_SECRET_KEY: "session-key",
+  OPENWEBUI_ADMIN_EMAIL: "admin@example.com",
+  OPENWEBUI_ADMIN_PASSWORD: "admin-password",
+};
+
+test("the deploy skips the chat host until the inference key is set", () => {
+  expect(chatSettings({})).toBeUndefined();
+  expect(chatSettings({ ...chatSecrets, VERDA_INFERENCE_KEY: " " })).toBeUndefined();
+  expect(chatSettings({ ...chatSecrets, OPENWEBUI_ADMIN_PASSWORD: "admin-password\r " })).toEqual(
+    chatSettings(chatSecrets),
+  );
+  expect(chatSettings(chatSecrets)).toEqual({
+    inferenceKey: "inference-key",
+    secretKey: "session-key",
+    adminEmail: "admin@example.com",
+    adminPassword: "admin-password",
+  });
+});
+
+test("an inference key without the admin login fails before anything is deployed", () => {
+  const { OPENWEBUI_ADMIN_PASSWORD: _password, ...partial } = chatSecrets;
+  expect(() => chatSettings(partial)).toThrow(/needs OPENWEBUI_ADMIN_PASSWORD/);
+});
+
+test("the chat host runs with login on, sign-up off and the hosted inference endpoint", () => {
+  const chat = chatSettings(chatSecrets);
+  if (!chat) throw new Error("chat settings expected");
+  const env = chatEnv(outputs, chat);
+  expect(env.get("WEBUI_AUTH")).toBe("True");
+  expect(env.get("ENABLE_SIGNUP")).toBe("False");
+  expect(env.get("WEBUI_URL")).toBe("https://chat.203-0-113-7.sslip.io");
+  expect(env.get("OPENAI_API_BASE_URL")).toBe(
+    "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1",
+  );
+  expect(env.get("OPENAI_API_KEY")).toBe("inference-key");
+  expect(renderEnvFile(env)).toContain("WEBUI_ADMIN_PASSWORD=admin-password\n");
+});
+
+test("Caddy serves the chat host on its own subdomain when the chat runs", () => {
+  expect(renderCaddyfile(outputs, true)).toBe(
+    "203-0-113-7.sslip.io {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:3000\n}\n\n" +
+      "chat.203-0-113-7.sslip.io {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:8080\n}\n",
+  );
+});
+
+test("the chat unit keeps its data in a volume and listens on loopback only", () => {
+  expect(CHAT_SERVICE).toContain("-p 127.0.0.1:8080:8080");
+  expect(CHAT_SERVICE).toContain("-v trusted-trade-chat:/app/backend/data");
+  expect(CHAT_SERVICE).toContain("--env-file /etc/trusted-trade-chat.env");
+  expect(CHAT_SERVICE).toContain("ghcr.io/open-webui/open-webui:v0.13.3");
+});
+
 test("a reset runs with the hosted keys and production mode against the local checkout", async () => {
   const env = resetEnv(
     await deployEnv(outputs, parseEnv(keys)),
@@ -124,32 +194,57 @@ test("a reset runs with the hosted keys and production mode against the local ch
   expect(env["PATH"]).toBe("/usr/bin");
 });
 
-test("rsync skips root-only folders but keeps context infra and nested data folders", async () => {
+test("push rejects untrusted image references before loading secrets or touching the host", async () => {
+  const repo = "ghcr.io/jaahuo/junction-2026-trusted-trade-agents";
+  for (const image of [
+    "",
+    `${repo}:latest`,
+    `${repo}:${"A".repeat(40)}`,
+    `${repo}:${"a".repeat(39)}`,
+    `ghcr.io/other/image:${"a".repeat(40)}`,
+    `${repo}@sha256:${"a".repeat(64)}`,
+  ]) {
+    expect(await failure(push(outputs, { DEPLOY_IMAGE: image }))).toMatch(/DEPLOY_IMAGE/);
+  }
+  expect(await failure(push(outputs, { DEPLOY_IMAGE: `${repo}:${"a".repeat(40)}` }))).toMatch(
+    /DEPLOY_REGISTRY_USER/,
+  );
+});
+
+test("data transfer sends files to the literal remote data directory", async () => {
   const root = await mkdtemp(join(tmpdir(), "deploy-rsync-"));
   try {
-    const files = [
-      "infra/main.tf",
-      "data/products.json",
-      "report/x.txt",
-      ".env.deploy",
-      "node_modules/a/index.js",
-      "contexts/mandates/src/infra/buyer-key.ts",
-      "contexts/catalog/src/data/units.ts",
-      "contexts/mandates/node_modules/b/index.js",
-    ];
-    for (const file of files) {
-      await mkdir(dirname(join(root, "src", file)), { recursive: true });
-      await writeFile(join(root, "src", file), "x");
-    }
-    const excludes = RSYNC_EXCLUDES.map((pattern) => `--exclude=${pattern}`);
-    await $`rsync -a ${excludes} ${join(root, "src")}/ ${join(root, "out")}/`.quiet();
-    const copied = (await readdir(join(root, "out"), { recursive: true })).map(String);
-    expect(copied).toContain(join("contexts", "mandates", "src", "infra", "buyer-key.ts"));
-    expect(copied).toContain(join("contexts", "catalog", "src", "data", "units.ts"));
-    for (const skipped of ["infra", "data", "report", ".env.deploy", "node_modules"])
-      expect(copied).not.toContain(skipped);
-    expect(copied.some((file) => file.includes("node_modules"))).toBe(false);
+    const source = join(root, "source");
+    const appDir = join(root, "app");
+    const destination = join(appDir, "data");
+    const remoteShell = join(root, "local-remote-shell");
+    await mkdir(source);
+    await mkdir(destination, { recursive: true });
+    await writeFile(join(source, "catalog.json"), '{"catalog":"transferred"}\n');
+    await writeFile(join(destination, "retained.json"), '{"retained":true}\n');
+    // rsync invokes the remote shell with a host followed by a shell command, as ssh does.
+    await writeFile(remoteShell, '#!/bin/sh\nshift\nexec /bin/sh -c "$*"\n');
+    await chmod(remoteShell, 0o755);
+
+    await transferData(`${source}/`, "local", appDir, remoteShell);
+
+    expect(await readFile(join(destination, "catalog.json"), "utf8")).toBe(
+      '{"catalog":"transferred"}\n',
+    );
+    expect(await readFile(join(destination, "retained.json"), "utf8")).toBe('{"retained":true}\n');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("the service runs the persisted digest on loopback with read-only host data", () => {
+  const unit = renderService({ ...outputs, app_port: 8123, app_dir: "/opt/trusted trade" });
+  expect(unit).toContain("EnvironmentFile=/etc/trusted-trade-image.env\n");
+  expect(unit).toContain(
+    'ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:8123:3000 -v "/opt/trusted trade/data:/app/data:ro" ${TRUSTED_TRADE_IMAGE}\n',
+  );
+  expect(unit).toContain(
+    "ExecStop=/usr/bin/docker stop --time 30 trusted-trade\nTimeoutStopSec=40\n",
+  );
+  expect(() => renderService({ ...outputs, app_dir: "/opt/a:b" })).toThrow(/app_dir/);
 });

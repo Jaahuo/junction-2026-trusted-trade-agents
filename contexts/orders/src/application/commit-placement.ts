@@ -47,11 +47,11 @@ export const commitPlacement = async (input: {
   let detail = "";
 
   if (order.paymentTerms === "invoice" && creditLimit !== null) {
-    const remaining =
-      Math.round((creditLimit - (await tx.placedInvoiceGross(order.customer))) * 100) / 100;
+    const used = await tx.placedInvoiceGross(order.customer);
+    const remaining = Math.round((creditLimit - used) * 100) / 100;
     if (order.total.gross > remaining) {
       reason = "CREDIT_LIMIT";
-      detail = `${order.total.gross.toFixed(2)} EUR is over the remaining ${remaining.toFixed(2)} EUR credit`;
+      detail = `Gross spend ${order.total.gross.toFixed(2)} EUR; credit limit ${creditLimit.toFixed(2)} EUR, used ${used.toFixed(2)} EUR, remaining ${remaining.toFixed(2)} EUR. Mandate ${order.mandateId ?? "unknown"}, version ${order.mandateVersion ?? "unknown"}.`;
     }
   }
   if (reason === undefined && order.paymentTerms === "pay_on_order") {
@@ -67,6 +67,7 @@ export const commitPlacement = async (input: {
     events.push(
       serverEvent(at, reason === "PAYMENT_FAILED" ? "payment_failed" : "check_failed", {
         reason,
+        ...(reason === "CREDIT_LIMIT" ? { rule: "Invoice credit limit" } : {}),
         detail,
       }),
       serverEvent(at, "rejected", { reason }),

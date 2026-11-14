@@ -11,6 +11,7 @@ import {
   openDb,
 } from "@app/server-kit";
 import { migrateCatalogue, readDemoProducts } from "@ctx/catalog/api";
+import { Elysia } from "elysia";
 
 const quote = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 
@@ -57,9 +58,14 @@ export const resetContexts = async (db: Db, contexts: readonly ContextModule[]):
     db,
     contexts.filter((context) => context.name !== "catalog").map((context) => context.name),
   );
+  const api = new Elysia({ prefix: "/api" });
+  for (const context of contexts) api.use(await mountContext(db, context));
+  const fetcher: typeof fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => api.handle(new Request(input, init)),
+    { preconnect: fetch.preconnect },
+  );
   for (const context of contexts) {
-    await mountContext(db, context);
-    await context.seed?.(db, { demoProducts });
+    await context.seed?.(db, { demoProducts, fetcher });
     console.log(
       `reset ${context.name}${context.seed === undefined ? "" : " and loaded demo data"}`,
     );

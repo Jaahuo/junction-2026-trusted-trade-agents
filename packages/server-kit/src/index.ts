@@ -9,6 +9,7 @@ export type Db = BunSQLDatabase & { $client: SQL };
 
 export interface SeedInputs {
   demoProducts?: unknown;
+  fetcher?: typeof fetch;
 }
 export interface ContextModule {
   readonly name: string;

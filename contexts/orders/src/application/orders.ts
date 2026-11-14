@@ -8,16 +8,14 @@ import {
   type PlaceOrderRequest,
   type Precheck,
   type Principal,
-  REASON_TEXT,
-  type ReasonCode,
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import {
-  evaluate,
+  evaluateWithEvidence,
   grossTotal,
   nextDeliveryDateAfterCutoff,
   netTotal,
-  reasonsByProduct,
+  type EvaluatedChecks,
   ruleFor,
 } from "../domain/evaluate.ts";
 import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
@@ -171,8 +169,7 @@ const checkTokens = async (
   return ok({ lines: lines.value, alternatives: alternativeLines.value, mandate: current });
 };
 
-/** The evaluation, and the reasons each product raises (for the audit). */
-type Evaluated = { evaluation: Evaluation; byProduct: Map<string, ReasonCode[]> };
+type Evaluated = EvaluatedChecks;
 
 const evaluateChecked = async (
   deps: OrderDeps,
@@ -184,10 +181,7 @@ const evaluateChecked = async (
   const history = await deps.store.history(principal.customer, [
     ...new Set(claims.map((claim) => claim.productId)),
   ]);
-  return {
-    evaluation: evaluate({ claims, mandate: checked.mandate, history, live: null, now }),
-    byProduct: reasonsByProduct(claims, checked.mandate, history),
-  };
+  return evaluateWithEvidence({ claims, mandate: checked.mandate, history, live: null, now });
 };
 
 /** Runs R3-R5 and the rule checks without writing anything and without the credit check. */
@@ -216,13 +210,10 @@ const replayOrConflict = (
     ? ok({ order, created: false })
     : err(refusal("CONFLICT", "The idempotency key was used with other offers."));
 
-/**
- * The audit of a new order. A reason about one product gets one check_failed per product, with
- * its productId, so the approval card can name the product.
- */
+/** Preserve every check's evidence; only buyer-limit checks carry product attribution. */
 const auditOf = (
   evaluation: Evaluation,
-  byProduct: Map<string, ReasonCode[]>,
+  evidence: Evaluated["evidence"],
   checked: Pick<Checked, "lines" | "mandate">,
   at: string,
 ): AuditEvent[] => {
@@ -246,20 +237,19 @@ const auditOf = (
   ];
   if (evaluation.decision === "auto")
     return [...opened, { at, actor: "server", event: "check_passed" }];
-  const failed = evaluation.reasons.flatMap((reason) => {
-    const failedFor = (productId?: string): AuditEvent => ({
-      at,
-      actor: "server",
-      event: "check_failed",
-      reason,
-      detail: REASON_TEXT[reason],
-      ...(productId === undefined ? {} : { productId }),
-    });
-    const products = [...byProduct].filter(([, reasons]) => reasons.includes(reason));
-    return products.length === 0
-      ? [failedFor()]
-      : products.map(([productId]) => failedFor(productId));
-  });
+  const mandate =
+    checked.mandate === null
+      ? "Mandate: no current mandate."
+      : `Mandate ${checked.mandate.mandateId}, version ${checked.mandate.version}.`;
+  const failed: AuditEvent[] = evidence.map(({ reason, rule, detail, productId }) => ({
+    at,
+    actor: "server",
+    event: "check_failed",
+    reason,
+    rule,
+    detail: `${detail} ${mandate}`,
+    ...(productId === undefined ? {} : { productId }),
+  }));
   const outcome: AuditEvent =
     evaluation.decision === "rejected"
       ? { at, actor: "server", event: "rejected" }
@@ -271,12 +261,12 @@ const buildOrder = (
   principal: Principal,
   request: PlaceOrderRequest,
   checked: Checked,
-  { evaluation, byProduct }: Evaluated,
+  { evaluation, evidence }: Evaluated,
   now: Date,
 ): StoredOrder => {
   const claims = checked.lines.map((line) => line.claims);
   const at = now.toISOString();
-  const audit = auditOf(evaluation, byProduct, checked, at);
+  const audit = auditOf(evaluation, evidence, checked, at);
   const requested = audit[0];
   if (requested !== undefined && request.supersedes !== undefined)
     requested.detail = `Replaces ${request.supersedes.orderId} proposal ${request.supersedes.proposalVersion}`;

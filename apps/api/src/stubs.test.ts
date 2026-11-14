@@ -28,6 +28,8 @@ const inputs: { [K in RouteKey]: RouteInput<K> } = {
   register: fixtures.registerMandateRequest,
   revoke: { mandateId: fixtures.storedMandate.mandate.mandateId },
   facts: fixtures.factsRequest,
+  orders: {},
+  refusals: {},
   precheck: fixtures.precheckRequest,
   requote: fixtures.requoteRequest,
   issued: { offerIds: [fixtures.offerClaims.offerId] },

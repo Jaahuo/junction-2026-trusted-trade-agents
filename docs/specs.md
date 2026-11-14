@@ -11,7 +11,7 @@ Host rule: every section uses only standard MCP, the MCP Apps extension and the 
 PRD: [Open contract and adapters](prd.md#open-contract-and-adapters).
 
 - `@app/contract` (root entry `packages/contract/src/index.ts`, browser-safe): types, zod schemas (`<Type>Schema`, the type is `z.infer` of it), constants, `ROUTES`, `VIEWS`, `TOOL_INPUT`, `TOOL_OUTPUT`, `REASON_TEXT`, `DEMO_ACCOUNT`, `fixtures`. It imports only `zod` and `@app/kernel`. Domain, application, infra, api and ui code may import it.
-- `@app/contract/server` (entry `packages/contract/src/server/index.ts`): helpers that need `jose` or the environment: `principalOf`, offer and mandate tokens, offer keys, `callRoute`. Server layers only (infra, api).
+- `@app/contract/server` (entry `packages/contract/src/server/index.ts`): helpers that need `jose` or the environment: `principalOf`, offer and mandate tokens, offer keys, order integrity, `callRoute`. Server layers only (infra, api).
 - Foundation: every context exists with its full route table of SPEC-003 as typed stubs. A stub validates its input with the route's schema, declares the 2xx response schema and the error envelope, and answers `501 NOT_IMPLEMENTED`. A context issue replaces its own stubs. So every peer call typechecks from the start.
 - Cross-context calls: an application port, implemented in infra with Eden ``treaty<Api>(`${selfBaseUrl()}/api`, { parseDate: false })`` from `import type { Api } from "@ctx/<peer>/api"`. `parseDate: false` is required on every Eden client: without it Eden turns ISO dates and `YYYY-MM-DD` strings into `Date` objects and the JSON contract breaks. Where the import would create a workspace cycle (orders calling offers), the infra adapter uses `callRoute(routeKey, input)`, which validates the request and the response with the route's schemas.
 - Base URLs (`@app/server-kit`): `selfBaseUrl()` = `INTERNAL_BASE_URL` or `http://127.0.0.1:$PORT`; `publicBaseUrl()` = `PUBLIC_BASE_URL` or `selfBaseUrl()`. A context may serve root routes through `ContextModule.root`, mounted after `/api` and before the web fallback.
@@ -78,6 +78,7 @@ export const MODEL_TOOLS = [
   "place_order",
   "get_order_status",
   "get_mandate",
+  "draft_mandate",
   "list_pending_approvals",
 ] as const; // the model sees these
 export const VIEW_TOOLS = ["decide_approval", "register_mandate", "revoke_mandate"] as const; // only a view calls these
@@ -132,6 +133,7 @@ export const TOOL_INPUT = {
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
+  draft_mandate: DraftMandateRequestSchema,
   list_pending_approvals: EmptySchema,
   decide_approval: DecideApprovalInputSchema,
   register_mandate: RegisterMandateRequestSchema,
@@ -146,6 +148,7 @@ export const TOOL_INPUT = {
 | place    | place_order            | POST /api/orders                     | orders    | input = body                                                          | PlaceOrderRequest → 201 Order (200 on replay)              |
 | status   | get_order_status       | GET /api/orders/:orderId             | orders    | `orderId` → path                                                      | → Order                                                    |
 | mandate  | get_mandate            | GET /api/mandates/current            | mandates  | none                                                                  | → StoredMandate                                            |
+| draft    | draft_mandate          | POST /api/mandates/drafts            | mandates  | input = body                                                          | DraftMandateRequest → MandateDraft                         |
 | pending  | list_pending_approvals | GET /api/orders/pending              | orders    | none                                                                  | → PendingList                                              |
 | decide   | decide_approval        | POST /api/orders/:orderId/decision   | orders    | `orderId` → path; the rest → body as DecideApprovalRequest (SPEC-011) | DecideApprovalRequest → Order                              |
 | register | register_mandate       | POST /api/mandates                   | mandates  | input = body                                                          | RegisterMandateRequest → 201 StoredMandate (200 on replay) |
@@ -159,7 +162,7 @@ export const TOOL_INPUT = {
 
 - `DecideApprovalInput` is flat because a tool input schema is one object. The MCP binding drops `orderId`, keeps the fields that belong to `decision`, and the REST route validates the result as `DecideApprovalRequest`; a field that does not belong to the decision → 400.
 - No tool input has a customer, account, agent, password or passcode field.
-- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not in `HARD_CONSTRAINT_VALUES` for that attribute, → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` (`standingConstraints.hard`) and the `facts` route.
+- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not the one for that attribute (`yes` for `vegan`, `free_from` for every other), → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` and `draft_mandate` (`standingConstraints.hard`) and the `facts` route.
 - Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` and `GET /skills/trusted-trade-ordering/:file` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
 
 Verification: a contract test that `ROUTES` keys, tools, `TOOL_INPUT` and `TOOL_OUTPUT` match this table and that every `TOOL_INPUT` schema is a JSON object schema.
@@ -174,16 +177,21 @@ export interface Quantity {
   unit: string;
 }
 export type MatchState = "confirmed" | "contradicted" | "unknown";
-export const HARD_CONSTRAINT_ATTRIBUTES = ["lactose"] as const; // attributes with a data mapping below
+// Data mapping per free_from attribute: GS1 allergen type code, included allergen codes, nutritionalClaim code, contradicting claim.
+export const FREE_FROM_DATA = {
+  egg: { allergen: "AE", claim: "FREE_FROM_EGGS" },
+  gluten: { allergen: "AW", includes: ["UW", "NR", "GB", "GS", "GK"], claim: "FREE_FROM_GLUTEN" },
+  lactose: { allergen: "ML", claim: "FREE_FROM_LACTOSE", low: "LOW_LACTOSE" },
+  peanut: { allergen: "AP" },
+  fat: { claim: "FREE_FROM_FAT", low: "LOW_FAT" },
+  // … every GS1 allergen code and FREE_FROM_* claim in the product data; the full table is in @app/contract
+} as const;
+type FreeFromAttribute = keyof typeof FREE_FROM_DATA;
+export const HARD_CONSTRAINT_ATTRIBUTES: readonly [...FreeFromAttribute[], "vegan"]; // attributes with a data mapping below
 export type HardConstraintAttribute = (typeof HARD_CONSTRAINT_ATTRIBUTES)[number];
-export const HARD_CONSTRAINT_VALUES = { lactose: ["free_from"] } as const satisfies Record<
-  HardConstraintAttribute,
-  readonly string[]
->;
-export interface HardConstraint {
-  attribute: HardConstraintAttribute;
-  is: (typeof HARD_CONSTRAINT_VALUES)[HardConstraintAttribute][number];
-} // { attribute: "lactose", is: "free_from" }
+export type HardConstraint =
+  | { attribute: FreeFromAttribute; is: "free_from" } // { attribute: "gluten", is: "free_from" }
+  | { attribute: "vegan"; is: "yes" };
 export interface SoftConstraint {
   attribute: string;
   prefer: string;
@@ -237,12 +245,14 @@ export interface FactsResult {
   products: ProductFacts[];
   unknown: string[];
 }
-export const ALLERGEN_ATTRIBUTES = ["lactose"] as const; // hard constraint attributes gated by allergenData
+export const ALLERGEN_ATTRIBUTES: FreeFromAttribute[]; // the FREE_FROM_DATA keys with a GS1 allergen code; gated by allergenData
 ```
 
 - The server merges the mandate's standing constraints into the request: hard = request ∪ mandate, soft = request ∪ mandate. `SearchResult.constraints` returns the merged set.
-- Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the values in `HARD_CONSTRAINT_VALUES`. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
-- Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. Missing data is never `confirmed`.
+- Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the `is` value of their `HardConstraint` branch. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
+- `free_from`, from `FREE_FROM_DATA`: the allergen code or a code in its `includes` (wheat, rye, barley, spelt and khorasan wheat for gluten) with unit `CONTAINS` or `MAY_CONTAIN` in classification `allergen`, or the `low` claim in `nutritionalClaim` → `contradicted`; else the allergen code with unit `FREE_FROM` in `nonAllergen`, or the `claim` in `nutritionalClaim` → `confirmed`; else `unknown`, including `UNDECLARED` and allergen data on other codes only. Contradiction wins over a free-from claim. Attribute names are camelCase English; GS1 codes such as `AW` and other cases are refused.
+- `vegan` `yes`: `CONTAINS` of an allergen of animal origin (`AC`, `AE`, `AF`, `AM`, `BF`, `CM`, `ML`, `PO`, `UM`, `UN`, `ABD`, `ADQ`) → `contradicted`; else `nutritionalClaim` `VEGAN` → `confirmed`; else `unknown`. `MAY_CONTAIN` traces do not contradict vegan.
+- Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
 - Search matches Unicode words after case and hyphen normalization. The whole words `maito` and `milk` are equivalent; no other translation aliases apply. Every word of a term must match one name in one language. Terms are alternatives. Compound words do not match their substrings. A negated occurrence, such as `milk-free` or `free from milk`, does not match `milk`; `lactose-free milk` does.
 - A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, soft matches, name relevance, successful quantity conversion, matched terms, reliability, then product id. A head noun ranks above a modifier; milk chocolate and milk powder rank below milk.
@@ -400,6 +410,8 @@ export interface Mandate { iss: string /* customer */; mandateId: string; versio
 export interface StoredMandate { mandate: Mandate; jws: string | null; status: "active" | "revoked"; registeredAt: string }
 export interface RegisterMandateRequest { operationId?: string; limits: MandateLimits;
   standingConstraints: { hard: HardConstraint[]; soft: SoftConstraint[] }; exp?: number }
+export type DraftMandateRequest = Omit<RegisterMandateRequest, "operationId">;
+export interface MandateDraft { draft: DraftMandateRequest; current: StoredMandate | null }
 // @app/contract/server
 export const signMandate: (m: Mandate, key: JsonWebKey) => Promise<string>;              // ES256 compact JWS, typ "mandate+jwt"
 export const verifyMandate: (jws: string, key: JsonWebKey) => Promise<Result<Mandate, "MANDATE_INVALID">>;
@@ -409,8 +421,9 @@ export const verifyMandate: (jws: string, key: JsonWebKey) => Promise<Result<Man
 - `operationId`: a repeated register with the same operationId returns the stored mandate with 200 and changes nothing.
 - Signature (simulated custody): the register handler signs the stored payload with `BUYER_SIGNING_JWK` and stores the JWS with it, in the same transaction. The stored JWS decodes to exactly the stored mandate. An externally signed JWS is out of scope.
 - The wholesaler uses the stored limits only to enforce them and returns them only to the customer's own principal.
+- Draft (`draft_mandate`, `POST /api/mandates/drafts`): the agent proposes terms; only a human registers them. The route checks the draft with the register rules and returns 200 `{ draft, current }`: the draft as sent and the current mandate, or null. It writes nothing, signs nothing and writes no audit entry. The mandate settings view shows the draft and registers it with `register_mandate` when the human presses Register (SPEC-013).
 
-Failure paths: a body with `iss`, `agent`, `signedBy`, `mandateId`, `version` or `iat` → 400. A new registration with `exp` less than or equal to the server time in epoch seconds → 400 `BAD_REQUEST`; the current mandate does not change. The `operationId` replay rule takes precedence, even when the original mandate has expired. No current mandate → 404. An expired mandate is not current.
+Failure paths: a body with `iss`, `agent`, `signedBy`, `mandateId`, `version` or `iat` → 400; a draft with `operationId` also → 400. A draft with `exp` less than or equal to the server time in epoch seconds → 400 `BAD_REQUEST`. A new registration with `exp` less than or equal to the server time in epoch seconds → 400 `BAD_REQUEST`; the current mandate does not change. The `operationId` replay rule takes precedence, even when the original mandate has expired. No current mandate → 404. An expired mandate is not current.
 
 ## SPEC-009 Rule checks and reason codes
 
@@ -439,7 +452,7 @@ Precedence for `place_order` (one list; the first matching step R1-R7 ends the r
 - R1. The body fails its schema, or holds 0 or more than 20 tokens → `400 BAD_REQUEST`. No record.
 - R2. The idempotency key is known: same tokens → `200` with the stored order; other tokens → `409 CONFLICT`.
 - R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
-- R4. Tokens differ in `customer` or `paymentTerms`, or the customer is not the principal's → `400 BAD_REQUEST`.
+- R4. Tokens differ in `customer` or `paymentTerms`, a token's `paymentTerms` is not the account's (alternatives included), or the customer is not the principal's → `400 BAD_REQUEST`.
 - R5. A current mandate exists and a token's `agentId`, `mandateId` or `mandateVersion` differs from it → `409 STALE_OFFER` ("request new offers").
 - R6. `validate` reports a live amount below the summed quantity of a product → `409 STALE_OFFER` (live-amount rule, SPEC-006).
 - R7. After validation and the transactional idempotency-key recheck, a selected offer ID already belongs to an order for this customer → `400 OFFER_INVALID`. This check runs under the customer's placement lock, before placement side effects.
@@ -500,6 +513,8 @@ export interface AuditEvent {
   rule?: string;
   reason?: ReasonCode;
   detail?: string;
+  hash?: string; // lowercase SHA-256 hex
+  previousHash?: string | null; // null at genesis
   productId?: string; // the product a check applies to, for a reason about one product
   integrityOk?: boolean; // false when the entry no longer matches its signature
 }
@@ -550,6 +565,8 @@ export interface Order {
   nextDeliveryDate: string | null;
   audit: AuditEvent[];
   createdAt: string;
+  receipt?: string;
+  auditAnchor?: { hash: string; count: number };
   purpose?: string; // what the order is for, written by the agent from the buyer's request
   offerSignature?: { state: "verified" | "expired" | "invalid"; validUntil: string };
   receiptSignature?: { state: "verified" | "pending" | "invalid"; signedAt: string | null };
@@ -577,6 +594,16 @@ export interface PrecheckRequest {
 - Placement operation `commitPlacement(orderId)`: every move to `placed` goes through it, from `place_order` and from approval. In one transaction with a per-customer lock: re-validate the offers (SPEC-006 `validate`, with its live-amount rule; until that route exists, skipped); invoice: remaining credit = principal's `creditLimit` − gross of placed invoice orders, total above it → `rejected CREDIT_LIMIT`; pay-on-order: a `PaymentPort` step, `awaiting_payment`, then simulated authorization that fails above `paymentFailAbove` → `rejected PAYMENT_FAILED`, else `payment_authorized`; then `placed`. Each step writes its audit event in the same transaction.
 - First build: only invoice terms reach `commitPlacement` (SPEC-002); the `PaymentPort` adapter for pay-on-order arrives with the second account.
 - Order, lines and audit are written in one transaction. `order_refused` records have no order id and appear in no `Order.audit`.
+
+Order integrity: each new audit event contains `previousHash` and `hash`. The genesis predecessor is null. The hash is SHA-256 over recursively key-sorted JSON containing `scope`, zero-based `index`, `previousHash`, and `event`. The event contains every event property except `hash` and `previousHash`. Non-JSON values are invalid. The order scope is `order:${orderId}`; refusal records use `refusals:${customer}`. The shared hash code has no event field allowlist. Issue #125 can add rule or value properties to `AuditEventSchema`; the hash will include them automatically.
+
+`auditAnchor` records the chain head and event count. An unsigned stored anchor detects audit-only modification, not a change to both the audit and its anchor. A placed order also has a durable ES256 `receipt+jwt`, signed with the offer key and verifiable with the published JWKS. The receipt signs the final selected lines, offer IDs, customer, agent, account, mandate, payment terms, total, decision, creation and placement times, status, and audit anchor. It has no expiry. Verification checks the signature, the complete signed projection, and every audit event, including the signed prefix. Signing must succeed before placement history is written: returning `Result.err` does not roll back prior writes.
+
+Each customer has a separate unsigned refusal anchor with the chain head and event count. Before appending a refusal, the store verifies the complete chain against this anchor. Missing or truncated rows fail verification. Existing refusal rows without an anchor are rejected as legacy data; they are not silently rechained. The refusal and its anchor update are written in the same transaction. An attacker who can change both the rows and the unsigned anchor remains outside this protection without an external signed anchor.
+
+The integrity fields are optional in the schemas so old fixtures still parse. Verification does not accept an unsigned legacy order as verified, and decisions must fail for an unchained legacy order rather than silently rechain it. Orders API and UI, MCP tools, approval and timeline views, the view harness, discovery OpenAPI, and demo scripts consume the shared schemas.
+
+The browser-safe entry exports `OrderReceiptClaimsSchema` and `OrderReceiptClaims`. The server entry exports `appendAudit`, `verifyAuditChain`, `signOrderReceipt`, `verifyOrderReceipt`, and `verifyOrderIntegrity`. Append and chain verification return `AUDIT_INVALID` on invalid input. Receipt signing returns `UPSTREAM_FAILED` on failure. Receipt verification returns `RECEIPT_INVALID`; order integrity verification can also return `AUDIT_INVALID`.
 
 Failure paths: `validate` unreachable → 502 `UPSTREAM_FAILED`; on `place_order` no order is stored, on approval the order stays pending.
 
@@ -649,6 +676,7 @@ export const TOOL_OUTPUT = {
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,
+  draft_mandate: MandateDraftSchema,
   list_pending_approvals: PendingListSchema,
   decide_approval: OrderSchema,
   register_mandate: StoredMandateSchema,
@@ -694,7 +722,7 @@ export const VIEWS = [
   {
     view: "mandate-settings",
     uri: "ui://trusted-trade/mandate-settings",
-    tools: ["get_mandate"],
+    tools: ["get_mandate", "draft_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
     plainList: null,
@@ -707,6 +735,7 @@ export const VIEWS = [
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
 - Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. Without the query, a view with a `plainList` route loads that list instead (`/views/approval-card` lists the open orders). The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
 - The approval card shows a link to `approvalUrl` in every pending state.
+- Mandate settings: a `get_mandate` result shows the limits in force. A `draft_mandate` result shows the proposed limits next to the current ones and a Register button. Register calls `register_mandate` with the draft and an `operationId` the view creates once per draft, so a retry after a failed or lost call returns the stored mandate (SPEC-008). The view then shows the registered mandate. A failed call keeps the draft and shows the error next to the button.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
 - Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
 - Language: a view shows English or Finnish. In a host it takes the tool input's `language`, else the host context `locale`, else the browser language; on the plain page and in the harness the browser language. Any other language gives English. `?lang=` on the view URL overrides both, for the harness and screenshots.

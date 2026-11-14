@@ -1,6 +1,12 @@
 import { SQL } from "bun";
 import { expect, test } from "bun:test";
-import { DEMO_ACCOUNT, fixtures, type StoredMandate, StoredMandateSchema } from "@app/contract";
+import {
+  DEMO_ACCOUNT,
+  fixtures,
+  MandateDraftSchema,
+  type StoredMandate,
+  StoredMandateSchema,
+} from "@app/contract";
 import { verifyMandate } from "@app/contract/server";
 import { closeDb, type Db, env, mountContext, openDb } from "@app/server-kit";
 import type { AnyElysia } from "elysia";
@@ -308,4 +314,69 @@ test("a body with a jws field gives 400", async () =>
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
     expect(await current(app)).toBe(404);
+  }));
+
+const rowCount = (db: Db) => db.$client`select count(*)::int as n from mandates_mandates`;
+
+test("a draft returns the draft and null without a current mandate, and the current mandate after register, and stores nothing", async () =>
+  withDatabase(async (db) => {
+    const { app } = await mount(db);
+    const draft = fixtures.draftMandateRequest;
+    const none = await call(app, "POST", "/drafts", draft);
+    expect(none.status).toBe(200);
+    expect(MandateDraftSchema.parse(await none.json())).toEqual({ draft, current: null });
+    expect(await rowCount(db)).toEqual([{ n: 0 }]);
+
+    const stored = await register(app);
+    const before = await rowCount(db);
+    const withCurrent = await call(app, "POST", "/drafts", draft);
+    expect(withCurrent.status).toBe(200);
+    expect(MandateDraftSchema.parse(await withCurrent.json())).toEqual({ draft, current: stored });
+    expect(await rowCount(db)).toEqual(before);
+    expect(await current(app)).toEqual(stored);
+  }));
+
+test("a draft does not return a revoked or expired mandate as current", async () =>
+  withDatabase(async (db) => {
+    const { app, clock } = await mount(db);
+    const draft = fixtures.draftMandateRequest;
+    const first = await register(app);
+    await call(app, "POST", `/${first.mandate.mandateId}/revoke`);
+    const revoked = await call(app, "POST", "/drafts", draft);
+    expect(MandateDraftSchema.parse(await revoked.json()).current).toBeNull();
+
+    const second = await register(app);
+    clock.now = new Date(second.mandate.exp * 1000);
+    const expired = await call(app, "POST", "/drafts", draft);
+    expect(expired.status).toBe(200);
+    expect(MandateDraftSchema.parse(await expired.json()).current).toBeNull();
+  }));
+
+test("a draft with an exp at or before now, an operationId, a server-set field or an unsupported hard constraint gives 400 and stores nothing", async () =>
+  withDatabase(async (db) => {
+    const { app, clock } = await mount(db);
+    const stored = await register(app);
+    const before = await rowCount(db);
+    const now = Math.floor(clock.now.getTime() / 1000);
+    const draft = fixtures.draftMandateRequest;
+    for (const body of [
+      { ...draft, exp: now },
+      { ...draft, exp: now - 1 },
+      { ...draft, operationId: "op_draft" },
+      { ...draft, mandateId: "mnd_chosen" },
+      { ...draft, iss: "cust_other" },
+      {
+        ...draft,
+        standingConstraints: { hard: [{ attribute: "unicorn", is: "free_from" }], soft: [] },
+      },
+    ]) {
+      const response = await call(app, "POST", "/drafts", body);
+      expect({ body, status: response.status, reply: await response.json() }).toEqual({
+        body,
+        status: 400,
+        reply: { error: { code: "BAD_REQUEST", message: expect.any(String) } },
+      });
+    }
+    expect(await rowCount(db)).toEqual(before);
+    expect(await current(app)).toEqual(stored);
   }));

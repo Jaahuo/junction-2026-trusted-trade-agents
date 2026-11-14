@@ -1,6 +1,13 @@
-import type { Mandate, Principal, RegisterMandateRequest, StoredMandate } from "@app/contract";
+import type {
+  DraftMandateRequest,
+  Mandate,
+  MandateDraft,
+  Principal,
+  RegisterMandateRequest,
+  StoredMandate,
+} from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
-import { buildMandate, isCurrent } from "../domain/mandate.ts";
+import { buildMandate, checkTerms, isCurrent } from "../domain/mandate.ts";
 
 export interface MandateOwner {
   readonly customer: string;
@@ -60,9 +67,7 @@ export const registerMandate = (
     ownerOf(principal),
     request.operationId,
     async (previousVersion) => {
-      if (request.exp !== undefined && request.exp <= Math.floor(now.getTime() / 1000)) {
-        return err("expired");
-      }
+      if (!checkTerms(request, now).ok) return err("expired");
       const mandate = buildMandate({ principal, request, mandateId, previousVersion, now });
       return ok({ mandate, jws: await ports.sign(mandate) });
     },
@@ -85,4 +90,17 @@ export const revokeMandate = async (
 ): Promise<Result<StoredMandate, MandateLookupError>> => {
   const stored = await store.revoke(ownerOf(principal), mandateId);
   return stored === null ? err("not-found") : ok(stored);
+};
+
+/** Checks a proposed mandate with the register rules and pairs it with the current mandate; stores nothing. */
+export const draftMandate = async (
+  store: MandateStore,
+  principal: Principal,
+  request: DraftMandateRequest,
+  now: Date,
+): Promise<Result<MandateDraft, RegistrationError>> => {
+  const draft = checkTerms(request, now);
+  if (!draft.ok) return draft;
+  const current = await currentMandate(store, principal, now);
+  return ok({ draft: draft.value, current: current.ok ? current.value : null });
 };

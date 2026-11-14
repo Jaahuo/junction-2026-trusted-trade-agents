@@ -65,8 +65,15 @@ const toRequest = (route: (typeof ROUTES)[number], input: object): Request => {
   });
 };
 
+// Orders has migrations, so the app above leaves it out. Its decision route is still a stub that
+// never contacts the database, so the typed client cases mount the orders routes alone.
+const ordersContext = (await discoverContexts()).find((context) => context.name === "orders");
+if (ordersContext === undefined) throw new Error("The orders context was not discovered.");
+const ordersApp = new Elysia({ prefix: "/api" }).use(ordersContext.api(db));
+
 const inProcessFetch = Object.assign(
-  async (input: RequestInfo | URL, init?: RequestInit) => app.handle(new Request(input, init)),
+  async (input: RequestInfo | URL, init?: RequestInit) =>
+    ordersApp.handle(new Request(input, init)),
   { preconnect: fetch.preconnect },
 );
 
@@ -104,12 +111,14 @@ test("every POST route of a stub context answers 400 BAD_REQUEST with the envelo
   }
 });
 
-test("a typed Eden client from offers calls the orders precheck stub and gets the envelope typed as ErrorEnvelope", async () => {
+test("a typed Eden client calls the orders decision stub and gets the envelope typed as ErrorEnvelope", async () => {
   const orders = treaty<OrdersApi>("http://localhost/api", {
     parseDate: false,
     fetcher: inProcessFetch,
   });
-  const { data, error } = await orders.orders.precheck.post(fixtures.precheckRequest);
+  const { data, error } = await orders
+    .orders({ orderId: fixtures.order.orderId })
+    .decision.post(fixtures.decideApprovalRequest);
   expect(data).toBeNull();
   if (error?.status !== 501) throw new Error(`expected 501, got ${String(error?.status)}`);
   const envelope: ErrorEnvelope = error.value;
@@ -121,7 +130,9 @@ test("a typed Eden client handles the actual 400 validation envelope", async () 
     parseDate: false,
     fetcher: inProcessFetch,
   });
-  const { error } = await orders.orders.precheck.post({ offers: [] });
+  const { error } = await orders
+    .orders({ orderId: fixtures.order.orderId })
+    .decision.post({ proposalVersion: 1.5, decision: "approve" });
   if (error?.status !== 400) throw new Error(`expected 400, got ${String(error?.status)}`);
   const envelope: ErrorEnvelope = error.value;
   expect(envelope.error.code).toBe("BAD_REQUEST");

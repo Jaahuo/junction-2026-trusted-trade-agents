@@ -226,6 +226,10 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
    * limit. Other orders need no limit, so the host shows no tool call for them.
    */
   override updated() {
+    const order = this.state.kind === "done" ? this.selectedOrder(this.state.data) : undefined;
+    this.dispatchEvent(
+      new CustomEvent("tt-approval-selection", { detail: order?.orderId ?? null }),
+    );
     const state = this.state;
     if (this.limitAsked || this.source === null || state.kind !== "done") return;
     const orders = "orders" in state.data ? state.data.orders : [state.data];
@@ -453,9 +457,14 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     return this.renderDone(state.data);
   }
 
+  private selectedOrder(data: ViewData<"approval-card">) {
+    const orders = "orders" in data ? data.orders : [data];
+    return orders.length === 1 ? orders[0] : orders.find((o) => o.orderId === this.openId);
+  }
+
   protected override renderDone(data: ViewData<"approval-card">) {
     const orders = "orders" in data ? data.orders : [data];
-    const open = orders.length === 1 ? orders[0] : orders.find((o) => o.orderId === this.openId);
+    const open = this.selectedOrder(data);
     if (open === undefined) return orders.length === 0 ? this.empty() : this.list(orders);
     if (this.updatingId === open.orderId) return this.updating(open);
     // The back link sits in a row the list keeps too, so the card does not move.

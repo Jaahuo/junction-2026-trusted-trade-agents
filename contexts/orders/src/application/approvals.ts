@@ -14,7 +14,7 @@ import {
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import { grossTotal, netTotal } from "../domain/evaluate.ts";
-import { commitPlacement } from "./commit-placement.ts";
+import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import { auditOf, checkTokens, type Evaluated, evaluateChecked, type OrderDeps } from "./orders.ts";
 import type { OrderTx, RequotePort, StoredOrder } from "./ports.ts";
 
@@ -114,18 +114,23 @@ const approve = async (
   now: Date,
 ): Promise<Result<StoredOrder, DecisionError>> => {
   const at = now.toISOString();
-  const decided: StoredOrder = {
-    ...order,
-    decision: { action: "approve", next: null, note: null, by: principal.accountId, at },
-    audit: [...order.audit, approverEvent(at, "approved")],
-  };
-  if (mandate === null)
-    return ok({
-      ...decided,
-      status: "rejected",
-      reasons: [...order.reasons, "MANDATE_INVALID"],
-      audit: [
-        ...decided.audit,
+  const approved = await appendOrderAudit(
+    {
+      ...order,
+      decision: { action: "approve", next: null, note: null, by: principal.accountId, at },
+    },
+    [approverEvent(at, "approved")],
+  );
+  if (!approved.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+  const decided = approved.value;
+  if (mandate === null) {
+    const rejected = await appendOrderAudit(
+      {
+        ...decided,
+        status: "rejected",
+        reasons: [...order.reasons, "MANDATE_INVALID"],
+      },
+      [
         {
           at,
           actor: "server",
@@ -135,36 +140,47 @@ const approve = async (
         },
         { at, actor: "server", event: "rejected", reason: "MANDATE_INVALID" },
       ],
-    });
+    );
+    return rejected.ok
+      ? ok(rejected.value)
+      : failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+  }
   if (madeUnderOtherMandate(order, mandate))
     return failure("STALE_OFFER", "The mandate changed since the offers were made.");
   if (isExpired(order.lines, now))
     return failure("OFFER_EXPIRED", "An offer of this order has expired.");
-  return ok(
-    await commitPlacement({
-      tx,
-      order: decided,
-      creditLimit: principal.creditLimit,
-      payment: deps.payment,
-      now,
-    }),
-  );
+  const placed = await commitPlacement({
+    tx,
+    order: decided,
+    creditLimit: principal.creditLimit,
+    payment: deps.payment,
+    signReceipt: deps.signReceipt,
+    now,
+  });
+  return placed.ok
+    ? ok(placed.value)
+    : failure("UPSTREAM_FAILED", "The order could not be finalized.");
 };
 
-const reject = (
+const reject = async (
   principal: Principal,
   order: StoredOrder,
   request: Extract<DecideApprovalRequest, { decision: "reject" }>,
   now: Date,
-): StoredOrder => {
+): Promise<Result<StoredOrder, DecisionError>> => {
   const at = now.toISOString();
   const note = request.note ?? null;
-  return {
-    ...order,
-    status: "declined",
-    decision: { action: "reject", next: request.next, note, by: principal.accountId, at },
-    audit: [...order.audit, approverEvent(at, "declined", note === null ? {} : { detail: note })],
-  };
+  const declined = await appendOrderAudit(
+    {
+      ...order,
+      status: "declined",
+      decision: { action: "reject", next: request.next, note, by: principal.accountId, at },
+    },
+    [approverEvent(at, "declined", note === null ? {} : { detail: note })],
+  );
+  return declined.ok
+    ? ok(declined.value)
+    : failure("UPSTREAM_FAILED", "The audit record could not be verified.");
 };
 
 type Revision = Extract<DecideApprovalRequest, { decision: "edit" | "pick_alternative" }>;
@@ -438,7 +454,7 @@ const revision = (input: {
   mandate: Mandate | null;
   evaluated: Evaluated;
   now: Date;
-}): StoredOrder => {
+}): { order: StoredOrder; events: AuditEvent[] } => {
   const { principal, order, request, pairs, lines, mandate, evaluated, now } = input;
   const { evaluation, byProduct } = evaluated;
   const at = now.toISOString();
@@ -471,7 +487,7 @@ const revision = (input: {
     (event) => event.event !== "order_requested",
   );
   const claims = lines.map((line) => line.claims);
-  return {
+  const revised: StoredOrder = {
     ...order,
     offerIds: lines.map((line) => line.offerId),
     lines,
@@ -489,8 +505,9 @@ const revision = (input: {
         ? null
         : { action: request.decision, next: null, note: null, by: principal.accountId, at },
     requotes: [...order.requotes, ...requotes],
-    audit: [...order.audit, ...edits, ...drops, ...checks],
   };
+  // The events are appended to the hash-chained audit by the caller (appendOrderAudit).
+  return { order: revised, events: [...edits, ...drops, ...checks] };
 };
 
 interface Kept {
@@ -578,7 +595,7 @@ const revise = async (
       return failure("OFFER_INVALID", "An offer has already been used in an order.");
     // `known` and `order` are the same pending proposal: every write that keeps an order pending
     // raises proposalVersion, every other write moves it out of pending, and isOpen checked it here.
-    const revised = revision({
+    const proposed = revision({
       principal,
       order,
       request,
@@ -589,16 +606,22 @@ const revise = async (
       evaluated,
       now,
     });
-    const final =
-      evaluated.evaluation.decision === "auto"
-        ? await commitPlacement({
-            tx,
-            order: revised,
-            creditLimit: principal.creditLimit,
-            payment: deps.payment,
-            now,
-          })
-        : revised;
+    // Verifies the stored chain, then appends the revision's events to it.
+    const revised = await appendOrderAudit(proposed.order, proposed.events);
+    if (!revised.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+    let final = revised.value;
+    if (evaluated.evaluation.decision === "auto") {
+      const placed = await commitPlacement({
+        tx,
+        order: revised.value,
+        creditLimit: principal.creditLimit,
+        payment: deps.payment,
+        signReceipt: deps.signReceipt,
+        now,
+      });
+      if (!placed.ok) return failure("UPSTREAM_FAILED", "The order could not be finalized.");
+      final = placed.value;
+    }
     await guardedWrite(tx, final, request.proposalVersion);
     return ok(final);
   });
@@ -635,10 +658,12 @@ export const decide = async (
     const order = await tx.find(principal.customer, orderId);
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (!isOpen(order, request.proposalVersion)) return changed();
+    const verified = await appendOrderAudit(order, []);
+    if (!verified.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
     const decided =
       request.decision === "approve"
         ? await approve(deps, principal, tx, order, mandate, now)
-        : ok(reject(principal, order, request, now));
+        : await reject(principal, order, request, now);
     if (!decided.ok) return decided;
     await guardedWrite(tx, decided.value, request.proposalVersion);
     return decided;

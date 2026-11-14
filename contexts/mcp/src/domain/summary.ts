@@ -1,5 +1,6 @@
 import {
   type ErrorEnvelope,
+  type MandateDraft,
   type OffersResult,
   type Order,
   type PendingList,
@@ -11,6 +12,7 @@ import {
 } from "@app/contract";
 
 const quantity = (value: Quantity): string => `${value.value} ${value.unit}`;
+const euros = (value: number): string => `${value.toFixed(2)} EUR gross`;
 const reasons = (codes: readonly ReasonCode[]): string[] =>
   codes.map((code) => `- ${code}: ${REASON_TEXT[code]}`);
 const lines = (...parts: (string | string[])[]): string => parts.flat().join("\n");
@@ -63,7 +65,16 @@ export const pendingSummary = (list: PendingList): string =>
 
 export const mandateSummary = ({ mandate, status }: StoredMandate): string =>
   `Mandate ${mandate.mandateId} version ${mandate.version}: ${status}. ` +
-  `Maximum order total ${mandate.limits.maxOrderTotal.value.toFixed(2)} EUR gross.`;
+  `Maximum order total ${euros(mandate.limits.maxOrderTotal.value)}.`;
+
+export const draftSummary = ({ draft, current }: MandateDraft): string =>
+  lines(
+    `Draft mandate, not registered. Maximum order total ${euros(draft.limits.maxOrderTotal.value)}.`,
+    current === null
+      ? "There is no current mandate."
+      : `The current mandate ${current.mandate.mandateId} version ${current.mandate.version} allows ${euros(current.mandate.limits.maxOrderTotal.value)} and stays in force until the human registers the draft.`,
+    "The mandate view shows the draft. Ask the human to check it and press Register there. It is not in force until get_mandate shows it.",
+  );
 
 export const errorSummary = ({ error }: ErrorEnvelope): string =>
   `${error.code}: ${error.message}` +

@@ -205,6 +205,7 @@ export interface SearchCandidate {
   match: Record<string, MatchState>;
   orderQuantity: Quantity | null;
   equals: Quantity | null;
+  quantityReason?: string;
   deliveryReliability: number | null;
   co2PerKg: number | null;
   substitutes: string[];
@@ -243,8 +244,10 @@ export const ALLERGEN_ATTRIBUTES = ["lactose"] as const; // hard constraint attr
 - Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the values in `HARD_CONSTRAINT_VALUES`. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
 - Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
-- A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, then soft matches, then reliability.
-- Quantity: consumer-unit volume × units per sales unit gives `perSalesUnit`; `GRM` converts to `KGM`; the order quantity rounds up to a multiple of `allowedLotSize`. No volume → `orderQuantity` and `equals` are null.
+- Search matches Unicode words after case and hyphen normalization. The whole words `maito` and `milk` are equivalent; no other translation aliases apply. Every word of a term must match one name in one language. Terms are alternatives. Compound words do not match their substrings. A negated occurrence, such as `milk-free` or `free from milk`, does not match `milk`; `lactose-free milk` does.
+- A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, soft matches, name relevance, successful quantity conversion, matched terms, reliability, then product id. A head noun ranks above a modifier; milk chocolate and milk powder rank below milk.
+- Supported search soft attributes are `countryOfOrigin` and `category`, compared case-insensitively. An unsupported request or merged standing soft attribute gives 400. Each matched preference adds a `confirmed` entry to candidate `match`, with key `soft:<attribute>:<encoded-preference>`; the preference is lowercase and URI-component encoded. These entries do not affect hard filtering or hard-confirmation counts. Facts and offer product matches remain hard-only.
+- Quantity uses structured sales-unit volume or consumer-unit volume times consumer units per sales unit. `GRM` converts to `KGM`. Count sales units round up to a whole number compatible with `allowedLotSize`; weight sales units retain fractional lots. No supported conversion gives null `orderQuantity` and `equals`, with a `quantityReason` explanation. Successful conversions omit `quantityReason`.
 - The index loads once per process; parallel first requests share one load.
 
 Data meaning:
@@ -253,7 +256,7 @@ Data meaning:
 - `co2PerKg`: the estimated average kg CO2-eq per kg for the product's group, not a measurement of the product; `null` when absent.
 - Nutrition and allergen data are often missing for fresh produce. A missing value is `unknown`, never "free from".
 
-Failure paths: empty `terms` → 400. An unsupported hard constraint attribute or value → 400 (SPEC-003).
+Failure paths: empty `terms` → 400. An unsupported hard constraint attribute or value → 400 (SPEC-003). An unsupported search soft attribute, including a standing preference, → 400.
 
 Verification: a request with an unsupported hard constraint attribute gets 400 on search, offers and mandate registration.
 

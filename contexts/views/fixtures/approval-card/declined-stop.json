@@ -417,7 +417,7 @@
     "action": "reject",
     "next": "stop",
     "note": "Not needed: We have enough stock this week.",
-    "by": "approver",
+    "by": "acct_demo",
     "at": "2026-11-14T10:20:00+00:00"
   },
   "requotes": [],

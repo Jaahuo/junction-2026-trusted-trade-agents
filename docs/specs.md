@@ -489,6 +489,7 @@ export interface AuditEvent {
   rule?: string;
   reason?: ReasonCode;
   detail?: string;
+  productId?: string; // the product a check applies to, for a reason about one product
 }
 export interface OrderLine {
   offerId: string;

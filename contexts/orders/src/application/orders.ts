@@ -9,9 +9,16 @@ import {
   type Precheck,
   type Principal,
   REASON_TEXT,
+  type ReasonCode,
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
-import { evaluate, grossTotal, nextDeliveryDateAfterCutoff, netTotal } from "../domain/evaluate.ts";
+import {
+  evaluate,
+  grossTotal,
+  nextDeliveryDateAfterCutoff,
+  netTotal,
+  reasonsByProduct,
+} from "../domain/evaluate.ts";
 import { commitPlacement } from "./commit-placement.ts";
 import type {
   MandatePort,
@@ -104,17 +111,23 @@ const checkTokens = async (
   return ok({ lines: lines.value, alternatives: alternativeLines.value, mandate: current });
 };
 
+/** The evaluation, and the reasons each product raises (for the audit). */
+type Evaluated = { evaluation: Evaluation; byProduct: Map<string, ReasonCode[]> };
+
 const evaluateChecked = async (
   deps: OrderDeps,
   principal: Principal,
   checked: Checked,
   now: Date,
-): Promise<Evaluation> => {
+): Promise<Evaluated> => {
   const claims = checked.lines.map((line) => line.claims);
   const history = await deps.store.history(principal.customer, [
     ...new Set(claims.map((claim) => claim.productId)),
   ]);
-  return evaluate({ claims, mandate: checked.mandate, history, live: null, now });
+  return {
+    evaluation: evaluate({ claims, mandate: checked.mandate, history, live: null, now }),
+    byProduct: reasonsByProduct(claims, checked.mandate, history),
+  };
 };
 
 /** Runs R3-R5 and the rule checks without writing anything and without the credit check. */
@@ -126,7 +139,7 @@ export const precheck = async (
   const now = deps.now();
   const checked = await checkTokens(deps, principal, offers, [], now);
   if (!checked.ok) return checked;
-  return ok(await evaluateChecked(deps, principal, checked.value, now));
+  return ok((await evaluateChecked(deps, principal, checked.value, now)).evaluation);
 };
 
 const sameTokens = (order: StoredOrder, request: PlaceOrderRequest): boolean =>
@@ -141,20 +154,35 @@ const replayOrConflict = (
     ? ok({ order, created: false })
     : err(refusal("CONFLICT", "The idempotency key was used with other offers."));
 
-const auditOf = (evaluation: Evaluation, at: string): AuditEvent[] => {
+/**
+ * The audit of a new order. A reason about one product gets one check_failed per product, with
+ * its productId, so the approval card can name the product.
+ */
+const auditOf = (
+  evaluation: Evaluation,
+  byProduct: Map<string, ReasonCode[]>,
+  at: string,
+): AuditEvent[] => {
   const opened: AuditEvent[] = [
     { at, actor: "agent", event: "order_requested" },
     { at, actor: "server", event: "offer_verified" },
   ];
   if (evaluation.decision === "auto")
     return [...opened, { at, actor: "server", event: "check_passed" }];
-  const failed: AuditEvent[] = evaluation.reasons.map((reason) => ({
-    at,
-    actor: "server",
-    event: "check_failed",
-    reason,
-    detail: REASON_TEXT[reason],
-  }));
+  const failed = evaluation.reasons.flatMap((reason) => {
+    const failedFor = (productId?: string): AuditEvent => ({
+      at,
+      actor: "server",
+      event: "check_failed",
+      reason,
+      detail: REASON_TEXT[reason],
+      ...(productId === undefined ? {} : { productId }),
+    });
+    const products = [...byProduct].filter(([, reasons]) => reasons.includes(reason));
+    return products.length === 0
+      ? [failedFor()]
+      : products.map(([productId]) => failedFor(productId));
+  });
   const outcome: AuditEvent =
     evaluation.decision === "rejected"
       ? { at, actor: "server", event: "rejected" }
@@ -166,7 +194,7 @@ const buildOrder = (
   principal: Principal,
   request: PlaceOrderRequest,
   checked: Checked,
-  evaluation: Evaluation,
+  { evaluation, byProduct }: Evaluated,
   now: Date,
 ): StoredOrder => {
   const claims = checked.lines.map((line) => line.claims);
@@ -195,7 +223,7 @@ const buildOrder = (
     nextDeliveryDate: evaluation.reasons.includes("CUTOFF_PASSED")
       ? nextDeliveryDateAfterCutoff(claims, now)
       : null,
-    audit: auditOf(evaluation, at),
+    audit: auditOf(evaluation, byProduct, at),
     createdAt: at,
   };
 };
@@ -238,8 +266,9 @@ export const placeOrder = async (
     now,
   );
   if (!checked.ok) return refuse(deps.store, principal, checked.error, now);
-  const evaluation = await evaluateChecked(deps, principal, checked.value, now);
-  const order = buildOrder(principal, request, checked.value, evaluation, now);
+  const evaluated = await evaluateChecked(deps, principal, checked.value, now);
+  const { evaluation } = evaluated;
+  const order = buildOrder(principal, request, checked.value, evaluated, now);
 
   return deps.store.withCustomerLock(principal.customer, async (tx: OrderTx) => {
     // A parallel request with the same key may have stored its order while this one was checked.

@@ -2,7 +2,10 @@
 name: trusted-trade-openwebui
 services:
   open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.13.3
+    image: trusted-trade-openwebui:local
+    build:
+      context: ../..
+      dockerfile: hosts/openwebui/Dockerfile
     ports:
       - "127.0.0.1:${OPENWEBUI_PORT:-38090}:8080"
     extra_hosts:
@@ -30,8 +33,5 @@ services:
       DEFAULT_PINNED_MODELS: restaurant-buyer,bakery-buyer
     volumes:
       - data:/app/backend/data
-      - ./branding/custom.css:/app/backend/open_webui/static/custom.css:ro
-      - ./branding:/app/backend/open_webui/static/acme:ro
-      - ./scripts/migrate_auth.py:/opt/companion/migrate_auth.py:ro
 volumes:
   data:

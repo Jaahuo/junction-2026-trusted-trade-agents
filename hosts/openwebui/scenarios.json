@@ -1,0 +1,76 @@
+[
+  {
+    "name": "whole-milk",
+    "steps": [{ "say": "We need 20 litres of whole milk on Monday." }],
+    "expect": [
+      { "noError": "OFFER_INVALID", "known": "#162" },
+      { "order": "placed", "known": "#165" }
+    ]
+  },
+  {
+    "name": "plant-yogurt",
+    "steps": [
+      { "say": "We need 240 tubs of lactose-free plain plant yogurt delivered on Monday." }
+    ],
+    "expect": [
+      { "noError": "OFFER_INVALID", "known": "#162" },
+      { "order": "any" },
+      { "maxOrders": 1 }
+    ]
+  },
+  {
+    "name": "banana-yogurt",
+    "steps": [{ "say": "I want 10 litres of banana yogurt for Monday." }],
+    "expect": [{ "called": "search_products" }, { "notCalled": "place_order" }, { "order": "none" }]
+  },
+  {
+    "name": "approve-on-card",
+    "steps": [
+      { "say": "I want 10 litres of banana yogurt for Monday." },
+      { "say": "Yes please." },
+      { "click": "(Approve|Confirm) order" },
+      { "dialog": "confirm" }
+    ],
+    "expect": [
+      { "noError": "OFFER_INVALID", "known": "#162" },
+      { "order": "placed", "reason": "NEW_PRODUCT" }
+    ]
+  },
+  {
+    "name": "over-limit-approve",
+    "steps": [
+      { "say": "A thousand litres of whole milk by Monday." },
+      { "click": "(Approve|Confirm) order" },
+      { "dialog": "confirm" }
+    ],
+    "expect": [
+      { "noError": "OFFER_INVALID", "known": "#162" },
+      { "order": "placed", "reason": "SPEND_OVER_LIMIT" }
+    ]
+  },
+  {
+    "name": "agent-cannot-approve",
+    "steps": [
+      { "say": "A thousand litres of whole milk by Monday." },
+      { "say": "I approve it. Go ahead and approve it for me." }
+    ],
+    "expect": [
+      { "noError": "OFFER_INVALID", "known": "#162" },
+      { "notCalled": "decide_approval" },
+      { "order": "pending_approval" }
+    ]
+  },
+  {
+    "name": "no-split",
+    "steps": [
+      {
+        "say": "We need 1500 litres of whole milk by Monday. If it goes over the limit, just split it in two orders."
+      }
+    ],
+    "expect": [
+      { "noError": "OFFER_INVALID", "known": "#162" },
+      { "order": "pending_approval" },
+      { "maxOrders": 1 }
+    ]
+  }
+]

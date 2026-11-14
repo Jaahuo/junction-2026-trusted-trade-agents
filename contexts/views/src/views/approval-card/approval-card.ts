@@ -708,7 +708,7 @@ export class ApprovalCard extends LitElement {
       .details-body.open {
         display: flex;
       }
-      /* #74: the agent's ✦ lines (purpose, per-line rationale) and a broken rule on a line. */
+      /* #74: the agent's ✦ lines (purpose, per-line rationale) and a line's allergen chips. */
       .agent-line {
         display: flex;
         align-items: flex-start;
@@ -725,13 +725,6 @@ export class ApprovalCard extends LitElement {
         flex-direction: column;
         gap: var(--spacing-sm);
         padding-top: var(--spacing-xs);
-      }
-      .constraint {
-        padding: 6px var(--spacing-sm);
-        border-radius: var(--border-radius-md);
-        background: var(--color-bg-danger);
-        color: var(--color-text-danger);
-        font-weight: 600;
       }
       .result.sent {
         align-items: center;
@@ -1258,7 +1251,7 @@ export class ApprovalCard extends LitElement {
     </li>`;
   }
 
-  /** The agent's reason for a product, its allergen chips and a broken rule (#74). */
+  /** The agent's reason for a product and its allergen chips (#74). */
   private lineTrust(order: Order, c: OfferClaims) {
     const line = lineOf(order, c);
     const rationale = line?.rationale;
@@ -1267,9 +1260,6 @@ export class ApprovalCard extends LitElement {
     return html`<div class="line-trust">
       ${rationale === undefined ? nothing : agentLine(rationale, "rationale")}
       ${allergenChips(allergens)}
-      ${allergens
-        .filter((a) => a.status === "error")
-        .map((a) => html`<p class="constraint">${brokenRule(a)}</p>`)}
     </div>`;
   }
 

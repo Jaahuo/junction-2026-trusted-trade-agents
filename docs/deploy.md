@@ -102,9 +102,44 @@ gh secret set DEPLOY_KNOWN_HOSTS --env production < verified_known_hosts
 
 The [delivery gates](workflow.md#ci-stages-and-security-evidence) define the severity policy and evidence limits. Gate artifacts bind the image archive, CycloneDX SBOM and scan report to the commit, lockfile, run and attempt. Deployment evidence records the published digest and result without credentials. Private image archives expire after 7 days; reports and deployment evidence expire after 90 days. Rerun the selected main-push gate run if its archive expires before deployment. A new manual gate run is not a push gate. Preserve records elsewhere before expiry if your audit period is longer. Registry images require a separate retention policy.
 
-All four production secrets are required, including `DEPLOY_KNOWN_HOSTS`. A missing secret is not a successful deployment. Verify a successful health check and the digest in deployment evidence before reporting a release.
+The four application deployment secrets above are required, including `DEPLOY_KNOWN_HOSTS`. A missing secret is not a successful deployment. Verify a successful health check and the digest in deployment evidence before reporting a release.
 
 The current private repository plan does not support branch protection. At inspection, the production environment also has no approval or branch restrictions. These workflows do not prevent an authorized account from bypassing them. Configure and verify server-side controls on an eligible plan before claiming enforced release approval. This change does not upgrade the plan, expose the repository, or configure those controls.
+
+## Hosted chat
+
+`push` also runs Open WebUI v0.13.3 at `https://chat.<hostname>` when `VERDA_INFERENCE_KEY` is set (#155).
+Without that key it skips the chat host and changes nothing else.
+The chat host uses the OpenAI-compatible Verda endpoint `https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1` with the base model `nemotron-3.5-super-vl`, and connects to `<url>/mcp` of the same deployment.
+Login is on and sign-up is off, because the inference key pays for every chat.
+Sign in with the admin account and choose the model "Buyer agent".
+
+Keep the chat secrets in a fourth operator file, `~/.config/trusted-trade/env.chat`:
+
+```sh
+# The Verda inference key.
+VERDA_INFERENCE_KEY=
+# openssl rand -hex 32. Keep it stable, or sessions end at the next deploy.
+OPENWEBUI_SECRET_KEY=
+# The one chat login.
+OPENWEBUI_ADMIN_EMAIL=
+# openssl rand -base64 18
+OPENWEBUI_ADMIN_PASSWORD=
+```
+
+Keep comments on their own lines: the loop below stores everything after `=` as the secret.
+
+Open WebUI creates the admin account only at its first start, so a later password change in the file does not change the login.
+For a manual `push`, load the file first with `set -a && . ~/.config/trusted-trade/env.chat && set +a`.
+For CI, set each line as a secret of the `production` environment:
+
+```sh
+grep -E '^[A-Z_]+=' ~/.config/trusted-trade/env.chat | while IFS='=' read -r name value; do printf '%s' "$value" | gh secret set "$name" --env production; done
+```
+
+With `TF_VAR_domain`, add a DNS A record for `chat.<domain>` as well. The `sslip.io` name resolves without one.
+The chat data lives in the Docker volume `trusted-trade-chat` on the VM; `journalctl -u trusted-trade-chat` shows its log.
+To turn the chat host off, delete the four secrets, deploy, and run `systemctl disable --now trusted-trade-chat && rm /etc/trusted-trade-chat.env` on the VM, because a deploy without the key leaves the chat unit as it is.
 
 ## Update, inspect and remove
 

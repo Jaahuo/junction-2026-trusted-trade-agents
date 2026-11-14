@@ -205,6 +205,40 @@ describe("partial stock and substitutes", () => {
     expect(setup.live.calls.flatMap((call) => call.query.productIds)).not.toContain(substitute);
   });
 
+  test("a never rule leaves out that substitute and keeps the others", async () => {
+    const blocked = "prod_test_partial_blocked";
+    const kept = "prod_test_partial_kept";
+    const current = mandate();
+    const setup = fakeOffersDeps({
+      mandate: {
+        ...current,
+        limits: {
+          ...current.limits,
+          substitutionRules: [
+            {
+              replaces: ORIGINAL,
+              productId: blocked,
+              policy: "never",
+              decidedAt: "2026-11-14T10:00:00+00:00",
+            },
+          ],
+        },
+      },
+      products: [
+        fakeProduct(ORIGINAL, { perSalesUnit: litre, substitutes: [blocked, kept] }),
+        fakeProduct(blocked, { perSalesUnit: litre }),
+        fakeProduct(kept, { perSalesUnit: litre }),
+      ],
+      live: {
+        ...quoted(ORIGINAL, { amount: 600 }),
+        ...quoted(blocked, { amount: 1000 }),
+        ...quoted(kept, { amount: 1000 }),
+      },
+    });
+    const result = valueOf(await getOffers(setup.deps, principal, request()));
+    expect(result.offers.map((offer) => offer.claims.productId)).toEqual([ORIGINAL, kept]);
+  });
+
   test("ranks by soft match, price per standard unit, reliability and CO2, retaining at most three", async () => {
     const soft = "prod_test_rank_soft";
     const reliable = "prod_test_rank_reliable";

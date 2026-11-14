@@ -7,6 +7,23 @@ export type Policy = z.infer<typeof PolicySchema>;
 
 const ThresholdSchema = z.strictObject({ value: z.number(), ifNoData: PolicySchema }).nullable();
 
+/** A substitute product and the product it replaces. */
+export const SubstitutePairSchema = z.strictObject({ replaces: z.string(), productId: z.string() });
+export type SubstitutePair = z.infer<typeof SubstitutePairSchema>;
+
+/** A human decision on one substitute pair: auto skips SUBSTITUTION, never stops the offer. */
+export const SubstitutionRuleSchema = SubstitutePairSchema.extend({
+  policy: z.enum(["auto", "never"]),
+  /** Display only; the rule matches on ids. */
+  productName: z.string().optional(),
+  replacesName: z.string().optional(),
+  decidedAt: z.iso.datetime({ offset: true }),
+});
+export type SubstitutionRule = z.infer<typeof SubstitutionRuleSchema>;
+
+export const samePair = (a: SubstitutePair, b: SubstitutePair): boolean =>
+  a.replaces === b.replaces && a.productId === b.productId;
+
 export const MandateLimitsSchema = z.strictObject({
   maxOrderTotal: z.strictObject({
     value: z.number().nonnegative(),
@@ -21,6 +38,8 @@ export const MandateLimitsSchema = z.strictObject({
   maxCo2PerKg: ThresholdSchema,
   allergenData: z.strictObject({ ifNoData: PolicySchema }),
   paymentTerms: z.record(z.enum(PAYMENT_TERMS), PolicySchema),
+  /** auto applies only while substitutions is ask; never always stops the offer. Absent = none. */
+  substitutionRules: z.array(SubstitutionRuleSchema).optional(),
 });
 export type MandateLimits = z.infer<typeof MandateLimitsSchema>;
 

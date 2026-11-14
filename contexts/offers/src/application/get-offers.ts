@@ -1,14 +1,15 @@
 import { err, ok, type Result } from "@app/kernel";
-import type {
-  AvailabilityQuote,
-  OfferClaims,
-  OfferLine,
-  OffersRequest,
-  OffersResult,
-  OmitReason,
-  PriceQuote,
-  Principal,
-  ProductFacts,
+import {
+  type AvailabilityQuote,
+  type OfferClaims,
+  type OfferLine,
+  type OffersRequest,
+  type OffersResult,
+  type OmitReason,
+  type PriceQuote,
+  type Principal,
+  type ProductFacts,
+  samePair,
 } from "@app/contract";
 import {
   availabilityOmitReason,
@@ -316,6 +317,11 @@ export async function getOffers(
     for (const product of read.value.products) factsById.set(product.productId, product);
     for (const id of read.value.unknown) unknown.add(id);
   }
+  // A substitute the human said not to suggest again.
+  const blocked = (replaces: string, productId: string): boolean =>
+    (current?.limits.substitutionRules ?? []).some(
+      (rule) => rule.policy === "never" && samePair(rule, { replaces, productId }),
+    );
   const possible: { origin: Dated; product: ProductFacts; quantity: OfferClaims["quantity"] }[] =
     [];
   for (const origin of substituteOrigins) {
@@ -324,6 +330,7 @@ export async function getOffers(
       const product = factsById.get(id);
       if (
         id === origin.product.productId ||
+        blocked(origin.product.productId, id) ||
         unknown.has(id) ||
         product === undefined ||
         contradictedAttribute(product.match, constraints.hard) !== null

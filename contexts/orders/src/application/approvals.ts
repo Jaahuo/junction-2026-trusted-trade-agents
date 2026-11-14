@@ -7,6 +7,7 @@ import {
   REASON_TEXT,
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
+import { ruleFor } from "../domain/evaluate.ts";
 import { commitPlacement } from "./commit-placement.ts";
 import type { OrderDeps } from "./orders.ts";
 import type { OrderTx, StoredOrder } from "./ports.ts";
@@ -108,6 +109,39 @@ const reject = (
   };
 };
 
+/** Approvals of one substitute pair after which the card offers to stop asking. */
+const STANDING_OFFER_AFTER = 3;
+
+/**
+ * The first substitute line of an approved order that has no rule yet, with how often the human
+ * has approved that pair; set once the count reaches STANDING_OFFER_AFTER.
+ */
+const standingOffer = async (
+  tx: OrderTx,
+  order: StoredOrder,
+  mandate: Mandate | null,
+): Promise<StoredOrder["standingOffer"]> => {
+  if (mandate === null || mandate.limits.substitutions !== "ask") return undefined;
+  if (order.status !== "placed" && order.status !== "awaiting_payment") return undefined;
+  const line = order.lines.find(
+    ({ claims }) => claims.replaces !== null && ruleFor(mandate.limits, claims) === undefined,
+  );
+  if (line === undefined || line.claims.replaces === null) return undefined;
+  const pair = { replaces: line.claims.replaces, productId: line.claims.productId };
+  const approved = (await tx.withPair(order.customer, pair)).filter(
+    (past) => past.decision?.action === "approve",
+  );
+  if (approved.length < STANDING_OFFER_AFTER) return undefined;
+  const replacesName = approved
+    .flatMap((past) => past.lines)
+    .find(({ claims }) => claims.productId === pair.replaces)?.claims.product.name;
+  return {
+    ...pair,
+    timesApproved: approved.length,
+    ...(replacesName === undefined ? {} : { replacesName }),
+  };
+};
+
 /**
  * A human decision on a pending order. Only approve and reject are built; the other decisions
  * answer NOT_IMPLEMENTED. The decision is written only if the order is still pending at the
@@ -145,6 +179,8 @@ export const decide = async (
     if (!decided.ok) return decided;
     if (!(await tx.decide(decided.value, request.proposalVersion)))
       return failure("CONFLICT", "The order was decided or changed; reload it.");
-    return decided;
+    if (request.decision !== "approve" || !order.reasons.includes("SUBSTITUTION")) return decided;
+    const offer = await standingOffer(tx, decided.value, mandate);
+    return offer === undefined ? decided : ok({ ...decided.value, standingOffer: offer });
   });
 };

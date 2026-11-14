@@ -94,6 +94,18 @@ const orderTx = (tx: Executor): OrderTx => ({
       .limit(1);
     return rows.length > 0;
   },
+  withPair: async (customer, { replaces, productId }) => {
+    const rows = await tx
+      .select()
+      .from(orders)
+      .where(
+        and(
+          eq(orders.customer, customer),
+          sql`(${orders.lines} #>> '{}')::jsonb @> jsonb_build_array(jsonb_build_object('claims', jsonb_build_object('replaces', ${replaces}::text, 'productId', ${productId}::text)))`,
+        ),
+      );
+    return rows.map(toStored);
+  },
   insert: async (order) => {
     await tx.insert(orders).values(toRow(order));
   },

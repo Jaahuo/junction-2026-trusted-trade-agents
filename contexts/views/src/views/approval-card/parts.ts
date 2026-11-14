@@ -141,7 +141,7 @@ export const cardStyles = css`
     gap: var(--spacing-xs);
     padding: var(--spacing-xs) var(--spacing-md) var(--spacing-xs) var(--spacing-sm);
     border-radius: var(--radius-full);
-    background: var(--color-yellow-aimo);
+    background: var(--color-bg-attention);
     color: var(--color-text);
     font-size: var(--font-size-2xs);
     font-weight: 700;

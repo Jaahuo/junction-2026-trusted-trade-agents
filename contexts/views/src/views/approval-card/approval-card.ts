@@ -134,11 +134,26 @@ const linesFor = (order: Order, reason: ReasonCode) => {
   const ids = new Set(order.audit.filter((e) => e.reason === reason).map((e) => e.detail));
   return order.lines.map((l) => l.claims).filter((c) => ids.has(c.productId));
 };
-/** The out-of-stock product a substitute replaces, when the order still has it as a line. */
-const originalOf = (order: Order, c: OfferClaims) =>
-  c.replaces === null
-    ? undefined
-    : order.lines.map((l) => l.claims).find((l) => l.productId === c.replaces);
+/**
+ * A substitution on a line (Figma v17): the out-of-stock product, when known, and the products
+ * proposed for it, recommended first. Either the line is the out-of-stock product and the
+ * alternatives replace it, or the line is already the substitute (`replaces` set).
+ */
+type Substitution = { original: OfferClaims | undefined; options: OfferClaims[] };
+const substitutionOf = (order: Order, c: OfferClaims): Substitution | null => {
+  const lines = order.lines.map((l) => l.claims);
+  const alternatives = order.alternatives.map((l) => l.claims);
+  if (c.replaces !== null)
+    return {
+      original: lines.find((l) => l.productId === c.replaces),
+      options: [c, ...alternatives],
+    };
+  if (lines.some((l) => l.replaces === c.productId)) return null;
+  const proposed = alternatives.filter((a) => a.replaces === c.productId);
+  return proposed.length === 0 ? null : { original: c, options: proposed };
+};
+const outOfStock = (c: OfferClaims) =>
+  `out of stock${c.nextDeliveryDate === null ? "" : ` until ${day(c.nextDeliveryDate)}`}`;
 /** The element id of a product line, the target of its to-do. */
 const lineId = (c: OfferClaims) => `line-${c.offerId}`;
 /** Products shown before "Show N more products". */
@@ -729,14 +744,20 @@ export class ApprovalCard extends LitElement {
             },
           ];
         case "SUBSTITUTION":
-          return lines
-            .filter((c) => c.replaces !== null)
-            .map((c) => ({
-              where: originalOf(order, c)?.product.name ?? c.product.name,
-              target: lineId(c),
-              reason: `Out of stock${c.nextDeliveryDate === null ? "" : ` until ${day(c.nextDeliveryDate)}`}`,
-              action: "Choose a replacement",
-            }));
+          return lines.flatMap((c) => {
+            const sub = substitutionOf(order, c);
+            const head = sub?.original ?? c;
+            return sub === null
+              ? []
+              : [
+                  {
+                    where: head.product.name,
+                    target: lineId(c),
+                    reason: `Out of stock${head.nextDeliveryDate === null ? "" : ` until ${day(head.nextDeliveryDate)}`}`,
+                    action: "Choose a replacement",
+                  },
+                ];
+          });
         case "PRICE_CHANGED":
           return order.requotes.map((q) => ({
             where: q.current.product.name,
@@ -859,11 +880,8 @@ export class ApprovalCard extends LitElement {
 
   /** The note under a product that something applies to; a price change is a warning (v17). */
   private lineNote(order: Order, c: OfferClaims): { text: string; warning: boolean } | null {
-    if (c.replaces !== null)
-      return {
-        text: `Substitute proposed · out of stock${c.nextDeliveryDate === null ? "" : ` until ${day(c.nextDeliveryDate)}`}`,
-        warning: false,
-      };
+    if (substitutionOf(order, c) !== null)
+      return { text: `Substitute proposed · ${outOfStock(c)}`, warning: false };
     const requote = order.requotes.find((r) => r.current.offerId === c.offerId);
     if (requote !== undefined)
       return {
@@ -939,14 +957,22 @@ export class ApprovalCard extends LitElement {
 
   /** The decision block of a flagged product: its choices and agent help (v17). */
   private lineDecision(order: Order, c: OfferClaims) {
-    if (c.replaces !== null)
+    const sub = substitutionOf(order, c);
+    if (sub !== null) {
+      const head = sub.original ?? c;
       return html`<h4 class="section-title">Replace with</h4>
-        ${this.choices(order, c, true)}
-        ${this.agentHelp(c.product.name, "Let the agent find another", "find another substitute", [
-          "Same brand only",
-          "Cheapest option",
-          ...(c.nextDeliveryDate === null ? [] : [`Wait until ${day(c.nextDeliveryDate)}`]),
-        ])}`;
+        ${this.choices(sub)}
+        ${this.agentHelp(
+          head.product.name,
+          "Let the agent find another",
+          "find another substitute",
+          [
+            "Same brand only",
+            "Cheapest option",
+            ...(head.nextDeliveryDate === null ? [] : [`Wait until ${day(head.nextDeliveryDate)}`]),
+          ],
+        )}`;
+    }
     if (c.shortfall === null)
       return linesFor(order, "NEW_PRODUCT").includes(c)
         ? this.agentHelp(c.product.name, "Let the agent find another", "find another product", [
@@ -1039,6 +1065,12 @@ export class ApprovalCard extends LitElement {
     const proposalVersion = order.proposalVersion;
     if (this.picked !== null)
       return { decision: "pick_alternative", offerId: this.picked, proposalVersion };
+    // A recommended substitute that is not in the order yet is picked like any other choice.
+    const recommended = order.lines
+      .map((l) => substitutionOf(order, l.claims)?.options[0])
+      .find((o) => o !== undefined && o.replaces !== null && !order.offerIds.includes(o.offerId));
+    if (recommended !== undefined)
+      return { decision: "pick_alternative", offerId: recommended.offerId, proposalVersion };
     const c = order.lines.map((l) => l.claims).find((l) => l.shortfall !== null);
     if (c === undefined || c.shortfall === null || this.handling === "split")
       return { decision: "approve", proposalVersion };
@@ -1062,7 +1094,7 @@ export class ApprovalCard extends LitElement {
     const note = this.lineNote(order, c);
     // A flagged substitute heads its box with the product it replaces (when the order has it)
     // and shows itself as the recommended "Replace with" option.
-    const head = flagged && c.replaces !== null ? originalOf(order, c) : c;
+    const head = flagged && c.replaces !== null ? substitutionOf(order, c)?.original : c;
     const pack = head?.product.perSalesUnit ?? null;
     const summary =
       head === undefined
@@ -1104,7 +1136,7 @@ export class ApprovalCard extends LitElement {
     const all = order.lines.map((l) => l.claims);
     const news = linesFor(order, "NEW_PRODUCT");
     const isFlagged = (c: OfferClaims) =>
-      pending && (c.replaces !== null || c.shortfall !== null || news.includes(c));
+      pending && (substitutionOf(order, c) !== null || c.shortfall !== null || news.includes(c));
     // A replaced product is shown at the top of its substitute's box, not as its own line.
     const replaced = new Set(all.map((c) => (isFlagged(c) ? c.replaces : null)));
     const flagged = all.filter(isFlagged);
@@ -1224,36 +1256,33 @@ export class ApprovalCard extends LitElement {
       }`;
   }
 
-  /** "Other choices (N)": the order's alternatives, one of which can replace the proposal (P2). */
-  private choices(order: Order, c: OfferClaims, withProposal: boolean) {
-    const alternatives = order.alternatives.map((l) => l.claims);
-    if (alternatives.length === 0 && !withProposal) return nothing;
+  /** "Replace with": the recommended product, and "Other choices (N)" for the rest (Figma v17). */
+  private choices({ original, options }: Substitution) {
+    const [recommended, ...others] = options;
+    if (recommended === undefined) return nothing;
+    const reference = original ?? recommended;
     const open = this.choicesOpen;
-    const toggle =
-      alternatives.length === 0
-        ? nothing
-        : html`<button
-            type="button"
-            class="more-products"
-            aria-expanded=${open ? "true" : "false"}
-            @click=${() => (this.choicesOpen = !open)}
-          >
-            ${open ? "Hide other choices" : `Other choices (${alternatives.length})`}${icon(chevronDown)}
-          </button>`;
-    return html`<div class="options" role="radiogroup" aria-label="Product for ${c.product.name}">
-      ${withProposal || open ? this.choice(c, c, originalOf(order, c)) : nothing} ${toggle}
-      ${open ? alternatives.map((a) => this.choice(c, a, originalOf(order, c))) : nothing}
+    return html`<div class="options" role="radiogroup" aria-label="Replace with">
+      ${this.choice(recommended, true, reference)}
+      ${
+        others.length === 0
+          ? nothing
+          : html`<button
+              type="button"
+              class="more-products"
+              aria-expanded=${open ? "true" : "false"}
+              @click=${() => (this.choicesOpen = !open)}
+            >
+              ${open ? "Hide other choices" : `Other choices (${others.length})`}${icon(chevronDown)}
+            </button>`
+      }
+      ${open ? others.map((c) => this.choice(c, false, reference)) : nothing}
     </div>`;
   }
 
-  /**
-   * One product to choose: the proposal (recommended) or an alternative, with its difference to
-   * the replaced product (Figma), or else to the proposal.
-   */
-  private choice(proposal: OfferClaims, c: OfferClaims, original: OfferClaims | undefined) {
-    const reference = original ?? proposal;
-    const proposed = c.offerId === proposal.offerId;
-    const selected = this.picked === (proposed ? null : c.offerId);
+  /** One product to choose, with its difference to the out-of-stock product (or the total). */
+  private choice(c: OfferClaims, recommended: boolean, reference: OfferClaims) {
+    const selected = this.picked === (recommended ? null : c.offerId);
     const std = stdUnits(c);
     const pack = c.product.perSalesUnit;
     return html`<label class="choice ${selected ? "selected" : ""}">
@@ -1261,12 +1290,12 @@ export class ApprovalCard extends LitElement {
         type="radio"
         name="product-choice"
         .checked=${selected}
-        @change=${() => (this.picked = proposed ? null : c.offerId)}
+        @change=${() => (this.picked = recommended ? null : c.offerId)}
       />
       <span class="choice-body">
         <span class="choice-top">
           <span>${c.product.name}</span>
-          ${proposed ? html`<span class="recommended label-small">Recommended</span>` : nothing}
+          ${recommended ? html`<span class="recommended label-small">Recommended</span>` : nothing}
           <span class="strong"
             >${c === reference ? money(c.total.net) : signed(c.total.net - reference.total.net)}</span
           >

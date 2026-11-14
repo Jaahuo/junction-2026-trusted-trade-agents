@@ -59,6 +59,23 @@ export const orderSummary = (order: Order): string =>
   lines(
     `Order ${order.orderId}: ${order.status}, ${order.total.gross.toFixed(2)} EUR gross, proposal version ${order.proposalVersion}.`,
     reasons(order.reasons),
+    order.lines.map(
+      ({ claims }) =>
+        `- ${claims.product.name} (${claims.productId}): ${quantity(claims.quantity)}, ` +
+        `unit price ${claims.unitPrice.net.toFixed(2)} ${claims.unitPrice.currency} net (VAT ${claims.unitPrice.vatRate}%), line price ${euros(claims.total.gross)}, delivery ${claims.deliveryDate}.`,
+    ),
+    order.originalRequest === null ? [] : [`Original request: ${order.originalRequest}`],
+    order.decision === null
+      ? []
+      : [
+          `Decision: ${order.decision.action}; next: ${order.decision.next ?? "none"}.`,
+          ...(order.decision.note === null ? [] : [`Note: ${order.decision.note}`]),
+          ...(order.decision.next === "stop"
+            ? ["Stop and do not look for alternatives."]
+            : order.decision.next === "alternatives"
+              ? ["Search for alternatives and submit a replacement order for approval."]
+              : []),
+        ],
     approvalLine(order),
   );
 

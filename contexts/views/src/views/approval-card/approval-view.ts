@@ -386,8 +386,19 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
    * on the card; the agent reads the context with the user's next message.
    */
   private async tell(order: Order) {
-    const text = decisionText(order);
-    await this.source?.context?.(`${text} Order id: ${order.orderId}.`).catch(() => undefined);
+    const lines = order.lines
+      .map(
+        ({ claims: c }) =>
+          `${c.product.name} (${c.productId}): ${c.quantity.value} ${c.quantity.unit}; requested ${c.requestedDate}, delivery ${c.deliveryDate}, next delivery ${c.nextDeliveryDate ?? "unknown"}; shortfall ${c.shortfall === null ? "none" : `${c.shortfall.value} ${c.shortfall.unit}`}; replaces ${c.replaces ?? "none"}`,
+      )
+      .join("\n");
+    const text = `${decisionText(order)} Order id: ${order.orderId}. Status: ${order.status}.
+Approver request: ${order.decision?.note ?? "unknown"}.
+Original order request: ${order.originalRequest ?? "unknown"}.
+Gross total including VAT: ${order.total.gross.toFixed(2)} EUR. Mandate order limit including VAT: ${this.orderLimit === null ? "unknown" : `${this.orderLimit.toFixed(2)} EUR`}.
+Held order lines:\n${lines}
+${order.status === "declined" && order.decision?.next === "alternatives" ? "The approver REJECTED this order and asks for a NEW OFFER. Use get_order_status if needed, then search, get_offers and place_order to submit a replacement for approval." : ""}`;
+    await this.source?.context?.(text).catch(() => undefined);
     if (order.status === "declined" && order.decision?.next === "alternatives")
       await this.source?.message?.(text).catch(() => undefined);
   }
@@ -437,12 +448,21 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       const state = this.state;
       if (state.kind === "done")
         this.state = { kind: "done", data: replace(state.data, rejected.data) };
-      void source.context?.(
-        `Order ${order.orderId} was rejected on the approval card because the approver asked for a new offer. Place the new order for approval when you have it.`,
-      );
     }
+    const descriptions = [...order.lines, ...order.alternatives].map(
+      ({ claims: c }) =>
+        `${c.product.name} (${c.productId}): offered quantity ${c.quantity.value} ${c.quantity.unit}; requested date ${c.requestedDate}, actual delivery ${c.deliveryDate}, next delivery ${c.nextDeliveryDate ?? "unknown"}; ${c.deliveryDate > c.requestedDate ? "late; " : ""}shortfall ${c.shortfall === null ? "none" : `${c.shortfall.value} ${c.shortfall.unit} (requested quantity includes this shortfall)`}; replaces ${c.replaces ?? "none"}`,
+    );
+    const enriched = `Order ${order.orderId} status: ${update ? "declined" : "pending approval (waiting for the approver's decision)"}.
+Approver request: ${text}
+Original order request: ${order.originalRequest ?? "unknown"}.
+Gross total including VAT: ${order.total.gross.toFixed(2)} EUR. Mandate order limit including VAT: ${this.orderLimit === null ? "unknown" : `${this.orderLimit.toFixed(2)} EUR`}.
+Held order lines:\n${descriptions.slice(0, order.lines.length).join("\n")}
+Available alternatives (not held order lines):\n${descriptions.slice(order.lines.length).join("\n") || "none"}
+${update ? "The approver REJECTED this order and asks for a NEW OFFER. Use get_order_status if needed, then search, get_offers and place_order to submit a replacement for approval." : ""}`;
+    await source.context?.(enriched).catch(() => undefined);
     try {
-      await message(text);
+      await message(enriched);
     } catch (cause) {
       this.updatingId = null;
       this.state = {

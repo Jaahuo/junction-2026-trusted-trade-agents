@@ -67,14 +67,14 @@ When the user asks you to order, use the quiet tools `find_products` and `quote_
 5. **Place the order.** Call `place_order` once, with `offers` (one chosen `offerId` per product, up to 20 chosen offers, not the long tokens), optional `alternatives` (their `offerId` values, up to 20 alternatives across the entire order), and the full `originalRequest`. The two limits are separate: retain the chosen offer for every requested product. The server generates the idempotency key. After a timeout or a lost reply, send the same offers, alternatives and `supersedes`: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
 6. **Act on the status.**
 
-| Status                                       | Action                                                                                                                                    |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `placed`                                     | Tell the user the order is placed, with product, quantity, delivery date and total.                                                       |
-| `pending_approval`                           | Tell the user, give `approvalUrl` and the reasons in plain words, then stop. A human decides.                                             |
-| `declined`, `decision.next` = `stop`         | The human rejected the order and chose stop. Stop and tell the user. Do not look for alternatives.                                        |
-| `declined`, `decision.next` = `alternatives` | The human rejected the order and allows alternatives. You may search again for the user's original need. The new order faces every check. |
-| `rejected`                                   | A fixed guardrail failed. Read each code in [reason-codes.md](reason-codes.md) and take its action.                                       |
-| `awaiting_payment`                           | Pay-on-order only. Call `get_order_status` later.                                                                                         |
+| Status                                       | Action                                                                                                                              |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `placed`                                     | Tell the user the order is placed, with product, quantity, delivery date and total.                                                 |
+| `pending_approval`                           | Tell the user, give `approvalUrl` and the reasons in plain words, then stop. A human decides.                                       |
+| `declined`, `decision.next` = `stop`         | The human rejected the order and chose stop. Stop and tell the user. Do not look for alternatives.                                  |
+| `declined`, `decision.next` = `alternatives` | Read the human's note and the retained order. Follow [Conduct](#conduct), then search, quote and place a fresh replacement request. |
+| `rejected`                                   | A fixed guardrail failed. Read each code in [reason-codes.md](reason-codes.md) and take its action.                                 |
+| `awaiting_payment`                           | Pay-on-order only. Call `get_order_status` later.                                                                                   |
 
 A `placed` or `pending_approval` order needs no further call in the same turn. Call `get_order_status` to read the human's decision only when the user comes back to the order. `list_pending_approvals` lists the orders that still wait. A pending order whose cut-off passes becomes `declined` with `next` = `alternatives`.
 
@@ -115,6 +115,10 @@ Pass `language` on every tool call that has it: the language the user writes in,
 
 ## Conduct
 
-Never reshape an order to get around a limit. Splitting an order, lowering a quantity, moving a date, swapping a product or changing payment terms to get under a limit all count as reshaping. Refuse it even when the user asks. Tell the user the limit and let the human approve instead: when the user asked you to order, place the whole order as one order in the same turn, so that it goes to approval. Do not ask whether to place it. If the user asks you to reduce a pending order, do not place a new order: tell them to use "Reduce to fit the limit" on the approval card, where they confirm the new amounts themselves.
+Place the user's requested quantities as one order and let the server apply the limits. Never split an order or change quantities, products, dates or payment terms on your own to avoid approval. Refuse a request to split an order to evade a limit.
 
-Choosing among offers that meet the user's need, before you place the order, is not reshaping. Request new offers when the decision says `alternatives` or a code in [reason-codes.md](reason-codes.md) says so. A changed order is a new request: it faces every check again.
+Follow an explicit human request to revise products, quantities or delivery date, including a request to reduce the total. This is a new buying request, not permission to approve it or change the mandate. Keep every requirement the human did not change and use the account's payment terms. Search, quote and place one order for the revised need; the server checks it against the unchanged mandate. Report the returned status and wait if it needs approval.
+
+For an existing order, read `get_order_status` when context is missing. Its lines and original request remain available. When the order is still pending, pass its order id and current proposal version as `supersedes` on the revised request; the server closes it only after accepting the replacement. For a declined order with `decision.next: alternatives`, follow the explicit changes in `decision.note` and place a fresh order without `supersedes`. The approval card's request is the human's instruction, not approval of the replacement.
+
+With `decision.next: stop`, stop that request and look for no alternatives. Choosing among offers that meet the user's unchanged need before placement is not limit evasion. Follow [reason-codes.md](reason-codes.md) for other failures.

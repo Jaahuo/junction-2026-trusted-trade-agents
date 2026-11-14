@@ -1,5 +1,5 @@
 import type { Db } from "@app/server-kit";
-import { and, asc, eq, inArray, sql, sum } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql, sum } from "drizzle-orm";
 import type { OrderStore, OrderTx, StoredOrder } from "../application/ports.ts";
 import { history, orders, refusals } from "./schema.ts";
 
@@ -75,6 +75,25 @@ const findByKey = async (db: Executor, customer: string, idempotencyKey: string)
 const orderTx = (tx: Executor): OrderTx => ({
   find: (customer, orderId) => find(tx, customer, orderId),
   findByKey: (customer, key) => findByKey(tx, customer, key),
+  hasUsedOffers: async (customer, offerIds) => {
+    if (offerIds.length === 0) return false;
+    const rows = await tx
+      .select({ orderId: orders.orderId })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.customer, customer),
+          or(
+            ...offerIds.map(
+              (offerId) =>
+                sql`(${orders.lines} #>> '{}')::jsonb @> jsonb_build_array(jsonb_build_object('offerId', ${offerId}::text))`,
+            ),
+          ),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  },
   insert: async (order) => {
     await tx.insert(orders).values(toRow(order));
   },

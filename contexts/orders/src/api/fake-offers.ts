@@ -24,7 +24,7 @@ type Sign = (changes?: Partial<OfferClaims>, exp?: Date) => Promise<string>;
  * `omit` leaves products out with a reason (or with no omitted entry when the reason is null);
  * `price` scales every unit price and `priceOf` one product's; `fail` makes the call fail; `reuse`
  * answers with the token it was given; `broken` sends a token that fails verification; `ignore`
- * leaves the asked amount or date unapplied.
+ * leaves the asked amount or date unapplied; `deliveryDate` moves every delivery to that date.
  */
 const fakeOffers = (sign: Sign, clock: { now: Date }) => {
   const calls: RequoteRequest[] = [];
@@ -37,6 +37,7 @@ const fakeOffers = (sign: Sign, clock: { now: Date }) => {
     price: 1,
     priceOf: new Map<string, number>(),
     mandate: null as { mandateId: string; version: number } | null,
+    deliveryDate: null as string | null,
   };
   const port: RequotePort = {
     requote: async (request) => {
@@ -68,6 +69,7 @@ const fakeOffers = (sign: Sign, clock: { now: Date }) => {
                 ...claims,
                 quantity,
                 requestedDate,
+                ...(state.deliveryDate === null ? {} : { deliveryDate: state.deliveryDate }),
                 unitPrice: { ...claims.unitPrice, net: cents(claims.unitPrice.net * price) },
                 total: {
                   net: cents(claims.total.net * ratio),

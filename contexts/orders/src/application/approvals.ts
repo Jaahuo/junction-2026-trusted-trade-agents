@@ -431,19 +431,52 @@ const pricedUp = (pairs: Pair[]): string[] =>
       : [],
   );
 
+/** Gross price of one sales unit, deposits included, at full precision. */
+const unitGross = (claims: OfferClaims): number => claims.total.gross / claims.quantity.value;
+
 /**
- * A higher price than the approver saw adds PRICE_CHANGED, as SPEC-011 does for a re-quote at
- * approval, so the order waits for them instead of being placed at a price nobody approved.
+ * What a re-quote at approval made worse than the terms the approver approved, per product: a
+ * higher net or gross unit price or another pack size (`price`), or a later delivery date, another
+ * amount or unit, or a new shortfall (`availability`). Approval may place the order only when both
+ * are empty and the order's gross total is not higher.
  */
-const withPriceChanged = ({ evaluation, byProduct }: Evaluated, products: string[]): Evaluated => {
+const worsened = (pairs: Pair[]): { price: string[]; availability: string[] } => {
+  const price = new Set(pricedUp(pairs));
+  const availability = new Set<string>();
+  for (const { previous, current } of pairs) {
+    if (previous === null) continue;
+    const before = previous.claims;
+    const after = current.claims;
+    if (unitGross(after) > unitGross(before)) price.add(after.productId);
+    if (
+      after.deliveryDate > before.deliveryDate ||
+      after.quantity.value !== before.quantity.value ||
+      after.quantity.unit !== before.quantity.unit ||
+      (after.shortfall !== null && before.shortfall === null)
+    )
+      availability.add(after.productId);
+  }
+  return { price: [...price], availability: [...availability] };
+};
+
+/**
+ * Adds `reason` for `products`, so the order waits for the approver instead of being placed on
+ * terms nobody approved: PRICE_CHANGED for a higher price (SPEC-011), AVAILABILITY_DIFFERS for a
+ * later date or another amount.
+ */
+const withReason = (
+  { evaluation, byProduct }: Evaluated,
+  reason: ReasonCode,
+  products: string[],
+): Evaluated => {
   if (products.length === 0) return { evaluation, byProduct };
-  const reasons: ReasonCode[] = evaluation.reasons.includes("PRICE_CHANGED")
+  const reasons: ReasonCode[] = evaluation.reasons.includes(reason)
     ? evaluation.reasons
-    : [...evaluation.reasons, "PRICE_CHANGED"];
+    : [...evaluation.reasons, reason];
   const marked = new Map(byProduct);
   for (const productId of products) {
     const current = marked.get(productId) ?? [];
-    if (!current.includes("PRICE_CHANGED")) marked.set(productId, [...current, "PRICE_CHANGED"]);
+    if (!current.includes(reason)) marked.set(productId, [...current, reason]);
   }
   return {
     evaluation: {
@@ -623,7 +656,9 @@ const revise = async (
     });
   const pairs = pairsOf(proposal.value, checked.value.lines);
   const checkedAgain = await evaluateChecked(deps, principal, checked.value, now);
-  const evaluated = isEdit ? withPriceChanged(checkedAgain, pricedUp(pairs)) : checkedAgain;
+  const evaluated = isEdit
+    ? withReason(checkedAgain, "PRICE_CHANGED", pricedUp(pairs))
+    : checkedAgain;
 
   return underLock(deps, principal.customer, async (tx) => {
     const order = await tx.find(principal.customer, known.orderId);
@@ -679,10 +714,12 @@ const needsRequote = (order: StoredOrder, mandate: Mandate, now: Date): boolean 
 
 /**
  * Approve with re-quote (SPEC-011): every line gets a new offer under the current mandate through
- * `requote`, and the new lines run every check of SPEC-009 again. The same or a lower price and no
- * reason the approver has not seen replace the lines (`requoted`), and the order is approved and
- * placed. Otherwise the order stays pending as the next proposal, with PRICE_CHANGED or the new
- * reason, a `Requote` per line and `proposalVersion` + 1, so the approver decides on the new terms.
+ * `requote`, and the new lines run every check of SPEC-009 again. Only terms the same or better than
+ * the approved ones on every line (unit price net and gross, pack, amount, delivery date, no new
+ * shortfall), a gross total not higher, and no reason the approver has not seen replace the lines
+ * (`requoted`) and approve and place the order. Anything worse stays pending as the next proposal,
+ * with PRICE_CHANGED or AVAILABILITY_DIFFERS (even when the old proposal already listed them), a
+ * `Requote` per line and `proposalVersion` + 1, so the approver decides on the new terms.
  */
 const approveWithRequote = async (
   deps: ApprovalDeps,
@@ -710,14 +747,26 @@ const approveWithRequote = async (
     return upstream(known.orderId, "The re-quote returned an offer that has already expired.");
   const alternatives = pickable(known.alternatives, checked.value.mandate, now);
   const pairs = pairsOf(proposal.value, checked.value.lines);
-  const evaluated = withPriceChanged(
-    await evaluateChecked(deps, principal, checked.value, now),
-    pricedUp(pairs),
+  // The approver approved these exact terms. Worse terms always come back to them, whatever reasons
+  // the old proposal already showed: a higher price than they saw is never approved implicitly.
+  const worse = worsened(pairs);
+  const totalUp =
+    grossTotal(checked.value.lines.map((line) => line.claims)) > known.total.gross
+      ? checked.value.lines.map((line) => line.claims.productId)
+      : [];
+  const evaluated = withReason(
+    withReason(await evaluateChecked(deps, principal, checked.value, now), "PRICE_CHANGED", [
+      ...new Set([...worse.price, ...totalUp]),
+    ]),
+    "AVAILABILITY_DIFFERS",
+    worse.availability,
   );
   const { evaluation } = evaluated;
-  // The approver approved the reasons they saw; a reason they have not seen needs them again.
   const approvable =
     evaluation.decision !== "rejected" &&
+    worse.price.length === 0 &&
+    worse.availability.length === 0 &&
+    totalUp.length === 0 &&
     evaluation.reasons.every((reason) => known.reasons.includes(reason));
 
   return underLock(deps, principal.customer, async (tx) => {

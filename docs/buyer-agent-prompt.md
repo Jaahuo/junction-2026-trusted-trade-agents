@@ -9,7 +9,45 @@ A host that loads the skill through the MCP Skills extension and has its own ass
 The prompt changes how the agent talks.
 It does not change the contract, the tools or the checks: the server stays the control ([PRD, Skill](prd.md#skill)).
 
-## Install the prompt in Open WebUI
+## Start Open WebUI with the prompt
+
+One command starts Open WebUI v0.13.3 on this machine, connects the MCP server and creates the "Buyer agent" model with the skill and the prompt.
+
+1. Copy `hosts/openwebui/.env.example` to `hosts/openwebui/.env`.
+2. Set `WEBUI_SECRET_KEY` (`openssl rand -hex 32`), and the model endpoint in `OPENAI_API_BASE_URL` and `OPENAI_API_KEY`.
+   The endpoint is any OpenAI-compatible server, as the container sees it.
+3. Start the API of this worktree with `bun run dev`.
+4. Run the setup:
+
+   ```sh
+   bun scripts/openwebui.ts up
+   ```
+
+5. Open the address that the command prints, choose the model **Buyer agent**, and send one of the [test sentences](#test-sentences).
+
+After you change the prompt on this page or the skill, run `bun scripts/openwebui.ts setup` to update the model.
+A second run without a change reports `unchanged`.
+`bun scripts/openwebui.ts down` stops the container and keeps its data.
+
+Things to know:
+
+- **Login is off.**
+  The container has no login and listens on 127.0.0.1 only.
+  Do not publish its port.
+- **The MCP server address.**
+  The setup points Open WebUI at the API port of the worktree you run it from.
+  Set `OPENWEBUI_MCP_URL` to use another server.
+- **The base model.**
+  The setup takes the first model of the endpoint that is not an embedding model.
+  Set `OPENWEBUI_BASE_MODEL` to choose one.
+- **Speech.**
+  The `AUDIO_TTS_*` names are optional; see [sponsor guidance](sponsors.md) before you send audio to a service.
+- **Other tool servers.**
+  The setup replaces only its own connection and keeps the ones you added.
+
+## Install the prompt by hand
+
+Use these steps on an Open WebUI instance that the script does not manage.
 
 1. Connect the MCP server as a tool server, as [host support](host-support.md#open-webui) describes.
 2. Open **Workspace**, then **Models**, and create or edit the model that buyers talk to.

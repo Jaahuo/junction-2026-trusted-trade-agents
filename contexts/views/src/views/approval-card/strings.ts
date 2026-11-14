@@ -87,6 +87,7 @@ export const VIEW = {
         "Changing amounts is not available yet. Approve the order as it is, or ask the agent.",
     } as Record<string, string>,
     notSaved: "The decision was not saved. Try again.",
+    ruleNotSaved: "The rule was not saved. Try again.",
     // What the card says for the approver after a decision; the agent reads it.
     decided: {
       placed: (name: string, brand: string) => `${name} approved. It is placed with ${brand}.`,
@@ -133,6 +134,7 @@ export const VIEW = {
         "Määrien muuttaminen ei ole vielä mahdollista. Hyväksy tilaus sellaisenaan tai kysy agentilta.",
     } as Record<string, string>,
     notSaved: "Päätöstä ei tallennettu. Yritä uudelleen.",
+    ruleNotSaved: "Sääntöä ei tallennettu. Yritä uudelleen.",
     decided: {
       placed: (name: string, brand: string) =>
         `Hyväksyin: ${name}. Tilaus on lähetetty toimittajalle ${brand}.`,

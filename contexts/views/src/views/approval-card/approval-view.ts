@@ -1,4 +1,10 @@
-import type { DecideApprovalRequest, Order, PendingList } from "@app/contract";
+import {
+  type DecideApprovalRequest,
+  type Order,
+  type PendingList,
+  samePair,
+  type SubstitutionRule,
+} from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { css, html, nothing } from "lit";
 import {
@@ -12,9 +18,10 @@ import checkCircle from "../../shared/icons/check-circle-32.svg?raw";
 import warningSmall from "../../shared/icons/warning-16.svg?raw";
 import warningLarge from "../../shared/icons/warning-32.svg?raw";
 import { pick } from "../../shared/locale.ts";
+import { saveRules } from "../../shared/substitution-rules.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
-import { defineApprovalCard, reasonSummaries } from "./approval-card.ts";
+import { defineApprovalCard, reasonSummaries, type RuleChoice } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
 import { brandHeader, cardStyles, icon, money, orderName, vat, when } from "./parts.ts";
 import { VIEW } from "./strings.ts";
@@ -33,6 +40,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     orderLimit: { state: true },
     decisionError: { state: true },
     pending: { state: true },
+    remembered: { state: true },
+    rules: { state: true },
   };
 
   static override styles = [
@@ -200,6 +209,10 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   private limitAsked = false;
   /** What the tool is doing, from its arguments, while the result is on its way. */
   declare private pending: { placing: boolean; request: string | null };
+  /** The orders whose substitution rule is saved in the mandate. */
+  declare private remembered: ReadonlySet<string>;
+  /** The mandate's substitution rules, read once when a declined order has a substitute. */
+  declare private rules: SubstitutionRule[];
 
   constructor() {
     super();
@@ -209,6 +222,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     this.orderLimit = null;
     this.decisionError = null;
     this.pending = { placing: false, request: null };
+    this.remembered = new Set();
+    this.rules = [];
   }
 
   override connectedCallback() {
@@ -222,8 +237,9 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   }
 
   /**
-   * Reads the order limit once, when an over-limit order is shown; without it the block shows no
-   * limit. Other orders need no limit, so the host shows no tool call for them.
+   * Reads the mandate once, when an over-limit order or a declined substitute is shown: the order
+   * limit for the block, and the rules so a pair with a rule is not offered again. Other orders
+   * need neither, so the host shows no tool call for them.
    */
   override updated() {
     const order = this.state.kind === "done" ? this.selectedOrder(this.state.data) : undefined;
@@ -233,11 +249,13 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const state = this.state;
     if (this.limitAsked || this.source === null || state.kind !== "done") return;
     const orders = "orders" in state.data ? state.data.orders : [state.data];
-    if (!orders.some((o) => o.reasons.includes("SPEND_OVER_LIMIT"))) return;
+    if (!orders.some((o) => o.reasons.includes("SPEND_OVER_LIMIT") || declinedSubstitute(o)))
+      return;
     this.limitAsked = true;
     void callAction(this.source, "get_mandate", {}, null).then((result) => {
-      if (result.kind === "done" && result.data.status === "active")
-        this.orderLimit = result.data.mandate.limits.maxOrderTotal.value;
+      if (result.kind !== "done" || result.data.status !== "active") return;
+      this.orderLimit = result.data.mandate.limits.maxOrderTotal.value;
+      this.rules = result.data.mandate.limits.substitutionRules ?? [];
     });
   }
 
@@ -278,6 +296,27 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     )
       await this.decide(updated, { decision: "approve", proposalVersion: updated.proposalVersion });
     if (updated.status !== "pending_approval") await this.tell(updated);
+  }
+
+  /**
+   * Saves the human's rule for a substitute pair as a new version of the current mandate, with
+   * its limits, constraints and expiry unchanged otherwise. A rule for the same pair is replaced.
+   */
+  private async remember(order: Order, choice: RuleChoice) {
+    const source = this.source;
+    if (source === null) return;
+    this.busyId = order.orderId;
+    const saved = await saveRules(source, (rules) => [
+      ...rules.filter((rule) => !samePair(rule, choice)),
+      { ...choice, decidedAt: new Date().toISOString() },
+    ]);
+    this.busyId = null;
+    if (saved.kind !== "done") {
+      this.decisionError = { orderId: order.orderId, message: pick(VIEW).ruleNotSaved };
+      return;
+    }
+    this.decisionError = null;
+    this.remembered = new Set([...this.remembered, order.orderId]);
   }
 
   /**
@@ -480,6 +519,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       <tt-approval-card
         .order=${open}
         ?busy=${this.busyId === open.orderId}
+        ?remembered=${this.remembered.has(open.orderId)}
+        .rules=${this.rules}
         ?can-ask=${this.source?.message !== undefined}
         .orderLimit=${this.orderLimit}
         .error=${this.decisionError?.orderId === open.orderId ? this.decisionError.message : null}
@@ -488,9 +529,14 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
           this.decide(open, e.detail, true)}
         @tt-ask-agent=${(e: CustomEvent<string>) => this.ask(open, e.detail, true)}
         @tt-talk=${(e: CustomEvent<string>) => this.ask(open, e.detail, false)}
+        @tt-remember=${(e: CustomEvent<RuleChoice>) => this.remember(open, e.detail)}
       ></tt-approval-card>`;
   }
 }
+
+/** A declined order with a substitute line: the card may offer to stop suggesting it. */
+const declinedSubstitute = (o: Order) =>
+  o.status === "declined" && o.lines.some((line) => line.claims.replaces !== null);
 
 /** Plain words for a failed decision, by the server's error code ("CODE: message"). */
 const decisionFailure = (result: { kind: string; message?: string }) => {

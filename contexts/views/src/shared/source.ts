@@ -26,6 +26,10 @@ function bridgeSource(view: ViewName): Source {
       const result = await app.sendMessage({ role: "user", content: [{ type: "text", text }] });
       return result.isError !== true;
     },
+    updateModelContext: async (text) => {
+      await ready;
+      await app.updateModelContext({ content: [{ type: "text", text }] });
+    },
   });
   const ready = app.connect();
   return source;

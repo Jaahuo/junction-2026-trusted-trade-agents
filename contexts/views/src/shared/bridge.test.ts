@@ -19,6 +19,7 @@ const mandate = fixtures.storedMandate;
 function fakeHost(answer: Awaited<ReturnType<Host["callServerTool"]>>, accepts = true) {
   const calls: Parameters<Host["callServerTool"]>[0][] = [];
   const messages: string[] = [];
+  const contexts: string[] = [];
   const listeners: ((structuredContent: unknown) => void)[] = [];
   const host: Host = {
     onToolResult: (listener) => listeners.push(listener),
@@ -30,11 +31,14 @@ function fakeHost(answer: Awaited<ReturnType<Host["callServerTool"]>>, accepts =
       messages.push(text);
       return accepts;
     },
+    updateModelContext: async (text) => {
+      contexts.push(text);
+    },
   };
   const deliver = (value: unknown) => {
     for (const listener of listeners) listener(value);
   };
-  return { host, calls, messages, deliver };
+  return { host, calls, messages, contexts, deliver };
 }
 
 /** A fake fetch: records each request and answers with one JSON body. */
@@ -143,4 +147,11 @@ test("plain mode has no chat to message", () => {
     query: new URLSearchParams(),
   });
   expect(source.message).toBeUndefined();
+});
+
+test("host mode tells the model about a decision without a chat message", async () => {
+  const { host, messages, contexts } = fakeHost({});
+  await hostSource(host).context?.("The approver rejected order ord_test_1.");
+  expect(contexts).toEqual(["The approver rejected order ord_test_1."]);
+  expect(messages).toEqual([]);
 });

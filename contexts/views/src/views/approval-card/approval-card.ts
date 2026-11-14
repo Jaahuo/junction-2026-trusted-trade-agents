@@ -178,6 +178,7 @@ export class ApprovalCard extends LitElement {
     choicesOpen: { state: true },
     picked: { state: true },
     requoting: { state: true },
+    rejecting: { state: true },
   };
 
   static override styles = [
@@ -674,6 +675,8 @@ export class ApprovalCard extends LitElement {
   declare private picked: string | null;
   /** True from Confirm with changed amounts until the new quote arrives. */
   declare private requoting: boolean;
+  /** True from Reject until the decision comes back: the spinner sits on Reject. */
+  declare private rejecting: boolean;
 
   constructor() {
     super();
@@ -688,6 +691,7 @@ export class ApprovalCard extends LitElement {
     this.choicesOpen = false;
     this.picked = null;
     this.requoting = false;
+    this.rejecting = false;
   }
 
   /** A new order (or a new version of it) starts without changes or picks. */
@@ -697,6 +701,7 @@ export class ApprovalCard extends LitElement {
       this.picked = null;
       this.handling = "split";
       this.requoting = false;
+      this.rejecting = false;
     }
   }
 
@@ -1196,7 +1201,8 @@ export class ApprovalCard extends LitElement {
     // "Approve order" while the order is over the limit; else "Confirm order".
     const over = this.overLimit(order);
     const confirm = !order.reasons.includes("SPEND_OVER_LIMIT") || (over !== null && over <= 0);
-    if (this.busy && !this.requoting) return confirm ? "Confirming…" : "Approving…";
+    if (this.busy && !this.requoting && !this.rejecting)
+      return confirm ? "Confirming…" : "Approving…";
     return confirm ? "Confirm order" : "Approve order";
   }
 
@@ -1233,11 +1239,11 @@ export class ApprovalCard extends LitElement {
         <button
           part="button approve"
           class="btn primary"
-          aria-busy=${this.busy ? "true" : "false"}
+          aria-busy=${this.busy && !this.rejecting ? "true" : "false"}
           @click=${() => (this.busy ? undefined : confirm())}
         >
           ${
-            this.busy && !this.requoting
+            this.busy && !this.requoting && !this.rejecting
               ? html`<span class="spinner" role="status" aria-label="Sending"></span>`
               : nothing
           }
@@ -1246,16 +1252,23 @@ export class ApprovalCard extends LitElement {
         <button
           part="button reject"
           class="btn brand"
-          ?disabled=${this.busy}
-          @click=${() =>
+          aria-busy=${this.busy && this.rejecting ? "true" : "false"}
+          @click=${() => {
+            if (this.busy) return;
             // Just reject: no reason form yet, and the agent does not try again.
+            this.rejecting = true;
             this.decide({
               decision: "reject",
               next: "stop",
               proposalVersion: order.proposalVersion,
-            })}
+            });
+          }}
         >
-          Reject
+          ${
+            this.busy && this.rejecting
+              ? html`<span class="spinner" role="status" aria-label="Rejecting"></span>Rejecting…`
+              : "Reject"
+          }
         </button>
       </div>
       ${

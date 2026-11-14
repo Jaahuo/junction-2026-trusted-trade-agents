@@ -4,12 +4,15 @@ import { setLang } from "../../shared/locale.ts";
 import {
   categoriesText,
   draftRows,
+  inForce,
   effectiveStatus,
   expiryDelay,
   isDraft,
   isNoCurrentMandate,
   policyText,
+  registeredContext,
   registerInput,
+  registersDraft,
   substitutionText,
   thresholdText,
 } from "./presentation.ts";
@@ -120,4 +123,44 @@ test("the register input is the draft with the operationId", () => {
     ...fixtures.draftMandateRequest,
     operationId: "op_view_1",
   });
+});
+
+test("inForce keeps the current mandate only while it is active", () => {
+  const exp = fixtures.storedMandate.mandate.exp;
+  expect(inForce(fixtures.mandateDraft, (exp - 1) * 1000)).toEqual(fixtures.storedMandate);
+  expect(inForce(fixtures.mandateDraft, exp * 1000)).toBeNull();
+  const revoked = { ...fixtures.storedMandate, status: "revoked" as const };
+  expect(inForce({ ...fixtures.mandateDraft, current: revoked }, 0)).toBeNull();
+});
+
+test("registersDraft matches a new active mandate with the draft's terms in any key order", () => {
+  const { draft } = fixtures.mandateDraft;
+  const limits = Object.fromEntries(Object.entries(draft.limits).toReversed());
+  const stored: StoredMandate = {
+    ...fixtures.storedMandate,
+    mandate: {
+      ...fixtures.storedMandate.mandate,
+      mandateId: "mnd_new",
+      version: 2,
+      limits: { ...draft.limits, ...limits },
+    },
+  };
+  const now = (stored.mandate.exp - 1) * 1000;
+  expect(registersDraft(stored, fixtures.mandateDraft, now)).toBe(true);
+  expect(registersDraft(fixtures.storedMandate, fixtures.mandateDraft, now)).toBe(false);
+  expect(registersDraft({ ...stored, status: "revoked" }, fixtures.mandateDraft, now)).toBe(false);
+  expect(
+    registersDraft(stored, { ...fixtures.mandateDraft, draft: { ...draft, exp: 5 } }, now),
+  ).toBe(false);
+});
+
+test("registeredContext says in force only for an active mandate", () => {
+  const exp = fixtures.storedMandate.mandate.exp;
+  expect(registeredContext(fixtures.storedMandate, (exp - 1) * 1000)).toContain("in force now");
+  expect(registeredContext(fixtures.storedMandate, exp * 1000)).toContain(
+    "expired and not in force",
+  );
+  expect(registeredContext({ ...fixtures.storedMandate, status: "revoked" }, 0)).toContain(
+    "revoked and not in force",
+  );
 });

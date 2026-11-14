@@ -115,31 +115,91 @@ test("Register calls register_mandate with the draft and an operationId, then sh
   ]);
 });
 
-test("a failed Register keeps the draft, shows the error and retries with the same operationId", async () => {
+const lost = async () => {
+  throw new Error("UPSTREAM_FAILED: register answered a response that cannot be read.");
+};
+
+test("a refused Register keeps the draft, says it failed and retries with the same operationId", async () => {
   setLang("fi");
   const { view, calls, context, press } = setup([
-    async () => {
-      throw new Error("UPSTREAM_FAILED: The mandate service did not answer.");
-    },
+    lost,
+    async () => fixtures.storedMandate,
     async () => registered,
   ]);
   await press();
   const failed = textOf(view.render());
   expect(failed).toContain('part="register-error"');
-  expect(failed).toContain("UPSTREAM_FAILED: The mandate service did not answer.");
+  expect(failed).toContain("UPSTREAM_FAILED: register answered a response that cannot be read.");
   expect(failed).toContain("Rajoja ei rekisteröity");
   expect(context).toEqual([]);
 
   await press();
-  expect(calls).toHaveLength(2);
-  expect(calls[1]?.args["operationId"]).toBe(calls[0]?.args["operationId"]);
+  expect(calls.map((call) => call.tool)).toEqual([
+    "register_mandate",
+    "get_mandate",
+    "register_mandate",
+  ]);
+  expect(calls[2]?.args["operationId"]).toBe(calls[0]?.args["operationId"]);
   expect(view.current()).toEqual({ kind: "done", data: registered });
   setLang("en");
+});
+
+test("a lost answer after the register committed shows the registered mandate from get_mandate", async () => {
+  const { view, context, press } = setup([lost, async () => registered]);
+  await press();
+  expect(view.current()).toEqual({ kind: "done", data: registered });
+  expect(context).toEqual([expect.stringContaining("Its limits are in force now.")]);
+});
+
+test("a lost answer that get_mandate cannot settle says the registration is not confirmed", async () => {
+  const { view, context, press } = setup([
+    lost,
+    async () => {
+      throw new Error("The host did not answer.");
+    },
+  ]);
+  await press();
+  const text = textOf(view.render());
+  expect(text).toContain("Registration is not confirmed");
+  expect(text).not.toContain("The limits were not registered");
+  expect(context).toEqual([]);
+});
+
+test("a lost answer with no current mandate says the limits were not registered", async () => {
+  const { view, press } = setup([
+    lost,
+    async () => {
+      throw new Error("NOT_FOUND: No current mandate.");
+    },
+  ]);
+  await press();
+  expect(textOf(view.render())).toContain("The limits were not registered");
+});
+
+test("a replay that returns a revoked mandate does not tell the model it is in force", async () => {
+  const { view, context, press } = setup([async () => ({ ...registered, status: "revoked" })]);
+  await press();
+  expect(textOf(view.render())).toContain("Revoked");
+  expect(context).toEqual([expect.stringContaining("revoked and not in force")]);
+});
+
+test("a draft whose current mandate has expired shows no limits in force", () => {
+  const { view } = setup([]);
+  const expired = { ...fixtures.storedMandate.mandate, exp: 1 };
+  view.show({
+    kind: "done",
+    data: { ...fixtures.mandateDraft, current: { ...fixtures.storedMandate, mandate: expired } },
+  });
+  const text = textOf(view.render());
+  expect(text).toContain("No mandate is in force now.");
+  expect(text).not.toContain("In force now:");
 });
 
 test("an answer outside the contract keeps the draft with an error", async () => {
   const { view, press } = setup([async () => ({ unexpected: true })]);
   await press();
   expect(view.current()).toEqual({ kind: "done", data: fixtures.mandateDraft });
-  expect(textOf(view.render())).toContain("register_mandate answered outside the contract.");
+  const text = textOf(view.render());
+  expect(text).toContain("register_mandate answered outside the contract.");
+  expect(text).toContain("Registration is not confirmed");
 });

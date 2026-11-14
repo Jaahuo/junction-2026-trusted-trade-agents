@@ -7,7 +7,7 @@ const en = {
   loading: "Loading agent limits…",
   noMandateTitle: "No current mandate",
   noMandateBody:
-    "The agent has no current authority to place orders. Ask an approver to set up a mandate.",
+    "The agent has no current authority to place orders. Ask the agent to draft limits, then check them and press Register.",
   loadFailedTitle: "Agent limits could not be loaded",
   loadFailedBody: "Try again or open the limits page.",
   tryAgain: "Try again",
@@ -82,6 +82,9 @@ const en = {
   registerFailedBody:
     "Press Register again. A repeated Register does not register the limits twice.",
   humanOnly: "Only you can register limits. The agent cannot register them.",
+  registerUnconfirmedTitle: "Registration is not confirmed",
+  registerUnconfirmedBody:
+    "The answer did not arrive, so the view cannot tell whether the limits are in force. Press Register again: a repeated Register does not register the limits twice.",
 };
 
 const fi: typeof en = {
@@ -90,7 +93,7 @@ const fi: typeof en = {
   loading: "Ladataan agentin rajoja…",
   noMandateTitle: "Ei voimassa olevaa valtuutusta",
   noMandateBody:
-    "Agentilla ei ole valtuutusta tehdä tilauksia. Pyydä hyväksyjää laatimaan valtuutus.",
+    "Agentilla ei ole valtuutusta tehdä tilauksia. Pyydä agenttia laatimaan rajat, tarkista ne ja paina Rekisteröi.",
   loadFailedTitle: "Agentin rajoja ei voitu ladata",
   loadFailedBody: "Yritä uudelleen tai avaa rajasivu.",
   tryAgain: "Yritä uudelleen",
@@ -166,6 +169,9 @@ const fi: typeof en = {
   registerFailedBody:
     "Paina Rekisteröi uudelleen. Toistettu rekisteröinti ei rekisteröi rajoja kahdesti.",
   humanOnly: "Vain sinä voit rekisteröidä rajat. Agentti ei voi rekisteröidä niitä.",
+  registerUnconfirmedTitle: "Rekisteröintiä ei ole vahvistettu",
+  registerUnconfirmedBody:
+    "Vastaus ei tullut perille, joten näkymä ei tiedä, ovatko rajat voimassa. Paina Rekisteröi uudelleen: toistettu rekisteröinti ei rekisteröi rajoja kahdesti.",
 };
 
 export const MANDATE = { en, fi };

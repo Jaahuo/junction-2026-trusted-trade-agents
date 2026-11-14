@@ -417,7 +417,7 @@ Each view is an MCP App: a tool declares a `ui://` resource, and the host render
 | 2        | Offer comparison | `get_offers`                                         | Options side by side: price per litre or kilogram, delivery date, reliability, CO2, pre-check result |
 | 3        | Order timeline   | `get_order_status`                                   | The audit record in readable form                                                                    |
 | 4        | Search results   | `search_products`                                    | Candidates, how each matched, and the quantity to order                                              |
-| 5        | Mandate settings | `get_mandate`                                        | The limits, editable in the view                                                                     |
+| 5        | Mandate settings | `get_mandate`, `draft_mandate`                       | The limits in force, or the agent's draft with a Register button for the human                       |
 
 - Tools always return structured data and text as well, so hosts without MCP Apps still complete the flow.
 - The card in the chat and the approval page show the same information and call the same decision action. An order pending approval returns its `approvalUrl`, the address of the approval page.

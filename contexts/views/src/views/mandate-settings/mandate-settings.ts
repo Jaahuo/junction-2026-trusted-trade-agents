@@ -5,6 +5,7 @@ import { css, html, nothing } from "lit";
 import {
   callAction,
   plainPageUrl,
+  type Source,
   type ViewData,
   type ViewEntryOf,
   viewEntry,
@@ -19,11 +20,14 @@ import {
   draftRows,
   effectiveStatus,
   expiryDelay,
+  inForce,
   isDraft,
+  isNoCurrentMandate,
   percentText,
   policyText,
   registeredContext,
   registerInput,
+  registersDraft,
   softText,
   substitutionText,
   thresholdText,
@@ -151,8 +155,8 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
   private expiryTimer: number | undefined;
   private renderedStatus: "active" | "expired" | "revoked" | null = null;
   declare private registering: boolean;
-  /** Why the last Register failed, shown next to the button. */
-  declare private registerError: string | null;
+  /** Why the last Register failed, shown next to the button; `unconfirmed` when the outcome is unknown. */
+  declare private registerError: { message: string; unconfirmed: boolean } | null;
   /** Created at the first Register of a draft and kept, so a retry is a replay (SPEC-008). */
   private operationId: string | null = null;
 
@@ -179,9 +183,11 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
   override updated() {
     clearTimeout(this.expiryTimer);
     const state = this.state;
-    if (!this.isConnected || state.kind !== "done" || isDraft(state.data)) return;
-    if (this.renderedStatus === null) return;
-    const delay = expiryDelay(state.data.mandate.exp, this.renderedStatus);
+    if (!this.isConnected || state.kind !== "done" || this.renderedStatus === null) return;
+    // A draft shows its current mandate as in force only until that mandate expires.
+    const exp = isDraft(state.data) ? state.data.current?.mandate.exp : state.data.mandate.exp;
+    if (exp === undefined) return;
+    const delay = expiryDelay(exp, this.renderedStatus);
     if (delay !== null) this.expiryTimer = window.setTimeout(() => this.requestUpdate(), delay);
   }
 
@@ -204,13 +210,26 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
       registerInput(draft.draft, this.operationId),
       null,
     );
+    if (result.kind === "done") return this.registered(source, result.data);
+    // The register may have committed before its answer was lost: the mandate in force tells.
+    const check = await callAction(source, "get_mandate", {}, null);
+    if (check.kind === "done" && registersDraft(check.data, draft))
+      return this.registered(source, check.data);
     this.registering = false;
-    if (result.kind !== "done") {
-      this.registerError = result.kind === "error" ? result.message : null;
-      return;
-    }
-    this.state = { kind: "done", data: result.data };
-    void source.context?.(registeredContext(result.data));
+    const known =
+      check.kind === "done" ||
+      (check.kind === "error" &&
+        (check.message.startsWith("NOT_FOUND:") || isNoCurrentMandate(new Error(check.message))));
+    this.registerError = {
+      message: result.kind === "error" ? result.message : "",
+      unconfirmed: !known,
+    };
+  }
+
+  private registered(source: Source, stored: StoredMandate) {
+    this.registering = false;
+    this.state = { kind: "done", data: stored };
+    void source.context?.(registeredContext(stored));
   }
 
   private header() {
@@ -266,7 +285,8 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
 
   private renderDraft(record: MandateDraft) {
     const text = pick(MANDATE);
-    const current = record.current;
+    const current = inForce(record);
+    this.renderedStatus = record.current === null ? null : effectiveStatus(record.current);
     return html`<article class="card" part="draft">
       ${this.header()}
       <div class="body">
@@ -280,7 +300,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
             ${current === null ? text.draftNoCurrent : text.draftCompare(current.mandate.version)}
           </p>
           <dl>
-            ${draftRows(record).map(
+            ${draftRows({ ...record, current }).map(
               (item) =>
                 html`<div class="row">
                   <dt>${item.label}</dt>
@@ -300,9 +320,13 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
           this.registerError === null
             ? nothing
             : html`<div class="message danger" role="alert" part="register-error">
-                <p class="strong">${text.registerFailedTitle}</p>
-                <p>${this.registerError}</p>
-                <p>${text.registerFailedBody}</p>
+                <p class="strong">
+                  ${this.registerError.unconfirmed ? text.registerUnconfirmedTitle : text.registerFailedTitle}
+                </p>
+                <p>${this.registerError.message}</p>
+                <p>
+                  ${this.registerError.unconfirmed ? text.registerUnconfirmedBody : text.registerFailedBody}
+                </p>
               </div>`
         }
         <div class="actions">

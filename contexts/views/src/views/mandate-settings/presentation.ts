@@ -123,7 +123,39 @@ export function registerInput(draft: DraftMandateRequest, operationId: string) {
   return { ...draft, operationId };
 }
 
-/** What the model learns when the human registers the draft in the view. */
-export function registeredContext({ mandate }: StoredMandate) {
-  return `The human registered mandate ${mandate.mandateId} version ${mandate.version} in the mandate view. Its limits are in force now.`;
+/** The draft's current mandate while it is in force, else null. */
+export function inForce({ current }: MandateDraft, now = Date.now()) {
+  return current !== null && effectiveStatus(current, now) === "active" ? current : null;
+}
+
+/** JSON with sorted keys: stored mandates come back from jsonb in another key order. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (typeof value === "object" && value !== null)
+    return `{${Object.entries(value)
+      .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+      .join(",")}}`;
+  return JSON.stringify(value);
+}
+
+/** True when `stored` is a new active mandate with exactly the draft's terms. */
+export function registersDraft(stored: StoredMandate, draft: MandateDraft, now = Date.now()) {
+  const { mandate } = stored;
+  return (
+    effectiveStatus(stored, now) === "active" &&
+    mandate.mandateId !== draft.current?.mandate.mandateId &&
+    canonical(mandate.limits) === canonical(draft.draft.limits) &&
+    canonical(mandate.standingConstraints) === canonical(draft.draft.standingConstraints) &&
+    (draft.draft.exp === undefined || draft.draft.exp === mandate.exp)
+  );
+}
+
+/** What the model learns when Register in the view answers; a replay can return an inactive mandate. */
+export function registeredContext(stored: StoredMandate, now = Date.now()) {
+  const { mandateId, version } = stored.mandate;
+  const status = effectiveStatus(stored, now);
+  return status === "active"
+    ? `The human registered mandate ${mandateId} version ${version} in the mandate view. Its limits are in force now.`
+    : `The mandate view returned mandate ${mandateId} version ${version}, but it is ${status} and not in force. Call get_mandate for the limits in force.`;
 }

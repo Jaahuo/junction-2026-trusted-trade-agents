@@ -142,16 +142,65 @@ test("push rejects untrusted image references before loading secrets or touching
   for (const image of [
     "",
     `${repo}:latest`,
-    `${repo}:${"A".repeat(40)}`,
-    `${repo}:${"a".repeat(39)}`,
-    `ghcr.io/other/image:${"a".repeat(40)}`,
-    `${repo}@sha256:${"a".repeat(64)}`,
+    `${repo}:${"a".repeat(40)}`,
+    `${repo}@sha256:${"A".repeat(64)}`,
+    `${repo}@sha256:${"a".repeat(63)}`,
+    `ghcr.io/other/image@sha256:${"a".repeat(64)}`,
+    `${repo}@sha256:${"a".repeat(64)};touch /tmp/injected`,
   ]) {
     expect(await failure(push(outputs, { DEPLOY_IMAGE: image }))).toMatch(/DEPLOY_IMAGE/);
   }
-  expect(await failure(push(outputs, { DEPLOY_IMAGE: `${repo}:${"a".repeat(40)}` }))).toMatch(
-    /DEPLOY_REGISTRY_USER/,
-  );
+  expect(
+    await failure(push(outputs, { DEPLOY_IMAGE: `${repo}@sha256:${"a".repeat(64)}` })),
+  ).toMatch(/DEPLOY_REGISTRY_USER/);
+});
+
+test("push uses the exact digest and strict host checking, and stops on a digest mismatch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "deploy-push-"));
+  const previous = { ...process.env };
+  const image = `ghcr.io/jaahuo/junction-2026-trusted-trade-agents@sha256:${"a".repeat(64)}`;
+  const server = Bun.serve({ port: 0, fetch: () => new Response("ok") });
+  try {
+    const log = join(root, "commands");
+    const input = join(root, "input");
+    await writeFile(
+      join(root, "ssh"),
+      '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\ncase "$*" in\n  *"docker image inspect"*) printf "%s\\n" "$FAKE_DIGEST";;\n  *"install -m"*) cat >> "$FAKE_INPUT";;\nesac\n',
+    );
+    await writeFile(join(root, "rsync"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\n');
+    await chmod(join(root, "ssh"), 0o755);
+    await chmod(join(root, "rsync"), 0o755);
+    process.env["PATH"] = `${root}:${previous["PATH"] ?? ""}`;
+    process.env["DEPLOY_ENV"] = keys;
+    process.env["FAKE_LOG"] = log;
+    process.env["FAKE_INPUT"] = input;
+    process.env["FAKE_DIGEST"] = image;
+    const settings = {
+      DEPLOY_IMAGE: image,
+      DEPLOY_REGISTRY_USER: "user",
+      DEPLOY_REGISTRY_TOKEN: "token",
+    };
+    const localOutputs = { ...outputs, public_base_url: `http://127.0.0.1:${server.port}` };
+    await push(localOutputs, settings);
+    const commands = await readFile(log, "utf8");
+    expect(commands).toContain(`docker pull '${image}'`);
+    expect(commands).toContain("StrictHostKeyChecking=yes");
+    expect(commands).not.toContain("StrictHostKeyChecking=accept-new");
+    expect(await readFile(input, "utf8")).toContain(`TRUSTED_TRADE_IMAGE="${image}"`);
+
+    await writeFile(log, "");
+    process.env["FAKE_DIGEST"] =
+      `ghcr.io/jaahuo/junction-2026-trusted-trade-agents@sha256:${"b".repeat(64)}`;
+    expect(await failure(push(localOutputs, settings))).toMatch(/requested repository digest/);
+    expect(await readFile(log, "utf8")).not.toContain("systemctl stop trusted-trade");
+  } finally {
+    await server.stop();
+    for (const name of ["PATH", "DEPLOY_ENV", "FAKE_LOG", "FAKE_INPUT", "FAKE_DIGEST"]) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("data transfer sends files to the literal remote data directory", async () => {

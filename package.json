@@ -49,6 +49,11 @@
     "db:reset": "bun apps/api/src/reset.ts",
     "prepare": "vp config --no-agent"
   },
+  "dependencies": {
+    "exact-mirror": "1.2.7",
+    "openapi-types": "12.1.3",
+    "typebox": "1.4.6"
+  },
   "devDependencies": {
     "@app/contract": "workspace:*",
     "@shadcn/lint": "^0.2.5",

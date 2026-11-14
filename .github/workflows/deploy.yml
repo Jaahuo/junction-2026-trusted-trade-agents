@@ -5,107 +5,192 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-permissions:
-  contents: read
-  actions: read
-  packages: write
+permissions: {}
 jobs:
-  deploy:
-    name: deploy
+  target:
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push')
-    # Job-level, so a run that the condition above skips, such as a failed gate, never takes the pending slot.
+      github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.select.outputs.sha }}
+      run_id: ${{ steps.select.outputs.run_id }}
+      attempt: ${{ steps.select.outputs.attempt }}
+    steps:
+      - name: Select latest successful gate for current main
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          run=$(gh api --paginate "repos/$REPO/actions/workflows/gate.yml/runs?head_sha=$sha&event=push&status=success&per_page=100" \
+            | jq -sc --arg sha "$sha" --arg repo "$REPO" '[.[].workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .conclusion == "success" and .path == ".github/workflows/gate.yml" and .repository.full_name == $repo and .head_repository.full_name == $repo)] | sort_by(.created_at, .id) | last // empty')
+          [ -n "$run" ] || { echo "No successful push gate for current main" >&2; exit 1; }
+          id=$(jq -er '.id | tostring | select(test("^[1-9][0-9]*$"))' <<< "$run")
+          attempt=$(jq -er '.run_attempt | tostring | select(test("^[1-9][0-9]*$"))' <<< "$run")
+          printf 'sha=%s\nrun_id=%s\nattempt=%s\n' "$sha" "$id" "$attempt" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: target
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    env:
+      SHA: ${{ needs.target.outputs.sha }}
+      RUN_ID: ${{ needs.target.outputs.run_id }}
+      ATTEMPT: ${{ needs.target.outputs.attempt }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+          persist-credentials: false
+      - name: Start deployment evidence
+        run: |
+          mkdir -p deployment-evidence
+          printf 'sourceSha=%s\ngateRunId=%s\ngateRunAttempt=%s\n' "$SHA" "$RUN_ID" "$ATTEMPT" > deployment-evidence/identity.txt
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: delivery-${{ needs.target.outputs.sha }}-${{ needs.target.outputs.attempt }}
+          path: evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.target.outputs.run_id }}
+      - name: Validate scanned image evidence
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ && "$RUN_ID" =~ ^[1-9][0-9]*$ && "$ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          cd evidence
+          printf '%s\n' image-scan.json image.tar manifest.json sbom.cdx.json > /tmp/expected-files
+          awk 'NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || $2 !~ /^(image\.tar|image-scan\.json|manifest\.json|sbom\.cdx\.json)$/ { exit 1 } { print $2 }' SHA256SUMS | sort > /tmp/checksum-files
+          diff -u /tmp/expected-files /tmp/checksum-files
+          sha256sum --check --strict SHA256SUMS
+          lock=$(sha256sum ../bun.lock | cut -d ' ' -f 1)
+          jq -e --arg sha "$SHA" --arg id "$RUN_ID" --arg attempt "$ATTEMPT" --arg lock "$lock" '
+            type == "object" and .schemaVersion == 1 and .sourceSha == $sha and
+            .gateRunId == $id and .gateRunAttempt == $attempt and .lockfileSha256 == $lock and
+            (.imageId | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+            (.scannerVersion | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+          ' manifest.json > /dev/null
+          cp SHA256SUMS ../deployment-evidence/artifact-SHA256SUMS
+          docker load --input image.tar
+          expected=$(jq -er .imageId manifest.json)
+          actual=$(docker image inspect "gate-image:$SHA" --format '{{.Id}}')
+          [ "$actual" = "$expected" ]
+      - name: Publish verified image
+        id: publish
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          repository=jaahuo/junction-2026-trusted-trade-agents
+          tag="$SHA-$RUN_ID-$ATTEMPT"
+          image="ghcr.io/$repository:$tag"
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d)
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
+          docker tag "gate-image:$SHA" "$image"
+          docker push "$image"
+          token=$(curl --fail --silent --show-error --user "$REGISTRY_USER:$GH_TOKEN" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:$repository:pull" | jq -er .token)
+          curl --fail --silent --show-error -D /tmp/manifest-headers -o /tmp/manifest.json \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/$repository/manifests/$tag"
+          digest=$(awk 'BEGIN { IGNORECASE=1 } tolower($1) == "docker-content-digest:" { gsub("\r", "", $2); print $2 }' /tmp/manifest-headers)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [ "sha256:$(sha256sum /tmp/manifest.json | cut -d ' ' -f 1)" = "$digest" ]
+          [ "$(jq -er '.config.digest' /tmp/manifest.json)" = "$(jq -er .imageId evidence/manifest.json)" ]
+          pinned="ghcr.io/$repository@$digest"
+          printf 'image=%s\n' "$pinned" >> "$GITHUB_OUTPUT"
+          printf 'image=%s\n' "$pinned" >> deployment-evidence/identity.txt
+      - name: Retain deployment evidence
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: deployment-${{ github.run_id }}-${{ github.run_attempt }}
+          path: deployment-evidence
+          retention-days: 90
+          if-no-files-found: error
+
+  deploy:
+    needs: [target, publish]
     concurrency:
       group: deploy-production
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
+    permissions:
+      contents: read
+      packages: read
     env:
-      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ needs.target.outputs.sha }}
       REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      # Every run deploys the current main head once its push gate passed, whatever commit triggered it.
-      # A late gate, a rerun or a manual run never rolls back, and a pending run that the concurrency
-      # group replaces loses nothing: the run that executes deploys the latest gated head.
-      - name: Choose the gated main head
-        id: target
-        env:
-          CONFIGURED: ${{ secrets.DEPLOY_OUTPUTS != '' && secrets.DEPLOY_ENV != '' && secrets.DEPLOY_SSH_KEY != '' }}
-        run: |
-          sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
-          gated=$(gh api "repos/$REPO/actions/workflows/gate.yml/runs?head_sha=$sha&event=push&status=success&per_page=1" --jq .total_count)
-          if [ "$CONFIGURED" != "true" ]; then
-            reason="deploy secrets are not set; see docs/deploy.md"
-          elif [ "$gated" = "0" ]; then
-            reason="$sha has no successful push gate run"
-          fi
-          if [ -n "${reason:-}" ]; then
-            echo "Skipped: $reason." >> "$GITHUB_STEP_SUMMARY"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Deploying $sha." >> "$GITHUB_STEP_SUMMARY"
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: actions/checkout@v5
-        if: steps.target.outputs.ready == 'true'
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ steps.target.outputs.sha }}
-      - uses: jdx/mise-action@v5
-        if: steps.target.outputs.ready == 'true'
-      - if: steps.target.outputs.ready == 'true'
-        run: bun install --frozen-lockfile
-      - name: Reuse or publish the selected image
-        if: steps.target.outputs.ready == 'true'
+          ref: ${{ needs.target.outputs.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
+      - run: bun install --frozen-lockfile
+      - name: Deploy verified digest
+        id: deploy
         env:
-          SHA: ${{ steps.target.outputs.sha }}
-          REGISTRY_USER: ${{ github.actor }}
-        run: |
-          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid selected SHA" >&2; exit 1; }
-          repository=jaahuo/junction-2026-trusted-trade-agents
-          image="ghcr.io/$repository:$SHA"
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
-          token=$(curl --fail --silent --show-error --user "$REGISTRY_USER:$GH_TOKEN" \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:$repository:pull" | jq -er .token)
-          response=$(mktemp)
-          trap 'rm -f "$response"' EXIT
-          status=$(curl --silent --show-error -o "$response" -w '%{http_code}' \
-            -H "Authorization: Bearer $token" \
-            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
-            "https://ghcr.io/v2/$repository/manifests/$SHA")
-          if [ "$status" = 200 ]; then
-            echo "Reusing $image"
-          elif [ "$status" = 404 ] && jq -e 'any(.errors[]?; .code == "MANIFEST_UNKNOWN")' "$response" > /dev/null; then
-            docker buildx build --platform linux/amd64 \
-              --label "org.opencontainers.image.source=https://github.com/jaahuo/junction-2026-trusted-trade-agents" \
-              --label "org.opencontainers.image.revision=$SHA" \
-              --tag "$image" --push .
-          else
-            echo "Registry manifest lookup failed (HTTP $status)" >&2
-            cat "$response" >&2
-            exit 1
-          fi
-      - name: Push to the hosted demo
-        if: steps.target.outputs.ready == 'true'
-        env:
-          SHA: ${{ steps.target.outputs.sha }}
           DEPLOY_OUTPUTS: ${{ secrets.DEPLOY_OUTPUTS }}
           DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          DEPLOY_IMAGE: ghcr.io/jaahuo/junction-2026-trusted-trade-agents:${{ steps.target.outputs.sha }}
+          DEPLOY_IMAGE: ${{ needs.publish.outputs.image }}
           DEPLOY_REGISTRY_USER: ${{ github.actor }}
           DEPLOY_REGISTRY_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          [ -n "$DEPLOY_OUTPUTS" ] && [ -n "$DEPLOY_ENV" ] && [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ] || { echo "Deployment secrets and known hosts are required" >&2; exit 1; }
           install -d -m 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           if [ "$(gh api "repos/$REPO/commits/main" --jq .sha)" != "$SHA" ]; then
-            echo "Skipped: main moved past $SHA; the newer run deploys." >> "$GITHUB_STEP_SUMMARY"
+            echo "Skipped: main moved past $SHA." >> "$GITHUB_STEP_SUMMARY"
+            echo 'status=skipped-main-moved' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           bun scripts/deploy.ts push
+          echo 'status=healthy' >> "$GITHUB_OUTPUT"
+      - name: Record deployment result
+        if: always()
+        env:
+          RUN_ID: ${{ needs.target.outputs.run_id }}
+          ATTEMPT: ${{ needs.target.outputs.attempt }}
+          IMAGE: ${{ needs.publish.outputs.image }}
+          OUTCOME: ${{ steps.deploy.outcome }}
+          STATUS: ${{ steps.deploy.outputs.status }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/deploy-result"
+          printf 'sourceSha=%s\ngateRunId=%s\ngateRunAttempt=%s\nimage=%s\nstepOutcome=%s\nstatus=%s\n' \
+            "$SHA" "$RUN_ID" "$ATTEMPT" "$IMAGE" "$OUTCOME" "${STATUS:-not-healthy}" > "$RUNNER_TEMP/deploy-result/result.txt"
+      - name: Retain deployment result
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: deployment-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/deploy-result
+          retention-days: 90
+          if-no-files-found: error

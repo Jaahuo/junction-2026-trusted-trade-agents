@@ -89,7 +89,7 @@ export const renderEnvFile = (values: ReadonlyMap<string, string>): string =>
 export const renderCaddyfile = (outputs: Outputs): string =>
   `${outputs.hostname} {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:${outputs.app_port}\n}\n`;
 
-const SSH = ["-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"];
+const SSH = ["-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes"];
 
 /** Parses `tofu output -json`; CI passes the same JSON in DEPLOY_OUTPUTS because it has no state. */
 export const parseOutputs = (json: string): Outputs => {
@@ -198,10 +198,8 @@ export const push = async (
   settings: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<void> => {
   const image = settings["DEPLOY_IMAGE"] ?? "";
-  if (!new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}:[0-9a-f]{40}$`).test(image))
-    throw new Error(
-      "DEPLOY_IMAGE must be the trusted GHCR repository tagged with a full lowercase SHA",
-    );
+  if (!new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}$`).test(image))
+    throw new Error("DEPLOY_IMAGE must be the trusted GHCR repository pinned by sha256 digest");
   const user = settings["DEPLOY_REGISTRY_USER"] ?? "";
   const token = settings["DEPLOY_REGISTRY_TOKEN"] ?? "";
   if (!user || !token || /[\r\n]/.test(user) || /[\r\n]/.test(token))
@@ -221,18 +219,14 @@ docker pull ${shellQuote(image)} >&2
 docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${shellQuote(image)}
 `;
   const digests = await $`ssh ${SSH} ${host} ${pull} < ${new Response(token)}`.text();
-  const digest = digests
-    .split("\n")
-    .find((line) =>
-      new RegExp(`^${IMAGE_REPOSITORY.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}$`).test(line),
-    );
-  if (!digest) throw new Error("Pulled image has no trusted repository digest");
+  if (!digests.split("\n").includes(image))
+    throw new Error("Pulled image does not contain the requested repository digest");
   const remoteShell = `ssh ${SSH.join(" ")}`;
   if (existsSync("data")) await transferData("data/", host, outputs.app_dir, remoteShell);
   await $`ssh ${SSH} ${host} systemctl stop trusted-trade`;
   await $`ssh ${SSH} ${host} ${`chown -R 1000:1000 ${dir}/data && chmod -R u+rX ${dir}/data`}`;
   await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
-  await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${digest}"\n`)}`;
+  await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-image.env < ${new Response(`TRUSTED_TRADE_IMAGE="${image}"\n`)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade.service < ${new Response(unit)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs))}`;
   // The Vultr Ubuntu image enables ufw with only SSH open.

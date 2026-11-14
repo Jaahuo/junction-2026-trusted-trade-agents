@@ -122,6 +122,7 @@ Run these from the worktree that serves the demo, in order:
    Each run starts with `bun run db:reset`, so repeated runs never use up the credit limit.
    Each step prints `ok <step>`; a failure prints `FAIL step <step>` with the HTTP status and error code, and exits 1.
    The run leaves a placed order, so run `bun run db:reset` once more before you record.
+   Wait a few seconds between smoke scripts and before the first chat request to avoid upstream rate limits.
 
 ### Smoke script options
 
@@ -164,7 +165,7 @@ The chat check sends the demo sentences to the Buyer agent in Open WebUI through
 
 The check needs Google Chrome.
 It stops before the first sentence when the server, its MCP endpoint, the host or the model endpoint is down, or when Open WebUI is connected to another server.
-The [`chat-check` skill](../.agents/skills/chat-check/SKILL.md) explains each failure line and how to add a scenario.
+The [`verify` skill](../.agents/skills/verify/SKILL.md) explains each failure line and how to add a scenario.
 
 ## Restart check
 

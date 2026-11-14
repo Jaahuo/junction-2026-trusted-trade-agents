@@ -567,6 +567,27 @@ Failure paths: `validate` unreachable → 502 `UPSTREAM_FAILED`; on `place_order
 
 Verification: parallel tests: 10 calls with one idempotency key; two orders that together exceed credit, on both entry paths (approve vs approve, approve vs automatic).
 
+### Peppol/UBL status mapping
+
+This table is a conceptual mapping, not an implemented integration. A [Peppol Order Response](https://docs.peppol.eu/poacc/upgrade-3/profiles/28-ordering/) is a seller's response to a buyer's order. The internal status instead records this application's approval and placement process. It does not establish that a seller received or responded to an order.
+
+The codes below are from the [Peppol subset of UN/CEFACT 4343 for UBL Order Response](https://docs.peppol.eu/poacc/upgrade-3/2025-Q4/codelist/UNCL4343-T76/). A code applies only when the corresponding seller response exists; an internal status alone cannot produce one.
+
+| Internal status or decision          | Potential Peppol response                                                       | Boundary                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `pending_approval`                   | No response inferred. `AB` means message acknowledgement, not acceptance.       | Internal approval does not prove seller receipt.                                                |
+| `awaiting_payment`                   | No response inferred. `AB` is possible only if the seller acknowledged receipt. | Waiting for payment is not seller acceptance.                                                   |
+| `placed`                             | `AP` only if the seller accepts the order.                                      | Internal placement does not prove seller acceptance.                                            |
+| `rejected`                           | `RE` only if the seller rejects the order.                                      | An internal rule, credit, or payment rejection is not a seller response.                        |
+| `declined` with `next: stop`         | No response inferred; `RE` requires seller rejection.                           | The approver rejected the proposal and chose to stop.                                           |
+| `declined` with `next: alternatives` | No response inferred; `RE` requires seller rejection.                           | The approver rejected the proposal and allowed alternatives; this is not a seller substitution. |
+
+`CA` means conditional acceptance. Peppol requires order lines for `CA`; see the [response code rules](https://docs.peppol.eu/poacc/upgrade-3/2025-Q4/syntax/OrderResponse/cbc-OrderResponseCode/). A seller substitution can use [`cac:SellerSubstitutedLineItem`](https://docs.peppol.eu/poacc/upgrade-3/2025-Q4/syntax/OrderResponse/cac-OrderLine/cac-SellerSubstitutedLineItem/). This application does not implement conditional seller responses or line response statuses. Its alternative offers do not represent a seller's substituted line.
+
+The [status and line schemas](../packages/contract/src/orders.ts#L6-L11) define the internal states and [order lines](../packages/contract/src/orders.ts#L40-L45). [Order creation](../contexts/orders/src/application/orders.ts#L167-L203) records alternatives and initial status. [Placement](../contexts/orders/src/application/commit-placement.ts#L1-L84) can reject or place an order. [Approval decisions](../contexts/orders/src/application/approvals.ts#L95-L123) record `stop` or `alternatives` on a decline; only approve and reject are implemented.
+
+The application has no UBL XML serializer or Peppol transport, and does not implement participant location numbers or certified Peppol interoperability. This mapping does not claim conformance or network connectivity.
+
 ## SPEC-011 Approval decisions and re-quote
 
 PRD: [Approval card](prd.md#approval-card), [Offer expires while the order waits](prd.md#offer-expires-while-the-order-waits).

@@ -1,6 +1,7 @@
 import { selfBaseUrl } from "@app/server-kit";
 import { type CatalogDeps, lazyCatalog } from "../application/catalog.ts";
 import { createCatalog } from "../domain/catalog.ts";
+import { offersAvailability } from "../infra/availability-client.ts";
 import { edenMandateSource } from "../infra/mandate-client.ts";
 import { defaultDataDir, loadProductFile } from "../infra/product-file.ts";
 
@@ -11,4 +12,5 @@ const fileCatalog = lazyCatalog(async () => createCatalog(await loadProductFile(
 export const catalogAdapters = (): CatalogDeps => ({
   catalog: fileCatalog,
   mandates: edenMandateSource(() => `${selfBaseUrl()}/api`),
+  availability: offersAvailability,
 });

@@ -110,7 +110,7 @@ test("MODEL_TOOLS, VIEW_TOOLS, PAYMENT_TERMS, ORDER_STATUSES, reason lists, AUDI
   same(REJECT_REASONS, specList("REJECT_REASONS"));
   same(AUDIT_EVENTS, specList("AUDIT_EVENTS"));
   const table = routeTable();
-  expect(table).toHaveLength(17);
+  expect(table).toHaveLength(18);
   same(
     ROUTES.map(({ key, tool, method, path, context, output }) => ({
       key,

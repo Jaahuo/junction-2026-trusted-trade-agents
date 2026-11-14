@@ -8,7 +8,7 @@ export const DEMO_ACCOUNT: Account = {
   customer: "cust_invoice_01",
   agentId: "agent_demo",
   paymentTerms: "invoice",
-  creditLimit: 5000,
+  creditLimit: null,
 };
 
 const ScenarioProductSchema = z.strictObject({ productId: z.string(), quantity: QuantitySchema });

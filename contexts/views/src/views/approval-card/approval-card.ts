@@ -1264,24 +1264,22 @@ export class ApprovalCard extends LitElement {
       <button type="button" class="btn secondary" @click=${() => this.ask(prompt)}>
         ${icon(agent16)}${label}
       </button>
-      ${
-        chips.length === 0
-          ? nothing
-          : html`<p class="label-small secondary">${pick(CARD).orTellIt}</p>
-              <div class="chips">
-                ${chips.map(
-                  (chip) =>
-                    html`<button
-                      type="button"
-                      class="chip"
-                      @click=${() => this.ask(`${prompt} ${chip}.`)}
-                    >
-                      ${icon(agent16)}${chip}
-                    </button>`,
-                )}
-              </div>`
-      }
+      ${this.agentChips(prompt, chips)}
     </div>`;
+  }
+
+  /** "Or tell it what to do:" and a chip per option; each sends the prompt with the chip. */
+  private agentChips(prompt: string, chips: string[]) {
+    if (!this.canAsk || chips.length === 0) return nothing;
+    return html`<p class="label-small secondary">${pick(CARD).orTellIt}</p>
+      <div class="chips">
+        ${chips.map(
+          (chip) =>
+            html`<button type="button" class="chip" @click=${() => this.ask(`${prompt} ${chip}.`)}>
+              ${icon(agent16)}${chip}
+            </button>`,
+        )}
+      </div>`;
   }
 
   /** Sends a message to the agent; `tt-ask-agent` collapses the card while the agent works. */
@@ -1351,6 +1349,11 @@ export class ApprovalCard extends LitElement {
         ${icon(agent16)}${text.reduceToFit}
       </button>
       ${note === null ? nothing : html`<p class="body-small" role="status">${note}</p>`}
+      ${
+        (this.overLimit(order) ?? 0) > 0
+          ? this.agentChips(text.reducePrompt(order.orderId), text.reduceChips)
+          : nothing
+      }
     </div>`;
   }
 

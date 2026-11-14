@@ -57,6 +57,8 @@ const toOrder = (
 export interface ApiDeps extends ApprovalDeps {
   /** Read on every response, so a new PUBLIC_BASE_URL applies to orders already stored. */
   publicBaseUrl: () => string;
+  /** The account a request acts as; tests set one with its own credit limit. */
+  principal: (request: Request) => Promise<Principal>;
 }
 
 const REFUSAL_STATUS = {
@@ -103,6 +105,7 @@ const defaultDeps = (db: Db): ApiDeps => {
     signReceipt: envReceiptSigner,
     now: () => new Date(),
     publicBaseUrl,
+    principal: principalFrom,
   };
 };
 
@@ -136,14 +139,14 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
         response: { 200: OrderSchema, 201: OrderSchema, ...refused },
       },
       async ({ body, request, status }) => {
-        const result = await placeOrder(deps, await principalFrom(request), body);
+        const result = await placeOrder(deps, await deps.principal(request), body);
         if (!result.ok) return status(REFUSAL_STATUS[result.error.code], envelope(result.error));
         const order = toOrder(result.value.order, deps.publicBaseUrl);
         return result.value.created ? status(201, order) : order;
       },
     )
     .get("/pending", { response: { 200: PendingListSchema } }, async ({ request }) => {
-      const principal = await principalFrom(request);
+      const principal = await deps.principal(request);
       try {
         await runCutoffJob(deps, principal.customer);
       } catch (error) {
@@ -160,7 +163,7 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
       "/precheck",
       { body: PrecheckRequestSchema, response: { 200: PrecheckSchema, ...refused } },
       async ({ body, request, status }) => {
-        const result = await precheck(deps, await principalFrom(request), body.offers);
+        const result = await precheck(deps, await deps.principal(request), body.offers);
         return result.ok
           ? result.value
           : status(REFUSAL_STATUS[result.error.code], envelope(result.error));
@@ -170,7 +173,7 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
       "/:orderId",
       { params: OrderRefSchema, response: { 200: OrderSchema, 404: ErrorEnvelopeSchema } },
       async ({ params, request, status }) => {
-        const order = await findOrder(deps.store, await principalFrom(request), params.orderId);
+        const order = await findOrder(deps.store, await deps.principal(request), params.orderId);
         return order === null
           ? status(404, { error: { code: "NOT_FOUND" as const, message: "No such order." } })
           : toOrder(order, deps.publicBaseUrl);
@@ -191,7 +194,7 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
         },
       },
       async ({ body, params, request, status }) => {
-        const result = await decide(deps, await principalFrom(request), params.orderId, body);
+        const result = await decide(deps, await deps.principal(request), params.orderId, body);
         return result.ok
           ? toOrder(result.value, deps.publicBaseUrl)
           : status(DECISION_STATUS[result.error.code], envelope(result.error));

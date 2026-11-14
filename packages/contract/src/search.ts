@@ -147,6 +147,13 @@ export const SearchResultSchema = z.strictObject({
   candidates: z.array(SearchCandidateSchema).max(20),
   constraints: ConstraintsSchema,
   mandate: z.strictObject({ id: z.string(), version: z.number().int() }).nullable(),
+  /**
+   * `checked: true`: every candidate can be delivered on or before `deliverBy`, and `dropped` ranked
+   * matches were left out because they cannot. `checked: false`: live availability was not read.
+   */
+  availability: z
+    .strictObject({ checked: z.boolean(), dropped: z.number().int().min(0) })
+    .optional(),
 });
 export type SearchResult = z.infer<typeof SearchResultSchema>;
 

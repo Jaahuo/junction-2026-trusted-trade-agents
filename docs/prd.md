@@ -112,7 +112,7 @@ Three roles exist. Through the MCP tools, the agent can never approve its own or
 
 **Demo access**
 
-- The first build has one seeded demo account: the invoice customer with a credit limit and one agent.
+- The first build has one seeded demo account: the invoice customer without a credit check and one agent.
 - It has no authentication on REST or MCP. Every request acts as the demo account.
 - Approver actions are tools that only a view calls. The model does not see them, so the agent cannot approve. A person approves on the approval card or the approval page.
 - Anyone who reaches the demo URL can open the approval page and call the REST API, including decisions. The README says so.
@@ -502,7 +502,7 @@ Judging weights: working end-to-end demo 30%, solving the user's need 20%, auton
 
 A missed cut-off with a later delivery date is the backup clip.
 
-Proposed: a rogue-agent clip after the scenarios. A chat jailbreak asks the agent to ignore its limits, and the order still goes to approval. A script then sends a changed offer, a reused offer token, an expired offer, an order over the credit limit and an order past the cut-off, and each ends with its reason code. Self-approval and order splitting stay out, because the first build does not stop them.
+Proposed: a rogue-agent clip after the scenarios. A chat jailbreak asks the agent to ignore its limits, and the order still goes to approval. A script then sends a changed offer, a reused offer token, an expired offer and an order past the cut-off, and each ends with its reason code. Self-approval and order splitting stay out, because the first build does not stop them.
 
 The mock returns real dates. The demo sentence must name a deliver-by date after the run day, before that date's cut-off.
 

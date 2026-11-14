@@ -12,6 +12,8 @@ import {
   ORDER_STATUS_LABELS,
 } from "@app/ui/format";
 import type { TemplateResult } from "lit";
+import { CARD } from "../approval-card/card-strings.ts";
+import { money, orderName } from "../approval-card/parts.ts";
 import { renderOrderTimeline } from "./order-timeline.ts";
 
 const fixtures = resolve(import.meta.dir, "../../../fixtures/order-timeline");
@@ -146,7 +148,6 @@ test("summary uses shared order labels, totals and line formatting", async () =>
   for (const name of ["pending", "placed", "requoted"]) {
     const order = OrderSchema.parse(await fixture(name));
     const output = visible(renderOrderTimeline(order));
-    expect(output).toContain(ORDER_STATUS_LABELS[order.status]);
     expect(output).toContain(formatMoney(order.total.gross, "EUR", "gross"));
     for (const { claims } of order.lines) {
       expect(output).toContain(claims.product.name);
@@ -188,4 +189,26 @@ test("the order log shows the audit integrity per log and per entry (#74)", asyn
   const plain = visible(renderOrderTimeline(OrderSchema.parse(await fixture("placed"))));
   expect(plain).not.toContain("Log intact");
   expect(plain).not.toContain("doesn’t match its signature");
+});
+
+test("the timeline opens with the approval card's order header in every state", async () => {
+  const states = [
+    ["pending", CARD.en.approvalRequired],
+    ["placed", CARD.en.approved],
+    ["declined", ORDER_STATUS_LABELS.declined],
+    ["rejected", ORDER_STATUS_LABELS.rejected],
+  ] as const;
+  for (const [name, label] of states) {
+    const order = OrderSchema.parse(await fixture(name));
+    const output = visible(renderOrderTimeline(order));
+    const header = output.slice(0, output.indexOf(" Products ") + 12);
+    expect(header).toContain(label);
+    expect(header).toContain(orderName(order));
+    expect(header).toContain(`${money(order.total.net)} excl. VAT`);
+    expect(header).toContain(`Order no. ${formatOrderNumber(order.orderId)}`);
+    expect(header).toContain(`Products ${order.lines.length}`);
+  }
+  const placed = OrderSchema.parse(await fixture("placed"));
+  const waiting = visible(renderOrderTimeline({ ...placed, status: "awaiting_payment" }));
+  expect(waiting).toContain(CARD.en.approvedWaiting);
 });

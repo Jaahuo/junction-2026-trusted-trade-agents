@@ -1,9 +1,12 @@
 import type { OfferClaims, Order } from "@app/contract";
 import { brand } from "@app/ui/brand";
+import { formatOrderNumber, ORDER_WORDING } from "@app/ui/format";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import attention16 from "../../shared/icons/attention-16.svg?raw";
-import { intlLocale, pick } from "../../shared/locale.ts";
+import { intlLocale, lang, pick } from "../../shared/locale.ts";
+import { CARD } from "./card-strings.ts";
+import { productImage } from "./images.ts";
 import { PARTS, VIEW } from "./strings.ts";
 
 // Parts that the card and the view share: the petrol header, the card frame and
@@ -89,12 +92,46 @@ export const brandHeader = (
     ${title ?? nothing} ${facts ?? nothing}
   </header>`;
 
+/** A product's 48 px (or 40 px in a choice) image tile; nothing when it has no image. */
+export const thumb = (name: string, size: "line" | "small" = "line") => {
+  const src = productImage(name);
+  return src === null
+    ? nothing
+    : html`<span class="thumb ${size}"><img src=${src} alt="" /></span>`;
+};
+
 /** One labelled data point; `wrap` lets a long value (a real product name) break lines. */
-export const fact = (label: string, value: string, wrap = false) =>
+const fact = (label: string, value: string, wrap = false) =>
   html`<div class="fact ${wrap ? "wrap" : ""}">
     <dt class="label-small">${label}</dt>
     <dd>${value}</dd>
   </div>`;
+
+/** The header's word for a decided or waiting order: "Approved", "Declined", "Approval required". */
+export const orderStateLabel = (order: Order) => {
+  const text = pick(CARD);
+  if (order.status === "placed") return text.approved;
+  if (order.status === "awaiting_payment") return text.approvedWaiting;
+  if (order.status === "pending_approval") return text.approvalRequired;
+  return ORDER_WORDING[lang()].statuses[order.status];
+};
+
+/**
+ * The order header of the card and the timeline (v16): the state, the order named by its
+ * delivery day, the net total, and the order number and product count.
+ */
+export const orderHeader = (order: Order, eyebrow: string, net: number, pill: boolean) => {
+  const text = pick(CARD);
+  const title = html`<div class="headline">
+    <h2 class="name">${orderName(order)}</h2>
+    <p aria-live="polite">${money(net)}<span class="vat">${vat("net")}</span></p>
+  </div>`;
+  const facts = html`<dl class="facts">
+    ${fact(text.orderNo, formatOrderNumber(order.orderId))}
+    ${fact(text.products, String(order.lines.length))}
+  </dl>`;
+  return brandHeader(eyebrow, title, facts, pill);
+};
 
 export const rows = (entries: [string, string | null][]) => {
   const shown = entries.filter((r): r is [string, string] => r[1] !== null);
@@ -190,6 +227,31 @@ export const cardStyles = css`
   }
   .header .fact dt {
     color: var(--color-text-on-brand-subtle);
+  }
+  .thumb {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    overflow: hidden;
+    border-radius: 6px;
+  }
+  .thumb.small {
+    width: 40px;
+    height: 40px;
+  }
+  .thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scale(1.5);
+  }
+  .section-title {
+    color: var(--color-heading);
+    font-family: var(--font-family-condensed);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.1;
   }
   .body {
     display: flex;

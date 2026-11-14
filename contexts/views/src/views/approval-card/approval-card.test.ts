@@ -86,6 +86,77 @@ test("a line with a shortfall gets a to-do naming what arrives, linked to its ch
   expect(reasonSummaries(order)).toEqual([text.notAllOnTime(c.product.name)]);
 });
 
+/** pending-partial with a substitute in the order that covers the butter's missing 8 kg. */
+const toppedUp = () => {
+  const order = OrderSchema.parse(pendingPartial);
+  const short = firstClaims(order);
+  const [line] = order.lines;
+  if (line === undefined) throw new Error("Expected the short line");
+  const claims = {
+    ...short,
+    offerId: "off_test_topup",
+    productId: "prod_test_topup",
+    product: {
+      ...short.product,
+      name: "Test butter 250 g",
+      perSalesUnit: { value: 0.25, unit: "KGM" },
+    },
+    quantity: { value: 32, unit: "CT" },
+    total: { net: 60, gross: 68.4 },
+    shortfall: null,
+    replaces: short.productId,
+  };
+  order.lines.push({ ...line, offerId: claims.offerId, claims });
+  order.offerIds.push(claims.offerId);
+  order.reasons.push("SUBSTITUTION");
+  return { order, short };
+};
+
+test("a substitute that tops up a short line is one of its choices, not an out-of-stock product", () => {
+  const text = pick(CARD);
+  const { order, short } = toppedUp();
+  const shown = markup(cardFor(order).card.render());
+
+  expect(shown).toContain(text.howToHandle(text.packs("16")));
+  expect(shown).toContain(text.topUpWith("Test butter 250 g"));
+  expect(shown).toContain(text.otherChoices(3));
+  expect(shown).not.toContain(text.replaceWith);
+  expect(shown).not.toContain(text.chooseReplacement);
+  expect(shown).not.toContain('id="line-off_test_topup"');
+  expect(reasonSummaries(order)).toEqual([text.notAllOnTime(short.product.name)]);
+});
+
+test("the top-up is approved as it is; Order fewer drops it from the order", () => {
+  const { order, short } = toppedUp();
+  const approving = cardFor(order);
+  click(approving.card, 'part="button approve"');
+  expect(approving.sent).toEqual([
+    { type: "tt-decide", detail: { decision: "approve", proposalVersion: order.proposalVersion } },
+  ]);
+
+  const fewer = cardFor(order);
+  const more = clickHandler(fewer.card.render(), 'class="more-products"');
+  if (more === undefined) throw new Error("the short line shows its other choices");
+  more();
+  // Top up, split, all later, then Order fewer.
+  const radios = handlers(fewer.card.render(), 'name="handling-', "@change=");
+  radios[3]?.();
+  click(fewer.card, 'part="button approve"');
+  expect(fewer.sent).toEqual([
+    {
+      type: "tt-decide",
+      detail: {
+        decision: "edit",
+        proposalVersion: order.proposalVersion,
+        changes: [
+          { productId: "prod_test_topup", quantity: { value: 0, unit: "CT" } },
+          { productId: short.productId, quantity: { value: 24, unit: "CT" } },
+        ],
+      },
+    },
+  ]);
+});
+
 test("a late line with no shortfall is flagged with the same choices as a short line", () => {
   const text = pick(CARD);
   const order = OrderSchema.parse(pendingLate);
@@ -124,7 +195,6 @@ test("a late line's choices send approve, remove or the agent prompt", () => {
 
   const approving = cardFor(order);
   click(approving.card, 'part="button approve"');
-  click(approving.card, 'part="button approve-confirm"');
   expect(approving.sent).toEqual([
     { type: "tt-decide", detail: { decision: "approve", proposalVersion: order.proposalVersion } },
   ]);
@@ -138,7 +208,6 @@ test("a late line's choices send approve, remove or the agent prompt", () => {
   if (removeRadio === undefined) throw new Error("the late line offers removal");
   removeRadio();
   click(removing.card, 'part="button approve"');
-  click(removing.card, 'part="button approve-confirm"');
   expect(removing.sent).toEqual([
     {
       type: "tt-decide",
@@ -195,38 +264,26 @@ test("each total says whether it includes VAT; the limit compares the gross tota
   expect(text).toContain("Order total excl. VAT");
 });
 
-test("approve asks with the gross total and sends only after the second click", () => {
+test("one click approves", () => {
   const { card, sent } = cardFor(pending);
-  const order = OrderSchema.parse(pending);
   click(card, 'part="button approve"');
-  expect(sent).toEqual([]);
-  expect(visible(card)).toContain(`Approve order of ${money(order.total.gross)} incl. VAT?`);
-  click(card, 'part="button cancel"');
-  expect(visible(card)).not.toContain("Approve order of");
-  click(card, 'part="button approve"');
-  click(card, 'part="button approve-confirm"');
   expect(sent).toEqual([
-    { type: "tt-decide", detail: { decision: "approve", proposalVersion: order.proposalVersion } },
+    {
+      type: "tt-decide",
+      detail: { decision: "approve", proposalVersion: card.order?.proposalVersion },
+    },
   ]);
 });
 
-test("reject asks first, then stops or lets the agent look for alternatives", () => {
-  for (const next of ["stop", "alternatives"] as const) {
-    const { card, sent } = cardFor(pending);
-    click(card, 'part="button reject"');
-    expect(sent).toEqual([]);
-    const text = visible(card);
-    expect(text).toContain("Reject this order?");
-    expect(text).toContain("Reject and stop");
-    expect(text).toContain("Reject, allow alternatives");
-    click(card, `part="button reject-${next}"`);
-    expect(sent).toEqual([
-      {
-        type: "tt-decide",
-        detail: { decision: "reject", next, proposalVersion: card.order?.proposalVersion },
-      },
-    ]);
-  }
+test("one click rejects, and the agent stops", () => {
+  const { card, sent } = cardFor(pending);
+  click(card, 'part="button reject"');
+  expect(sent).toEqual([
+    {
+      type: "tt-decide",
+      detail: { decision: "reject", next: "stop", proposalVersion: card.order?.proposalVersion },
+    },
+  ]);
 });
 
 test("no card shows a raw id outside More details; the details keep the order id", async () => {
@@ -398,7 +455,6 @@ test("reduce to fit fills the amounts on the card, sends nothing, and confirm se
   expect(text).toContain("Under your limit");
 
   click(card, 'part="button approve"');
-  click(card, 'part="button approve-confirm"');
   const [only] = sent;
   if (only?.type !== "tt-confirm-changes") throw new Error("confirm sends the changed amounts");
   const detail = DecideApprovalRequestSchema.parse(only.detail);
@@ -419,7 +475,6 @@ test("reduce to fit says so when even one of each is over the limit, and changes
   expect(sent).toEqual([]);
   expect(visible(card)).toContain(pick(CARD).cannotFit);
   click(card, 'part="button approve"');
-  click(card, 'part="button approve-confirm"');
   expect(sent[0]?.type).toBe("tt-decide");
 });
 

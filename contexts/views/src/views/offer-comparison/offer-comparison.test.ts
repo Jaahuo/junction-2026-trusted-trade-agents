@@ -523,7 +523,7 @@ describe("steering", () => {
     if (organic === undefined) throw new Error("Expected a second option");
     const asked = inHost({ open: openAt(row.key, "options"), asked: [organic.line.offerId] });
     const output = text(renderOfferComparison(data, asked));
-    expect(output).toMatch(/aria-disabled="?true"?[^>]*>\s*Asked ✓/);
+    expect(output).toMatch(/aria-disabled="?true"?[^>]*>\s*<span\s[^]*?<\/span\s*>Asked ✓/);
     expect(visible(renderOfferComparison(data, asked))).toMatch(/\bUse\b/);
   });
 

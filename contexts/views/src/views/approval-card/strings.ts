@@ -77,14 +77,14 @@ export const VIEW = {
     products: "Products",
     decideBy: "Decide by",
     review: "Review",
-    allApprovals: "← All approvals",
+    allApprovals: "← Back to open approvals",
     notSent: "The message was not sent.",
     failures: {
       OFFER_EXPIRED: "An offer in this order has expired. Ask the agent for new offers.",
       STALE_OFFER: "The mandate changed after the offers were made. Ask the agent for new offers.",
       CONFLICT: "This order was already decided or changed. Reload to see it.",
       NOT_FOUND: "This order no longer exists.",
-      UPSTREAM_FAILED: "The decision could not be checked right now. Try again in a moment.",
+      UPSTREAM_FAILED: "Something went wrong, so your decision was not saved. Try again.",
       NOT_IMPLEMENTED:
         "Changing amounts is not available yet. Approve the order as it is, or ask the agent.",
     } as Record<string, string>,
@@ -126,14 +126,14 @@ export const VIEW = {
     products: "Tuotteet",
     decideBy: "Päätä viimeistään",
     review: "Tarkista",
-    allApprovals: "← Kaikki hyväksynnät",
+    allApprovals: "← Takaisin avoimiin hyväksyntöihin",
     notSent: "Viestiä ei lähetetty.",
     failures: {
       OFFER_EXPIRED: "Tilauksen tarjous on vanhentunut. Pyydä agentilta uudet tarjoukset.",
       STALE_OFFER: "Valtuutus muuttui tarjousten jälkeen. Pyydä agentilta uudet tarjoukset.",
       CONFLICT: "Tilauksesta on jo päätetty tai sitä on muutettu. Lataa uudelleen nähdäksesi sen.",
       NOT_FOUND: "Tilausta ei enää ole.",
-      UPSTREAM_FAILED: "Päätöstä ei voitu tarkistaa juuri nyt. Yritä hetken päästä uudelleen.",
+      UPSTREAM_FAILED: "Jokin meni vikaan, joten päätöstäsi ei tallennettu. Yritä uudelleen.",
       NOT_IMPLEMENTED:
         "Määrien muuttaminen ei ole vielä mahdollista. Hyväksy tilaus sellaisenaan tai kysy agentilta.",
     } as Record<string, string>,

@@ -11,6 +11,7 @@ import {
   type MandateSource,
 } from "../application/catalog.ts";
 import { type CatalogProduct, createCatalog } from "../domain/catalog.ts";
+import { MAX_QUANTITY } from "../domain/quantity.ts";
 import { edenMandateSource } from "../infra/mandate-client.ts";
 import { DATA_FILES, loadProductFile } from "../infra/product-file.ts";
 import { createApi } from "./index.ts";
@@ -124,9 +125,12 @@ describe("POST /catalog/search", () => {
   });
 
   test("a 501 or 404 from mandates gives mandate null and no merge", async () => {
-    for (const code of [404, 501] as const) {
+    for (const [code, errorCode] of [
+      [404, "NOT_FOUND"],
+      [501, "NOT_IMPLEMENTED"],
+    ] as const) {
       const mandates = new Elysia().get("/api/mandates/current", ({ status }) =>
-        status(code, { error: { code: "NOT_FOUND", message: "none" } }),
+        status(code, { error: { code: errorCode, message: "none" } }),
       );
       const source = edenMandateSource(() => "http://localhost/api", inProcess(mandates));
       expect(await source.current()).toEqual(ok(null));
@@ -332,8 +336,8 @@ describe("POST /catalog/search", () => {
     expect(loads).toBe(0);
   });
 
-  test("a zero or negative quantity gives 400", async () => {
-    for (const value of [0, -5]) {
+  test("a zero, negative or huge quantity gives 400", async () => {
+    for (const value of [0, -5, 1e303]) {
       const { status, body } = await post(createApi(deps()), "/search", {
         ...searchBody,
         quantity: { value, unit: "LTR" },
@@ -341,7 +345,12 @@ describe("POST /catalog/search", () => {
       expect({ value, status, body }).toEqual({
         value,
         status: 400,
-        body: { error: { code: "BAD_REQUEST", message: "quantity.value: must be above 0." } },
+        body: {
+          error: {
+            code: "BAD_REQUEST",
+            message: `quantity.value: must be above 0 and at most ${MAX_QUANTITY}.`,
+          },
+        },
       });
     }
   });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isPositiveQuantity, perSalesUnit, toOrderQuantity } from "./quantity.ts";
+import { isValidQuantity, MAX_QUANTITY, perSalesUnit, toOrderQuantity } from "./quantity.ts";
 
 describe("quantity conversion", () => {
   test("1000 LTR of a 1 l item, 10 per sales unit, gives 100 sales units", () => {
@@ -98,9 +98,24 @@ describe("quantity conversion", () => {
     });
   });
 
-  test("only a finite quantity above 0 is positive", () => {
-    expect(isPositiveQuantity({ value: 0.001, unit: "LTR" })).toBe(true);
-    expect(isPositiveQuantity({ value: 0, unit: "LTR" })).toBe(false);
-    expect(isPositiveQuantity({ value: -1, unit: "LTR" })).toBe(false);
+  test("a valid quantity is finite, above 0 and at most MAX_QUANTITY", () => {
+    expect(isValidQuantity({ value: 0.001, unit: "LTR" })).toBe(true);
+    expect(isValidQuantity({ value: MAX_QUANTITY, unit: "LTR" })).toBe(true);
+    expect(isValidQuantity({ value: 0, unit: "LTR" })).toBe(false);
+    expect(isValidQuantity({ value: -1, unit: "LTR" })).toBe(false);
+    expect(isValidQuantity({ value: MAX_QUANTITY * 10, unit: "LTR" })).toBe(false);
+    expect(isValidQuantity({ value: 1e303, unit: "LTR" })).toBe(false);
+  });
+
+  test("a conversion that would overflow gives null, not Infinity", () => {
+    const tiny = {
+      salesUnit: "ST",
+      allowedLotSize: 1e-300,
+      perSalesUnit: { value: 1e-10, unit: "LTR" },
+    };
+    expect(toOrderQuantity({ value: 1e303, unit: "LTR" }, tiny)).toEqual({
+      orderQuantity: null,
+      equals: null,
+    });
   });
 });

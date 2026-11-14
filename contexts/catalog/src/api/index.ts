@@ -14,13 +14,14 @@ import {
   type SearchError,
   searchProducts,
 } from "../application/catalog.ts";
+import { MAX_QUANTITY } from "../domain/quantity.ts";
 import { catalogAdapters } from "./adapters.ts";
 
 const envelope = <C extends ErrorCode>(code: C, message: string) => ({ error: { code, message } });
 
 const MESSAGES: Record<SearchError, string> = {
   EMPTY_TERMS: "terms: give at least one non-empty search term.",
-  INVALID_QUANTITY: "quantity.value: must be above 0.",
+  INVALID_QUANTITY: `quantity.value: must be above 0 and at most ${MAX_QUANTITY}.`,
   UPSTREAM_FAILED: "The current mandate could not be read.",
   CATALOG_UNAVAILABLE: "The product index could not be loaded.",
 };

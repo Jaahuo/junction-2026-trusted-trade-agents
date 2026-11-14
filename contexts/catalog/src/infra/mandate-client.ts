@@ -1,4 +1,4 @@
-import { StoredMandateSchema } from "@app/contract";
+import { ErrorEnvelopeSchema, StoredMandateSchema } from "@app/contract";
 import { err, ok } from "@app/kernel";
 import type { Api } from "@ctx/mandates/api";
 import { treaty } from "@elysia/eden";
@@ -6,7 +6,13 @@ import type { MandateSource } from "../application/catalog.ts";
 
 type Fetcher = NonNullable<Parameters<typeof treaty>[1]>["fetcher"];
 
-/** Reads the current mandate through the mandates API (SPEC-001). 404 or 501 means no mandate. */
+// The only answers that mean "no mandate": 404 NOT_FOUND and 501 NOT_IMPLEMENTED in the error envelope.
+const NO_MANDATE = new Map<number, string>([
+  [404, "NOT_FOUND"],
+  [501, "NOT_IMPLEMENTED"],
+]);
+
+/** Reads the current mandate through the mandates API (SPEC-001). Any answer outside the contract is UPSTREAM_FAILED. */
 export const edenMandateSource = (apiBaseUrl: () => string, fetcher?: Fetcher): MandateSource => ({
   current: async () => {
     let response;
@@ -32,6 +38,9 @@ export const edenMandateSource = (apiBaseUrl: () => string, fetcher?: Fetcher): 
       return ok({ id: mandateId, version, standingConstraints });
     }
     const status: number = error.status;
-    return status === 404 || status === 501 ? ok(null) : err("UPSTREAM_FAILED");
+    const envelope = ErrorEnvelopeSchema.safeParse(error.value);
+    if (envelope.success && NO_MANDATE.get(status) === envelope.data.error.code) return ok(null);
+    console.error(`catalog: mandates answered ${status} outside the contract`);
+    return err("UPSTREAM_FAILED");
   },
 });

@@ -8,7 +8,7 @@ import type {
 import { err, ok, type Result } from "@app/kernel";
 import { parseTerms } from "../domain/catalog.ts";
 import { type Constraints, mergeConstraints } from "../domain/match.ts";
-import { isPositiveQuantity } from "../domain/quantity.ts";
+import { isValidQuantity } from "../domain/quantity.ts";
 
 export interface CurrentMandate {
   id: string;
@@ -55,7 +55,7 @@ export const searchProducts = async (
   request: SearchRequest,
 ): Promise<Result<SearchResult, SearchError>> => {
   if (!parseTerms(request.terms).ok) return err("EMPTY_TERMS");
-  if (!isPositiveQuantity(request.quantity)) return err("INVALID_QUANTITY");
+  if (!isValidQuantity(request.quantity)) return err("INVALID_QUANTITY");
   const mandate = await deps.mandates.current();
   if (!mandate.ok) return mandate;
   const constraints = mergeConstraints(

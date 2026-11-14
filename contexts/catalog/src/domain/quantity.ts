@@ -8,8 +8,8 @@ const STD_UNITS = new Map<string, { unit: "LTR" | "KGM"; factor: number }>([
   ["GRM", { unit: "KGM", factor: 0.001 }],
 ]);
 
-// Removes binary noise such as 0.1 * 3 = 0.30000000000000004.
-const tidy = (value: number): number => Math.round(value * 1e6) / 1e6;
+// Removes binary noise such as 0.1 * 3 = 0.30000000000000004, without scaling that could overflow.
+const tidy = (value: number): number => Number(value.toPrecision(12));
 
 /** The quantity in a std unit (`LTR` or `KGM`), unrounded, or null when the unit has no std conversion. */
 const toStdQuantity = (quantity: Quantity): Quantity | null => {
@@ -17,9 +17,12 @@ const toStdQuantity = (quantity: Quantity): Quantity | null => {
   return std === undefined ? null : { value: quantity.value * std.factor, unit: std.unit };
 };
 
-/** A search or order quantity must be above 0. */
-export const isPositiveQuantity = (quantity: Quantity): boolean =>
-  Number.isFinite(quantity.value) && quantity.value > 0;
+/** The largest quantity value a search accepts; far above any real order, far below float overflow. */
+export const MAX_QUANTITY = 1e9;
+
+/** A search quantity must be above 0 and at most `MAX_QUANTITY`. */
+export const isValidQuantity = (quantity: Quantity): boolean =>
+  Number.isFinite(quantity.value) && quantity.value > 0 && quantity.value <= MAX_QUANTITY;
 
 // Ceil that ignores float noise only: 100.00000000000001 lots is 100, 100.000000004 is 101.
 const ceilLots = (lots: number): number => {
@@ -64,8 +67,11 @@ export const toOrderQuantity = (requested: Quantity, product: SalesUnitInfo): Or
   }
   const lot = product.allowedLotSize > 0 ? product.allowedLotSize : 1;
   const value = tidy(ceilLots(salesUnits / lot) * lot);
+  const equals = tidy(value * per.value);
+  if (!Number.isFinite(value) || !Number.isFinite(equals))
+    return { orderQuantity: null, equals: null };
   return {
     orderQuantity: { value, unit: product.salesUnit },
-    equals: { value: tidy(value * per.value), unit: per.unit },
+    equals: { value: equals, unit: per.unit },
   };
 };

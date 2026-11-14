@@ -367,7 +367,7 @@ test("a draft with an exp at or before now, an operationId, a server-set field o
       { ...draft, iss: "cust_other" },
       {
         ...draft,
-        standingConstraints: { hard: [{ attribute: "gluten", is: "free_from" }], soft: [] },
+        standingConstraints: { hard: [{ attribute: "unicorn", is: "free_from" }], soft: [] },
       },
     ]) {
       const response = await call(app, "POST", "/drafts", body);

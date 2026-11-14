@@ -33,7 +33,9 @@ const RawProductSchema = z.object({
       .array(
         z.object({
           name: z.string().nullish(),
-          values: z.array(z.object({ id: z.string().nullish() })).nullish(),
+          values: z
+            .array(z.object({ id: z.string().nullish(), unit: z.string().nullish() }))
+            .nullish(),
         }),
       )
       .nullish(),
@@ -59,12 +61,20 @@ const displayName = (names: RawProduct["synkkaData"]["names"], fallback: string)
   return names[0]?.value ?? fallback;
 };
 
-const nutritionalClaims = (raw: RawProduct): Set<string> =>
+const ALLERGEN_GROUPS = new Set(["allergen", "nonAllergen"]);
+
+/** Nutritional claim codes, and allergen facts as `<unit>:<GS1 code>`; an allergen without a unit is skipped. */
+const claims = (raw: RawProduct): Set<string> =>
   new Set(
-    (raw.synkkaData.classifications ?? [])
-      .filter((classification) => classification.name === "nutritionalClaim")
-      .flatMap((classification) => classification.values ?? [])
-      .flatMap((value) => (typeof value.id === "string" ? [value.id] : [])),
+    (raw.synkkaData.classifications ?? []).flatMap((classification) =>
+      (classification.values ?? []).flatMap(({ id, unit }) => {
+        if (typeof id !== "string") return [];
+        if (classification.name === "nutritionalClaim") return [id];
+        if (ALLERGEN_GROUPS.has(classification.name ?? "") && typeof unit === "string")
+          return [`${unit}:${id}`];
+        return [];
+      }),
+    ),
   );
 
 const WEIGHT_UNITS = new Map([
@@ -118,7 +128,7 @@ const toProduct = (
     countryOfOrigin: raw.countryOfOrigin ?? null,
     deliveryReliability: reliability.get(raw.id) ?? null,
     co2PerKg: co2.get(raw.id) ?? null,
-    claims: nutritionalClaims(raw),
+    claims: claims(raw),
     substitutes: (raw.substitutions ?? []).map((substitution) => substitution.substituteProduct),
   };
 };

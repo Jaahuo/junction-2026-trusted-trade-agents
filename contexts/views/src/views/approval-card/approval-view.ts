@@ -316,7 +316,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         : current;
     this.busyId = null;
     if (saved.kind !== "done") {
-      this.decisionError = { orderId: order.orderId, message: pick(VIEW).notSaved };
+      this.decisionError = { orderId: order.orderId, message: pick(VIEW).ruleNotSaved };
       return;
     }
     this.decisionError = null;

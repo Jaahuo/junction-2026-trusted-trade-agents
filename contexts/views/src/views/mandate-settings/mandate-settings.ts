@@ -291,7 +291,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
 
   private rules(record: StoredMandate, active: boolean) {
     const rules = record.mandate.limits.substitutionRules ?? [];
-    if (rules.length === 0) return html``;
+    if (rules.length === 0) return nothing;
     const text = pick(MANDATE);
     const l = lang();
     return html`<section part="substitution-rules">
@@ -318,12 +318,12 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
                   >
                     ${text.revoke}
                   </button>`
-                : html``
+                : nothing
             }
           </li>`;
         })}
       </ul>
-      ${this.revokeFailed ? html`<p role="alert">${text.revokeFailed}</p>` : html``}
+      ${this.revokeFailed ? html`<p role="alert">${text.revokeFailed}</p>` : nothing}
     </section>`;
   }
 

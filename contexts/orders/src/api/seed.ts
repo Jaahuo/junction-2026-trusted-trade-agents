@@ -31,12 +31,11 @@ const EARLIER_APPROVALS = 2;
  */
 const approvedSubstitute = (
   demo: DemoProducts,
-  replaces: string,
-  productId: string,
+  pair: { replaces: string; productId: string; quantity: Quantity },
   index: number,
 ): StoredOrder => {
+  const { replaces, productId, quantity } = pair;
   const at = demo.observedAt;
-  const quantity = fifth(demo.s3?.quantity ?? { value: 1, unit: "ST" });
   const claims = {
     ...fixtures.offerClaims,
     offerId: `off_seed_substitute_${index}`,
@@ -100,7 +99,13 @@ export const seedHistory = async (
     const store = postgresOrderStore(db);
     await store.withCustomerLock(DEMO_ACCOUNT.customer, async (tx) => {
       for (let index = 1; index <= EARLIER_APPROVALS; index++)
-        await tx.insert(approvedSubstitute(demo, replaces, substitute.productId, index));
+        await tx.insert(
+          approvedSubstitute(
+            demo,
+            { replaces, productId: substitute.productId, quantity: fifth(quantity) },
+            index,
+          ),
+        );
     });
   }
   const placedAt = new Date(demo.observedAt);

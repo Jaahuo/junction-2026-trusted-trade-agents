@@ -1,12 +1,34 @@
 import { expect, test } from "bun:test";
 import { fixtures, REASON_TEXT } from "@app/contract";
-import { draftSummary, errorSummary, orderSummary, pendingSummary } from "./summary.ts";
+import {
+  draftSummary,
+  errorSummary,
+  orderSummary,
+  pendingSummary,
+  searchSummary,
+} from "./summary.ts";
 
 test("a pending order summary names the reasons and the approval URL", () => {
   const text = orderSummary(fixtures.order);
   expect(text).toContain("pending_approval");
   expect(text).toContain(REASON_TEXT.NEW_PRODUCT);
   expect(text).toContain(`${fixtures.order.approvalUrl}`);
+});
+
+const note = (availability?: { checked: boolean; dropped: number }) =>
+  searchSummary({ ...fixtures.searchResult, candidates: [], availability }).split("\n");
+
+test("a search summary says how many matches the availability filter left out, or that it did not run", () => {
+  expect(note()).toEqual(["0 candidate products."]);
+  expect(note({ checked: true, dropped: 0 })).toEqual(["0 candidate products."]);
+  expect(note({ checked: true, dropped: 3 })).toEqual([
+    "0 candidate products.",
+    "3 matches left out: they cannot be delivered by the requested date.",
+  ]);
+  expect(note({ checked: false, dropped: 0 })).toEqual([
+    "0 candidate products.",
+    "Live availability was not read.",
+  ]);
 });
 
 test("a placed order summary has no approval URL", () => {

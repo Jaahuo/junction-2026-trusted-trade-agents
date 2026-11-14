@@ -31,6 +31,7 @@ const inputs: { [K in RouteKey]: RouteInput<K> } = {
   precheck: fixtures.precheckRequest,
   requote: fixtures.requoteRequest,
   issued: { offerIds: [fixtures.offerClaims.offerId] },
+  availability: { deliverBy: fixtures.searchRequest.deliverBy, productIds: ["T-PRODUCT"] },
   validate: fixtures.validateRequest,
   account: {},
   openapi: {},
@@ -42,6 +43,7 @@ const implemented = new Set<RouteKey>([
   "offers",
   "requote",
   "issued",
+  "availability",
 ]);
 
 // A context leaves this test when it adds migrations: its own route tests then cover its routes

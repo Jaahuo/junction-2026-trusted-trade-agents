@@ -21,6 +21,16 @@ export const OffersRequestSchema = z.strictObject({
 });
 export type OffersRequest = z.infer<typeof OffersRequestSchema>;
 
+/** Which of these products can be delivered on or before the date (SPEC-006 `availability`). */
+export const AvailabilityRequestSchema = z.strictObject({
+  deliverBy: DateSchema,
+  productIds: z.array(z.string()).min(1).max(1000),
+});
+export type AvailabilityRequest = z.infer<typeof AvailabilityRequestSchema>;
+
+export const AvailabilityResultSchema = z.strictObject({ deliverable: z.array(z.string()) });
+export type AvailabilityResult = z.infer<typeof AvailabilityResultSchema>;
+
 export const OfferClaimsSchema = z.strictObject({
   iss: z.string(),
   offerId: z.string(),

@@ -8,6 +8,7 @@ import { loadMandate } from "./loader.ts";
 import {
   categoriesText,
   effectiveStatus,
+  expiryDelay,
   policyText,
   substitutionText,
   thresholdText,
@@ -122,6 +123,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
 
   readonly entry = viewEntry("mandate-settings");
   private expiryTimer: number | undefined;
+  private renderedStatus: "active" | "expired" | "revoked" | null = null;
 
   override connectedCallback() {
     // The shared shell loads on connect; this view must distinguish the current endpoint's 404.
@@ -140,13 +142,9 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
   override updated() {
     clearTimeout(this.expiryTimer);
     const state = this.state;
-    if (!this.isConnected || state.kind !== "done" || effectiveStatus(state.data) !== "active")
-      return;
-    const remaining = state.data.mandate.exp * 1000 - Date.now();
-    this.expiryTimer = window.setTimeout(
-      () => this.requestUpdate(),
-      Math.min(Math.max(remaining, 0), 2147483647),
-    );
+    if (!this.isConnected || state.kind !== "done" || this.renderedStatus === null) return;
+    const delay = expiryDelay(state.data.mandate.exp, this.renderedStatus);
+    if (delay !== null) this.expiryTimer = window.setTimeout(() => this.requestUpdate(), delay);
   }
 
   private async reload(retry: boolean) {
@@ -208,6 +206,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
     const { mandate } = record;
     const { limits, standingConstraints } = mandate;
     const status = effectiveStatus(record);
+    this.renderedStatus = status;
     const hard = standingConstraints.hard;
     const soft = standingConstraints.soft;
     return html`<article class="card" part="done">

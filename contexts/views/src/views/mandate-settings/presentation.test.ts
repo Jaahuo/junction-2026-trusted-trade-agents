@@ -3,6 +3,7 @@ import type { StoredMandate } from "@app/contract";
 import {
   categoriesText,
   effectiveStatus,
+  expiryDelay,
   isNoCurrentMandate,
   policyText,
   substitutionText,
@@ -40,6 +41,20 @@ test("status respects expiry boundary and revocation takes precedence", () => {
   expect(effectiveStatus(record, 200000)).toBe("expired");
   expect(effectiveStatus({ ...record, status: "revoked" }, 199999)).toBe("revoked");
   expect(effectiveStatus({ ...record, status: "revoked" }, 200000)).toBe("revoked");
+});
+
+test("expiry scheduling follows the rendered snapshot across the boundary", () => {
+  for (const [now, activeDelay] of [
+    [199999, 1],
+    [200000, 0],
+    [200001, 0],
+  ] as const) {
+    expect(expiryDelay(200, "active", now)).toBe(activeDelay);
+    expect(expiryDelay(200, "expired", now)).toBeNull();
+    expect(expiryDelay(200, "revoked", now)).toBeNull();
+  }
+
+  expect(expiryDelay(3_000_000, "active", 0)).toBe(2147483647);
 });
 
 test("category scope distinguishes all, none and literal codes", () => {

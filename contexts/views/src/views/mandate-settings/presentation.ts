@@ -5,6 +5,15 @@ export function effectiveStatus(record: StoredMandate, now = Date.now()) {
   return record.mandate.exp * 1000 <= now ? "expired" : "active";
 }
 
+export function expiryDelay(
+  expSeconds: number,
+  renderedStatus: "active" | "expired" | "revoked",
+  nowMs = Date.now(),
+): number | null {
+  if (renderedStatus !== "active") return null;
+  return Math.min(Math.max(expSeconds * 1000 - nowMs, 0), 2147483647);
+}
+
 export function categoriesText(categories: string[] | null) {
   if (categories === null) return "All categories";
   if (categories.length === 0) return "No categories";

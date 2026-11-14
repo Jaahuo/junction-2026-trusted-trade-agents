@@ -1,5 +1,5 @@
 {
-  "id": "4b58caff-5406-4678-99ce-1256365e452f",
+  "id": "c513f4b7-b06b-4db2-aa85-44f5025c4bbe",
   "prevId": "0f6707bb-a962-4373-89b1-d39109f43f5b",
   "version": "7",
   "dialect": "postgresql",
@@ -39,29 +39,7 @@
           "notNull": true
         }
       },
-      "indexes": {
-        "orders_history_customer_product": {
-          "name": "orders_history_customer_product",
-          "columns": [
-            {
-              "expression": "customer",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "productId",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -226,6 +204,21 @@
           "isUnique": true,
           "concurrently": false,
           "method": "btree",
+          "with": {}
+        },
+        "orders_orders_lines_offer_ids": {
+          "name": "orders_orders_lines_offer_ids",
+          "columns": [
+            {
+              "expression": "((\"lines\" #>> '{}')::jsonb) jsonb_path_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
           "with": {}
         }
       },

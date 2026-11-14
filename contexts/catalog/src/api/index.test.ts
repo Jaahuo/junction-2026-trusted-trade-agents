@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SearchResultSchema } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import { Elysia } from "elysia";
 import {
@@ -33,7 +34,13 @@ const product = (overrides: Partial<CatalogProduct> & { productId: string }): Ca
 });
 
 const products = [
-  product({ productId: "free", substitutes: ["low", "plain"], gtin: "0000000000042" }),
+  product({
+    productId: "free",
+    name: "lactose-free milk",
+    searchText: "lactose-free milk\nmaito",
+    substitutes: ["low", "plain"],
+    gtin: "0000000000042",
+  }),
   product({ productId: "low", claims: new Set(["LOW_LACTOSE"]) }),
   product({
     productId: "plain",
@@ -124,6 +131,105 @@ describe("POST /catalog/search", () => {
     expect(ids(body)).toEqual(["free", "plain"]);
   });
 
+  test("rejects unsupported request soft attributes before either upstream call", async () => {
+    let calls = 0;
+    const app = createApi(
+      deps({
+        mandates: {
+          current: async () => {
+            calls += 1;
+            return ok(null);
+          },
+        },
+        catalog: async () => {
+          calls += 1;
+          return ok(createCatalog(products));
+        },
+      }),
+    );
+    const result = await post(app, "/search", {
+      ...searchBody,
+      soft: [{ attribute: "brand", prefer: "example" }],
+    });
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        error: {
+          code: "BAD_REQUEST",
+          message: "soft.attribute: supported attributes are countryOfOrigin and category.",
+        },
+      },
+    });
+    expect(calls).toBe(0);
+  });
+
+  test("rejects unsupported standing soft attributes before loading the catalog", async () => {
+    let loads = 0;
+    const app = createApi(
+      deps({
+        mandates: fakeMandate(
+          ok({
+            id: "mdt_bad",
+            version: 1,
+            standingConstraints: { hard: [], soft: [{ attribute: "brand", prefer: "example" }] },
+          }),
+        ),
+        catalog: async () => {
+          loads += 1;
+          return ok(createCatalog(products));
+        },
+      }),
+    );
+    const result = await post(app, "/search", {
+      ...searchBody,
+      soft: [{ attribute: "category", prefer: "T-CAT" }],
+    });
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        error: {
+          code: "BAD_REQUEST",
+          message: "soft.attribute: supported attributes are countryOfOrigin and category.",
+        },
+      },
+    });
+    expect(loads).toBe(0);
+  });
+
+  test("supported soft preferences are echoed only when confirmed and never exclude products", async () => {
+    const catalogProducts = [
+      product({ productId: "first", category: "T-CAT / Fresh", countryOfOrigin: "fi" }),
+      product({ productId: "second", category: "Other", countryOfOrigin: "se" }),
+      product({ productId: "unknown", category: "Unmatched", countryOfOrigin: null }),
+    ];
+    const soft = [
+      { attribute: "countryOfOrigin", prefer: "FI" },
+      { attribute: "countryOfOrigin", prefer: "SE" },
+      { attribute: "category", prefer: "T-CAT / Fresh" },
+      { attribute: "category", prefer: "Other" },
+    ];
+    const { status, body } = await post(
+      createApi(deps({ catalog: async () => ok(createCatalog(catalogProducts)) })),
+      "/search",
+      { ...searchBody, soft },
+    );
+    expect(status).toBe(200);
+    const result = SearchResultSchema.parse(body);
+    expect(
+      Object.fromEntries(result.candidates.map(({ productId, match }) => [productId, match])),
+    ).toEqual({
+      first: {
+        "soft:countryOfOrigin:fi": "confirmed",
+        "soft:category:t-cat%20%2F%20fresh": "confirmed",
+      },
+      second: {
+        "soft:countryOfOrigin:se": "confirmed",
+        "soft:category:other": "confirmed",
+      },
+      unknown: {},
+    });
+  });
+
   test("a 501 or 404 from mandates gives mandate null and no merge", async () => {
     for (const [code, errorCode] of [
       [404, "NOT_FOUND"],
@@ -205,7 +311,7 @@ describe("POST /catalog/search", () => {
         {
           productId: "free",
           gtin: "0000000000042",
-          name: "milk free",
+          name: "lactose-free milk",
           category: "T-CAT",
           match: { lactose: "confirmed" },
           orderQuantity: { value: 100, unit: "KI" },
@@ -221,6 +327,7 @@ describe("POST /catalog/search", () => {
           category: "T-CAT",
           match: { lactose: "unknown" },
           orderQuantity: null,
+          quantityReason: "Sales unit conversion is unavailable.",
           equals: null,
           deliveryReliability: null,
           co2PerKg: null,
@@ -386,7 +493,7 @@ describe("POST /catalog/facts", () => {
         {
           productId: "free",
           gtin: "0000000000042",
-          name: "milk free",
+          name: "lactose-free milk",
           category: "T-CAT",
           salesUnit: "KI",
           allowedLotSize: 1,

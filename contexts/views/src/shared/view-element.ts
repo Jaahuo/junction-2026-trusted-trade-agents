@@ -70,5 +70,15 @@ export function defineView(tag: string, element: CustomElementConstructor) {
 /** Connects a view element to its source and adds it to the page. */
 export function mountView(element: ViewElement<ViewEntry>) {
   element.source = sourceFor(element.entry.view);
-  document.querySelector("#root")?.append(element);
+  const root = document.querySelector("#root");
+  if ("standaloneFallback" in element.source) {
+    const message = document.createElement("p");
+    const link = document.createElement("a");
+    link.href = "/approvals";
+    link.textContent = "Go to approvals";
+    message.append("This view needs data from a host. ", link, ".");
+    root?.append(message);
+    return;
+  }
+  root?.append(element);
 }

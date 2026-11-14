@@ -1,0 +1,18 @@
+# Open WebUI as a local chat host. Start it with: bun scripts/openwebui.ts up
+name: trusted-trade-openwebui
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.13.3
+    ports:
+      # Login is off, so the host is reachable from this machine only.
+      - "127.0.0.1:${OPENWEBUI_PORT:-38090}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file: .env
+    environment:
+      WEBUI_AUTH: "False"
+      ENABLE_OLLAMA_API: "False"
+    volumes:
+      - data:/app/backend/data
+volumes:
+  data:

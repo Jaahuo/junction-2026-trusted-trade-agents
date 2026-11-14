@@ -3,26 +3,23 @@ package_update: true
 packages:
   - caddy
   - rsync
-  - unzip
-users:
-  - default
-  - name: app
-    system: true
-    shell: /usr/sbin/nologin
+  - docker.io
 write_files:
   - path: /etc/systemd/system/trusted-trade.service
     content: |
       [Unit]
       Description=Trusted trade agents API
-      After=network-online.target
+      After=docker.service network-online.target
       Wants=network-online.target
+      Requires=docker.service
       ConditionPathExists=/etc/trusted-trade.env
+      ConditionPathExists=/etc/trusted-trade-image.env
 
       [Service]
-      User=app
-      WorkingDirectory=${app_dir}
-      EnvironmentFile=/etc/trusted-trade.env
-      ExecStart=/usr/local/bin/bun apps/api/src/main.ts
+      EnvironmentFile=/etc/trusted-trade-image.env
+      ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:${app_port}:3000 -v "${app_dir}/data:/app/data:ro" $${TRUSTED_TRADE_IMAGE}
+      ExecStop=/usr/bin/docker stop --time 30 trusted-trade
+      TimeoutStopSec=40
       Restart=on-failure
       RestartSec=2
 
@@ -36,8 +33,7 @@ write_files:
       ${ci_ssh_public_key}
 %{ endif ~}
 runcmd:
-  - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${bun_version}"
-  - mkdir -p ${app_dir}
-  - chown app:app ${app_dir}
+  - systemctl enable --now docker.service
+  - mkdir -p ${app_dir}/data
   - systemctl daemon-reload
   - systemctl enable trusted-trade.service

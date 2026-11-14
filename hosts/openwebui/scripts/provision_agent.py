@@ -45,7 +45,7 @@ def main():
     base_model = os.environ.get("AGENT_MODEL_ID") or BASE_MODEL
     if base_model != BASE_MODEL:
         raise ValueError(f"This host requires {BASE_MODEL}; got {base_model}.")
-    max_tokens = int(os.environ.get("OPENWEBUI_MAX_TOKENS", "4096"))
+    max_tokens = int(os.environ.get("OPENWEBUI_MAX_TOKENS", "16384"))
     if max_tokens <= 0:
         raise ValueError("OPENWEBUI_MAX_TOKENS must be positive.")
     endpoint = os.environ.get("OPENAI_API_BASE_URL", "").strip()

@@ -1,6 +1,6 @@
 # Task and pull request workflow
 
-Each candidate has its own GitHub Issues and private board. A person assigns a task owner initially. One owner and one worktree are responsible for each independently committing task. Helpers receive disjoint writable paths and explicit interfaces; they do not independently commit, push, open PRs or merge. Coordinate shared files and tooling changes explicitly. A shared folder is not itself a risk classification.
+Each candidate has its own GitHub Issues and private board. Issues are created unassigned. A person assigns a task owner, or an agent does so with `gh issue edit <n> --add-assignee <login>` when the person it works for tells it to take that issue or lane. One owner and one worktree are responsible for each independently committing task. Helpers receive disjoint writable paths and explicit interfaces; they do not independently commit, push, open PRs or merge. Coordinate shared files and tooling changes explicitly. A shared folder is not itself a risk classification.
 
 1. Start the assigned issue: `bun scripts/task.ts start <issue>`. The command fetches `origin/main` before Worktrunk creates `task/<issue>` from that remote branch. It adds the issue to the uniquely linked project if needed and moves it to In progress. Navigate to the worktree with `wt switch task/<issue>`.
 2. Record helper scopes and handoff: `bun scripts/task.ts handoff <issue> --scope <owner>:<path> --message <text>`. Repeat `--scope` as needed.

@@ -45,13 +45,28 @@ test("the acceptance request yields candidates that cover the requested quantity
     expect(candidate.equals?.unit).toBe(requested.unit);
     expect(candidate.equals?.value ?? 0).toBeGreaterThanOrEqual(requested.value);
   }
+}, 30_000);
+
+test("the demo milk is found by its literal English name", async () => {
+  const response = await app.handle(
+    new Request("http://localhost/catalog/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        terms: ["milk"],
+        hard: [{ attribute: "lactose", is: "free_from" }],
+        soft: [],
+        quantity: requested,
+        deliverBy: "2026-11-16",
+        paymentTerms: "invoice",
+      }),
+    }),
+  );
+  expect(response.status).toBe(200);
+  const { candidates } = SearchResultSchema.parse(await response.json());
   const demoFile = Bun.file(resolve(defaultDataDir(), "demo-products.json"));
-  if (await demoFile.exists()) {
-    const demo = DemoProductsSchema.parse(await demoFile.json());
-    if (demo.s2.quantity.unit === requested.unit && demo.s2.quantity.value === requested.value) {
-      expect(candidates.map((candidate) => candidate.productId)).toContain(demo.s2.productId);
-    }
-  }
+  const demo = DemoProductsSchema.parse(await demoFile.json());
+  expect(candidates.map((candidate) => candidate.productId)).toContain(demo.s2.productId);
 }, 30_000);
 
 test("every product sold by weight has its volume per sales unit in KGM", async () => {

@@ -1,0 +1,361 @@
+{
+  "offers": [
+    {
+      "offerId": "off_test_1",
+      "token": "test-offer-token-1",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_1",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_milk_drink",
+        "quantity": {
+          "value": 48,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 1.22,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 58.56,
+          "gross": 66.76
+        },
+        "deliveryDate": "2026-11-23",
+        "requestedDate": "2026-11-23",
+        "nextDeliveryDate": "2026-11-24",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-20T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test milk drink 1 l, lactose free",
+          "category": "test_dairy",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 1.1,
+          "match": {}
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      },
+      "precheck": {
+        "decision": "auto",
+        "reasons": []
+      },
+      "rank": null,
+      "comparison": null
+    },
+    {
+      "offerId": "off_test_2",
+      "token": "test-offer-token-2",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_2",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_cooking_cream",
+        "quantity": {
+          "value": 6,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 2.85,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 17.1,
+          "gross": 19.49
+        },
+        "deliveryDate": "2026-11-23",
+        "requestedDate": "2026-11-23",
+        "nextDeliveryDate": "2026-11-24",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-20T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test cooking cream 15 % 1 l",
+          "category": "test_dairy",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 1.1,
+          "match": {}
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      },
+      "precheck": {
+        "decision": "auto",
+        "reasons": []
+      },
+      "rank": null,
+      "comparison": null
+    },
+    {
+      "offerId": "off_test_3",
+      "token": "test-offer-token-3",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_3",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_butter",
+        "quantity": {
+          "value": 358,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 4.2,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 1503.6,
+          "gross": 1714.1
+        },
+        "deliveryDate": "2026-11-23",
+        "requestedDate": "2026-11-23",
+        "nextDeliveryDate": "2026-11-24",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-20T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test butter 500 g",
+          "category": "test_dairy",
+          "perSalesUnit": {
+            "value": 0.5,
+            "unit": "KGM"
+          },
+          "countryOfOrigin": null,
+          "deliveryReliability": null,
+          "co2PerKg": null,
+          "match": {}
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      },
+      "precheck": {
+        "decision": "needs_approval",
+        "reasons": ["SPEND_OVER_LIMIT"]
+      },
+      "rank": null,
+      "comparison": null
+    },
+    {
+      "offerId": "off_test_4",
+      "token": "test-offer-token-4",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_4",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_cheese_slices",
+        "quantity": {
+          "value": 10,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 11.9,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 119.0,
+          "gross": 135.66
+        },
+        "deliveryDate": "2026-11-25",
+        "requestedDate": "2026-11-23",
+        "nextDeliveryDate": "2026-11-24",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-20T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test cheese slices 1 kg",
+          "category": "test_cheese",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "KGM"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 1.1,
+          "match": {}
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      },
+      "precheck": {
+        "decision": "auto",
+        "reasons": []
+      },
+      "rank": null,
+      "comparison": null
+    },
+    {
+      "offerId": "off_test_5",
+      "token": "test-offer-token-5",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_5",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_butter_unsalted",
+        "quantity": {
+          "value": 358,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 4.3,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 1539.4,
+          "gross": 1754.92
+        },
+        "deliveryDate": "2026-11-23",
+        "requestedDate": "2026-11-23",
+        "nextDeliveryDate": "2026-11-24",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-20T10:00:00+02:00",
+        "replaces": "prod_test_butter",
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test butter 500 g, unsalted",
+          "category": "test_dairy",
+          "perSalesUnit": {
+            "value": 0.5,
+            "unit": "KGM"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.99,
+          "co2PerKg": 1.1,
+          "match": {}
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      },
+      "precheck": {
+        "decision": "needs_approval",
+        "reasons": ["SPEND_OVER_LIMIT", "SUBSTITUTION"]
+      },
+      "rank": "best",
+      "comparison": {
+        "replaces": "prod_test_butter",
+        "pricePerStdUnitDelta": 0.2,
+        "reliabilityDelta": 0.02,
+        "originDiffers": false
+      }
+    }
+  ],
+  "omitted": [
+    {
+      "productId": "prod_test_whipping_cream",
+      "reason": "INSUFFICIENT_STOCK",
+      "detail": "No stock for the requested date."
+    }
+  ]
+}

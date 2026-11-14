@@ -1,3 +1,5 @@
+import { setTimeout as sleepTimer } from "node:timers/promises";
+
 import {
   type AvailabilityQuote,
   AvailabilityQuoteSchema,
@@ -12,6 +14,24 @@ import { z } from "zod";
 
 const DEFAULT_BASE_URL = "https://junction26.valioaimo.fi";
 const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_ATTEMPTS = 3;
+const MAX_RETRY_WAIT_MS = 8_000;
+const DEFAULT_RETRY_WAIT_MS = 1_000;
+
+const retryDelay = (header: string | null, now: number): number => {
+  if (header === null) return DEFAULT_RETRY_WAIT_MS;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) return Number(value) * 1_000;
+  if (
+    /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?: \d|\d{2}) \d{2}:\d{2}:\d{2} \d{4})$/.test(
+      value,
+    )
+  ) {
+    const date = Date.parse(value);
+    if (Number.isFinite(date)) return Math.max(0, date - now);
+  }
+  return DEFAULT_RETRY_WAIT_MS;
+};
 // The challenge API: a Terminal product ships from the supplier's warehouse, and its amount is always
 // 999999 because the real amount is unknown. A Stock product's amount is known, however large.
 const TERMINAL = "Terminal";
@@ -180,26 +200,56 @@ export interface MockWholesalerOptions {
   baseUrl: string;
   apiKey: string;
   fetch?: typeof fetch;
+  now?: () => number;
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 export const mockWholesaler = (options: MockWholesalerOptions): WholesalerLive => {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
 
   const post = async (path: string, body: LiveQuery): Promise<Mapped<unknown>> => {
+    const now = options.now ?? Date.now;
+    const sleep =
+      options.sleep ??
+      (async (ms: number, signal: AbortSignal) => {
+        await sleepTimer(ms, undefined, { signal });
+      });
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const deadline = now() + REQUEST_TIMEOUT_MS;
+    let totalWait = 0;
     try {
       const send = options.fetch ?? fetch;
-      const response = await send(`${baseUrl}${path}`, {
-        method: "POST",
-        headers: { "X-API-Key": options.apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customer: body.customer,
-          requestedDate: body.requestedDate,
-          products: body.productIds,
-        }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      const payload = JSON.stringify({
+        customer: body.customer,
+        requestedDate: body.requestedDate,
+        products: body.productIds,
       });
-      if (!response.ok) return err("UPSTREAM_FAILED");
-      return ok(await response.json());
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (signal.aborted || now() >= deadline) return err("UPSTREAM_FAILED");
+        const response = await send(`${baseUrl}${path}`, {
+          method: "POST",
+          headers: { "X-API-Key": options.apiKey, "Content-Type": "application/json" },
+          body: payload,
+          signal,
+        });
+        if (signal.aborted || now() >= deadline) return err("UPSTREAM_FAILED");
+        if (response.ok) {
+          const result: unknown = await response.json();
+          if (signal.aborted || now() >= deadline) return err("UPSTREAM_FAILED");
+          return ok(result);
+        }
+        if (response.status !== 429 || attempt === MAX_ATTEMPTS - 1) return err("UPSTREAM_FAILED");
+        const currentTime = now();
+        const delay = retryDelay(response.headers.get("Retry-After"), currentTime);
+        if (totalWait + delay > MAX_RETRY_WAIT_MS || currentTime + delay >= deadline) {
+          return err("UPSTREAM_FAILED");
+        }
+        await response.body?.cancel();
+        if (signal.aborted || now() + delay >= deadline) return err("UPSTREAM_FAILED");
+        totalWait += delay;
+        await sleep(delay, signal);
+      }
+      return err("UPSTREAM_FAILED");
     } catch {
       return err("UPSTREAM_FAILED");
     }

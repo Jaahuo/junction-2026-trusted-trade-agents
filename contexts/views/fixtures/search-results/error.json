@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "UPSTREAM_FAILED",
+    "message": "The wholesaler did not answer."
+  }
+}

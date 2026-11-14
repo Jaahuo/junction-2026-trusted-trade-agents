@@ -48,6 +48,17 @@ async function paths() {
   };
 }
 
+export async function hasRuntime(worktree: string): Promise<boolean> {
+  const root = await realpath(worktree);
+  const common = await realpath(
+    resolve(root, await command(["git", "-C", root, "rev-parse", "--git-common-dir"])),
+  );
+  return (
+    (await Bun.file(resolve(root, ".local/runtime.json")).exists()) ||
+    (await Bun.file(resolve(common, "hackathon-runtime", `wt_${hash(root)}.json`)).exists())
+  );
+}
+
 async function readProject(path: string): Promise<Project> {
   const value: unknown = JSON.parse(await readFile(path, "utf8"));
   if (

@@ -1,5 +1,6 @@
 import { fail } from "./lib.ts";
 import { command, ghJson, option, repository } from "./workflow.ts";
+import { cleanMergedWorktree } from "./worktree-cleanup.ts";
 import { decodeBoard, decodeDependency, decodeIssue, decodeUser } from "./workflow-decode.ts";
 
 const args = process.argv.slice(2);
@@ -16,7 +17,8 @@ Start checks your issue assignment (not an atomic lock), creates task/<issue> wi
 wt, and moves the linked board item to In progress. Handoff records disjoint
 writable paths in an issue comment. Sync requires the dependency's actual merge
 commit on current main, then merges origin/main into this task branch. Finish
-verifies the task PR's merge commit on main, closes the issue and moves it to Done.
+verifies the task PR's merge commit on main, closes the issue, moves it to Done
+and removes the clean task worktree, its database and its branch.
 Commands use your own gh authentication; project access requires the project scope.
 Example: bun scripts/task.ts handoff 12 --scope api:contexts/api --scope web:apps/web --message 'API contract is ready'`);
   process.exit(0);
@@ -187,4 +189,9 @@ if (action === "status") {
   if (issue.state !== "CLOSED") await command("gh", "issue", "close", number);
   await boardStatus("Done");
   console.log(`Finished #${number} from merged PR #${numberPr}.`);
+  await cleanMergedWorktree(
+    `task/${number}`,
+    pr.head.sha,
+    `bun run task finish ${number} --pr ${numberPr}`,
+  );
 } else fail("Unknown task command; see --help.");

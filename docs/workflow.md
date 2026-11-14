@@ -52,14 +52,14 @@ Claude resolves the active worktree from the hook input's `cwd`, even when the s
 
 The `gate` workflow keeps one aggregate `gate` check for required-check consumers. Each required job must succeed. Failure, cancellation or an unexpected skip fails the aggregate.
 
-| Stage   | Responsibility                                                             |
-| ------- | -------------------------------------------------------------------------- |
+| Stage   | Responsibility                                                              |
+| ------- | --------------------------------------------------------------------------- |
 | Quality | Types, formatting, lint, unused code, duplication and migration consistency |
-| Tests   | Full test suite against disposable PostgreSQL                              |
-| Secrets | Gitleaks scan of Git history                                               |
+| Tests   | Full test suite against disposable PostgreSQL                               |
+| Secrets | Gitleaks scan of Git history                                                |
 | Gate    | Require quality, tests and secrets to succeed                               |
-| Publish | Build and smoke the selected main commit's image, then publish its digest  |
-| Deploy  | Deploy that digest with production-only credentials and verify health      |
+| Publish | Build and smoke the selected main commit's image, then publish its digest   |
+| Deploy  | Deploy that digest with production-only credentials and verify health       |
 
 All jobs use GitHub-hosted `ubuntu-24.04` runners. PR, main-push and scheduled gates run code checks without production credentials. Only a successful main-push gate can enable automatic deployment. Scheduled gates do not deploy.
 

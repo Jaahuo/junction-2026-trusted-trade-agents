@@ -80,6 +80,7 @@ export const MODEL_TOOLS = [
   "place_order",
   "get_order_status",
   "get_mandate",
+  "show_mandate",
   "draft_mandate",
   "list_pending_approvals",
 ] as const; // the model sees these
@@ -137,6 +138,7 @@ export const TOOL_INPUT = {
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
+  show_mandate: EmptySchema,
   draft_mandate: DraftMandateRequestSchema,
   list_pending_approvals: EmptySchema,
   decide_approval: DecideApprovalInputSchema,
@@ -145,25 +147,26 @@ export const TOOL_INPUT = {
 } as const; // EmptySchema = strict {}
 ```
 
-| Key      | Tool                   | Method and path                      | Context   | Tool input → REST                                                     | Body → 2xx response                                        |
-| -------- | ---------------------- | ------------------------------------ | --------- | --------------------------------------------------------------------- | ---------------------------------------------------------- |
-| search   | search_products        | POST /api/catalog/search             | catalog   | input = body                                                          | SearchRequest → SearchResult                               |
-| offers   | get_offers             | POST /api/offers                     | offers    | input = body                                                          | OffersRequest → OffersResult                               |
-| place    | place_order            | POST /api/orders                     | orders    | input = body                                                          | PlaceOrderRequest → 201 Order (200 on replay)              |
-| status   | get_order_status       | GET /api/orders/:orderId             | orders    | `orderId` → path                                                      | → Order                                                    |
-| mandate  | get_mandate            | GET /api/mandates/current            | mandates  | none                                                                  | → StoredMandate                                            |
-| draft    | draft_mandate          | POST /api/mandates/drafts            | mandates  | input = body                                                          | DraftMandateRequest → MandateDraft                         |
-| pending  | list_pending_approvals | GET /api/orders/pending              | orders    | none                                                                  | → PendingList                                              |
-| decide   | decide_approval        | POST /api/orders/:orderId/decision   | orders    | `orderId` → path; the rest → body as DecideApprovalRequest (SPEC-011) | DecideApprovalRequest → Order                              |
-| register | register_mandate       | POST /api/mandates                   | mandates  | input = body                                                          | RegisterMandateRequest → 201 StoredMandate (200 on replay) |
-| revoke   | revoke_mandate         | POST /api/mandates/:mandateId/revoke | mandates  | `mandateId` → path                                                    | → StoredMandate                                            |
-| facts    | —                      | POST /api/catalog/facts              | catalog   | —                                                                     | FactsRequest → FactsResult                                 |
-| precheck | —                      | POST /api/orders/precheck            | orders    | —                                                                     | PrecheckRequest → Precheck                                 |
-| requote  | —                      | POST /api/offers/requote             | offers    | —                                                                     | RequoteRequest → OffersResult                              |
-| issued   | —                      | POST /api/offers/issued              | offers    | —                                                                     | IssuedOffersRequest → IssuedOffers                         |
-| validate | —                      | POST /api/offers/validate            | offers    | —                                                                     | ValidateRequest → ValidateResult                           |
-| account  | —                      | GET /api/accounts/current            | accounts  | —                                                                     | → Account                                                  |
-| openapi  | —                      | GET /api/discovery/openapi.json      | discovery | —                                                                     | → OpenAPI 3.1                                              |
+| Key          | Tool                   | Method and path                      | Context   | Tool input → REST                                                     | Body → 2xx response                                        |
+| ------------ | ---------------------- | ------------------------------------ | --------- | --------------------------------------------------------------------- | ---------------------------------------------------------- |
+| search       | search_products        | POST /api/catalog/search             | catalog   | input = body                                                          | SearchRequest → SearchResult                               |
+| offers       | get_offers             | POST /api/offers                     | offers    | input = body                                                          | OffersRequest → OffersResult                               |
+| place        | place_order            | POST /api/orders                     | orders    | input = body                                                          | PlaceOrderRequest → 201 Order (200 on replay)              |
+| status       | get_order_status       | GET /api/orders/:orderId             | orders    | `orderId` → path                                                      | → Order                                                    |
+| mandate      | get_mandate            | GET /api/mandates/current            | mandates  | none                                                                  | → StoredMandate                                            |
+| draft        | draft_mandate          | POST /api/mandates/drafts            | mandates  | input = body                                                          | DraftMandateRequest → MandateDraft                         |
+| pending      | list_pending_approvals | GET /api/orders/pending              | orders    | none                                                                  | → PendingList                                              |
+| decide       | decide_approval        | POST /api/orders/:orderId/decision   | orders    | `orderId` → path; the rest → body as DecideApprovalRequest (SPEC-011) | DecideApprovalRequest → Order                              |
+| register     | register_mandate       | POST /api/mandates                   | mandates  | input = body                                                          | RegisterMandateRequest → 201 StoredMandate (200 on replay) |
+| revoke       | revoke_mandate         | POST /api/mandates/:mandateId/revoke | mandates  | `mandateId` → path                                                    | → StoredMandate                                            |
+| facts        | —                      | POST /api/catalog/facts              | catalog   | —                                                                     | FactsRequest → FactsResult                                 |
+| precheck     | —                      | POST /api/orders/precheck            | orders    | —                                                                     | PrecheckRequest → Precheck                                 |
+| requote      | —                      | POST /api/offers/requote             | offers    | —                                                                     | RequoteRequest → OffersResult                              |
+| issued       | —                      | POST /api/offers/issued              | offers    | —                                                                     | IssuedOffersRequest → IssuedOffers                         |
+| availability | —                      | POST /api/offers/availability        | offers    | —                                                                     | AvailabilityRequest → AvailabilityResult                   |
+| validate     | —                      | POST /api/offers/validate            | offers    | —                                                                     | ValidateRequest → ValidateResult                           |
+| account      | —                      | GET /api/accounts/current            | accounts  | —                                                                     | → Account                                                  |
+| openapi      | —                      | GET /api/discovery/openapi.json      | discovery | —                                                                     | → OpenAPI 3.1                                              |
 
 - `DecideApprovalInput` is flat because a tool input schema is one object. The MCP binding drops `orderId`, keeps the fields that belong to `decision`, and the REST route validates the result as `DecideApprovalRequest`; a field that does not belong to the decision → 400.
 - No tool input has a customer, account, agent, password or passcode field.
@@ -227,6 +230,7 @@ export interface SearchResult {
   candidates: SearchCandidate[];
   constraints: { hard: HardConstraint[]; soft: SoftConstraint[] };
   mandate: { id: string; version: number } | null;
+  availability?: { checked: boolean; dropped: number }; // the availability filter below
 }
 export interface FactsRequest {
   productIds: string[];
@@ -260,6 +264,7 @@ export const ALLERGEN_ATTRIBUTES: FreeFromAttribute[]; // the FREE_FROM_DATA key
 - Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
 - Search matches Unicode words after case and hyphen normalization. The whole words `maito` and `milk` are equivalent; no other translation aliases apply. Every word of a term must match one name in one language. Terms are alternatives. Compound words do not match their substrings. A negated occurrence, such as `milk-free` or `free from milk`, does not match `milk`; `lactose-free milk` does.
+- Availability: search reads its 60 best ranked matches and asks `availability` (SPEC-006) for them in one request. A match that cannot be delivered on or before `deliverBy` is not a candidate; the best 20 that remain are returned. `SearchResult.availability` is `{ checked: true, dropped }`, where `dropped` counts the matches left out. When `availability` fails, search still answers 200 with the unfiltered best 20 and `{ checked: false, dropped: 0 }`: the offers step reads availability again. A search with no match does not call `availability`.
 - A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, soft matches, name relevance, successful quantity conversion, matched terms, reliability, then product id. A head noun ranks above a modifier; milk chocolate and milk powder rank below milk.
 - Supported search soft attributes are `countryOfOrigin` and `category`, compared case-insensitively. An unsupported request or merged standing soft attribute gives 400. Each matched preference adds a `confirmed` entry to candidate `match`, with key `soft:<attribute>:<encoded-preference>`; the preference is lowercase and URI-component encoded. These entries do not affect hard filtering or hard-confirmation counts. Facts and offer product matches remain hard-only.
 - Quantity uses structured sales-unit volume or consumer-unit volume times consumer units per sales unit. `GRM` converts to `KGM`. Count sales units round up to a whole number compatible with `allowedLotSize`; weight sales units retain fractional lots. No supported conversion gives null `orderQuantity` and `equals`, with a `quantityReason` explanation. Successful conversions omit `quantityReason`.
@@ -322,7 +327,7 @@ export interface WholesalerCatalog {
 - `nextDeliveryDate` = the first schedule line date later than `availableDate`. When the response has none, the adapter makes one further availability query with the requested date set to `availableDate` + 1 day, at most one per product per call, and takes its `availableDate`. A failed or empty further query gives `null`.
 - `logisticModel: "Terminal"` (supplied from the supplier's warehouse, amount unknown) means `stock: "unconfirmed"`; an amount of `999999` with no `logisticModel` also does. A `Stock` product is `confirmed` at any amount, including the large amounts the mock returns for plentiful stock. Order submission is the order store itself (SPEC-010).
 - Deposits: the price response has no deposit amount, and the product data names deposit materials without a price, so the mock adapter sets `deposit: 0` and `depositKnown: false`.
-- Live adapter choice for offers: `WHOLESALER_LIVE=mock`, with the wholesaler API key set. With any other value or no API key, `get_offers` returns HTTP 200 and omits every line with reason `NO_PRICE`. The omission detail states that no live price source is configured. No offer is signed, and offers never invent a price. Catalogue search and facts use PostgreSQL. Each context selects its adapters in `src/api/adapters.ts`.
+- Live adapter choice for offers: `WHOLESALER_LIVE=mock`, with the wholesaler API key set, or `WHOLESALER_LIVE=fixture`. The fixture replays one live response recorded through the mock adapter, with an invented customer id, through the same mapping. Its dates move by the days between the recording day and today in Helsinki, and the API logs at start that its prices are recorded, not live. With any other value, or `mock` with no API key, `get_offers` returns HTTP 200 and omits every line with reason `NO_PRICE`. The omission detail states that no live price source is configured. No offer is signed, and offers never invent a price. Catalogue search and facts use PostgreSQL. Each context selects its adapters in `src/api/adapters.ts`.
 - Prices are cached per customer, pricing date and product until the earliest of `validTo`, `cutoffAt` and 5 minutes after the lookup. Availability is never cached: every `get_offers` and every `validate` sends a fresh availability request.
 
 Failure paths: transport error or non-2xx upstream → `UPSTREAM_FAILED` (route answers 502).
@@ -387,6 +392,7 @@ Steps of `get_offers`:
 - Keys: `OFFER_SIGNING_JWK` (private ES256 JWK) and `OFFER_SIGNING_KID`. With both set, a restart keeps every issued offer valid. When they are unset and `NODE_ENV` is not `production`, `offerSigningKeyFromEnv` generates a key for the process and logs one warning; in `production` it throws and the server does not start. `GET /.well-known/jwks.json` publishes the public key only.
 - `issued`: the offers service keeps every token it signs (by `get_offers` or `requote`) in process memory until the token's `exp`. `POST /api/offers/issued` with `{ offerIds }` (1 to 40) returns `{ offers: { offerId, token }[] }` for the IDs it issued to the principal's customer and agent and that have not expired; another ID is left out. A restart forgets the IDs; the agent then sends the token or requests new offers. This lets an agent name an offer by its short `offerId`, so a model never has to copy a token (#162). The store is per process, so the demo runs one API instance. Internal calls carry no principal, so orders also checks the owner in the verified token (SPEC-009 R3).
 - `requote`: re-issues offers for the same product, quantity and date (or the given changes) of the given tokens, under the current mandate of the token's `agentId`.
+- `availability`: `POST /api/offers/availability` with `{ deliverBy, productIds }` (1 to 1000) makes one live availability request (SPEC-005) for the principal's customer and returns `{ deliverable: productId[] }`. A product is deliverable when it has a quote, is not blocked from sale, has an `availableDate` on or before `deliverBy`, and its `cutoffAt` is null or later than now. Stock is not checked: a product with partial stock still gets an offer with a shortfall. A failed live read, or no configured live source, → `502 UPSTREAM_FAILED`. Search is its consumer (SPEC-004).
 - `validate`: re-reads live availability of the tokens' products with a fresh availability request (SPEC-005) and reports a sales block, a lost date or a passed cut-off. It also reports the live confirmed amount per product in `products[].liveAmount`, `null` when stock is unconfirmed.
 - Live-amount rule: when the live amount of a product is lower than the summed order quantity of that product (SPEC-009), the offers are stale. At `place_order` the request is refused with `409 STALE_OFFER` and the agent requests new offers (SPEC-009 R6). At approval the order goes through the re-quote path (SPEC-011).
 
@@ -681,6 +687,7 @@ PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
 - Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`; SPEC-013 defines the versioned URI.
 - Quiet twins: `find_products` and `quote_offers` are `search_products` and `get_offers` without a view. Same `TOOL_INPUT`, `TOOL_OUTPUT`, REST route and handler; no `_meta.ui` and no `language` input; `ROUTES` keeps the name of the tool with the view. A host opens a view for every call of a tool that declares one, so the agent uses the quiet twins while it prepares or places an order the user asked for, and the chat shows only the approval card. It uses `search_products` and `get_offers` when the user asks to see the products or compare offers.
+- Mandate lookup: `get_mandate` returns the limits without a view or `language` input. `show_mandate` has the same `TOOL_INPUT`, `TOOL_OUTPUT`, REST route and handler, but opens mandate settings and accepts `language`. The agent uses `get_mandate` during ordering and `show_mandate` only when the user asks to see the limits or settings. `ROUTES` keeps `get_mandate`.
 - Each tool whose view is shown in the chat also lists an optional `language` input (a BCP 47 tag): the language the user writes in. Only the view reads it, from the tool input; the server drops it before the REST call, so it is not part of `TOOL_INPUT` or any route.
 - Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
 
@@ -697,6 +704,7 @@ export const TOOL_OUTPUT = {
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,
+  show_mandate: StoredMandateSchema,
   draft_mandate: MandateDraftSchema,
   list_pending_approvals: PendingListSchema,
   decide_approval: OrderSchema,
@@ -743,7 +751,7 @@ export const VIEWS = [
   {
     view: "mandate-settings",
     uri: "ui://trusted-trade/mandate-settings",
-    tools: ["get_mandate", "draft_mandate"],
+    tools: ["show_mandate", "draft_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
     plainList: null,
@@ -759,7 +767,7 @@ export const VIEWS = [
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
 - Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. Without the query, a view with a `plainList` route loads that list instead (`/views/approval-card` lists the open orders). The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
 - The approval card shows a link to `approvalUrl` in every pending state.
-- Mandate settings: a `get_mandate` result shows the limits in force. A `draft_mandate` result shows the proposed limits next to the current ones and a Register button. Register calls `register_mandate` with the draft and an `operationId` the view creates once per draft, so a retry after a failed or lost call returns the stored mandate (SPEC-008). The view then shows the registered mandate. A failed call keeps the draft and shows the error next to the button.
+- Mandate settings: a `show_mandate` result shows the limits in force. A `draft_mandate` result shows the proposed limits next to the current ones and a Register button. Register calls `register_mandate` with the draft and an `operationId` the view creates once per draft, so a retry after a failed or lost call returns the stored mandate (SPEC-008). The view then shows the registered mandate. A failed call keeps the draft and shows the error next to the button.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
 - Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
 - Language: a view shows English or Finnish. In a host it takes the tool input's `language`, else the host context `locale`, else the browser language; on the plain page and in the harness the browser language. Any other language gives English. `?lang=` on the view URL overrides both, for the harness and screenshots.

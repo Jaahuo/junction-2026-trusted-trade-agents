@@ -46,7 +46,8 @@ export interface WholesalerLive {
 }
 
 export interface WholesalerCatalog {
-  searchCatalog(req: SearchRequest): readonly SearchCandidate[];
+  /** Ranked matches, best first; `limit` defaults to the 20 of SPEC-004. */
+  searchCatalog(req: SearchRequest, limit?: number): readonly SearchCandidate[];
   facts(req: FactsRequest): FactsResult;
   getSubstitutes(productId: string): readonly string[];
 }

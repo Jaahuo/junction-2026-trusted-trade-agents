@@ -47,7 +47,11 @@ async function withDatabase(run: (db: Db, dir: string) => Promise<void>) {
 }
 
 const makeApp = (db: Db) =>
-  createApi({ ...catalogAdapters(db), mandates: { current: async () => ok(null) } });
+  createApi({
+    ...catalogAdapters(db),
+    mandates: { current: async () => ok(null) },
+    availability: { deliverable: async (_deliverBy, productIds) => ok(new Set(productIds)) },
+  });
 
 test("import preserves records, CSV cells and order, metadata, and exact-byte identity", async () =>
   withDatabase(async (db, dir) => {

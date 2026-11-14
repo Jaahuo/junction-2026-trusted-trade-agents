@@ -2,6 +2,7 @@ import { type Db, selfBaseUrl } from "@app/server-kit";
 import { type CatalogDeps, type CatalogSource, lazyCatalog } from "../application/catalog.ts";
 import { createCatalog } from "../domain/catalog.ts";
 import { loadCatalogProducts } from "../infra/catalog-store.ts";
+import { offersAvailability } from "../infra/availability-client.ts";
 import { edenMandateSource } from "../infra/mandate-client.ts";
 
 const catalogs = new WeakMap<Db, CatalogSource>();
@@ -12,5 +13,9 @@ export const catalogAdapters = (db: Db): CatalogDeps => {
     catalog = lazyCatalog(async () => createCatalog(await loadCatalogProducts(db)));
     catalogs.set(db, catalog);
   }
-  return { catalog, mandates: edenMandateSource(() => `${selfBaseUrl()}/api`) };
+  return {
+    catalog,
+    mandates: edenMandateSource(() => `${selfBaseUrl()}/api`),
+    availability: offersAvailability,
+  };
 };

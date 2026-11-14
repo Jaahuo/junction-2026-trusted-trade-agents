@@ -18,9 +18,9 @@ Leave this path only for a branch that [Flow](#flow) names.
 ## Reply
 
 - Stay silent until the order has a status or you need an answer. Write no progress note, no plan and no list of what you found.
-- Give the outcome first, in one or two short sentences: product, quantity, delivery day and gross total.
-- For a sign-off, say that the order needs a sign-off, give the reason in a few plain words and give `approvalUrl`.
-- Leave out what a card shows, and leave out tool names, codes and ids.
+- A host that renders MCP App views shows the order as a card after `place_order`. The card carries the product, quantity, delivery day, total, reasons and the approval buttons. Then reply with one short sentence that gives only the status: the order is placed, or it needs a sign-off. Repeat nothing that the card shows and give no link.
+- Without a card, give the outcome in one or two short sentences: product, quantity, delivery day and gross total. For a sign-off, add the reason in a few plain words and `approvalUrl`.
+- Leave out tool names, codes and ids.
 - End on the outcome. Offer no menu of next steps.
 
 "Tell the user" in this skill and in [reason-codes.md](reason-codes.md) means one such sentence.
@@ -32,6 +32,7 @@ Ask only for a fact that you cannot look up and that changes the order:
 - What, how much or by when is missing from the request.
 - No product of the kind the user asked for has an offer after a second search (steps 2 and 4).
 - A candidate has no conversion for the quantity ([Units](#units)).
+- Nothing of that kind can be delivered by the date (step 2).
 - No mandate exists (step 1).
 
 Ask everything in one message, then order on the answer. Look up the rest: pack sizes, prices, stock and delivery days. The server decides limits and sign-offs, so place the order instead of asking whether to place it.
@@ -47,6 +48,8 @@ When the user asks you to order, use the quiet tools `find_products` and `quote_
    - Put a requirement the user cannot waive in `hard`. Supported: `{ attribute: <allergen or free-from claim>, is: "free_from" }`, for example `gluten`, `egg`, `lactose`, `peanut`, and `{ attribute: "vegan", is: "yes" }`. The tool input schema lists every attribute. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
    - Put a preference in `soft`. It only changes the ranking. Supported: `{ attribute: "countryOfOrigin", prefer: <country code> }` and `{ attribute: "category", prefer: <category> }`. Any other soft attribute gives 400: leave it out and put the word in `terms`.
    - If the search comes back empty, or holds no product of the kind the user asked for, call `find_products` again with fewer or other words for the same kind of product. Search again before you ask. Do not show an empty result to the user.
+   - Every candidate can be delivered on or before `deliverBy`: the search leaves out a product that cannot. `availability.dropped` counts the matches left out. When the second search is also empty and `dropped` is above 0, the wholesaler cannot deliver the product by that date: say so in one sentence and ask for another date.
+   - When `availability.checked` is `false`, the search could not read live availability. A candidate may then still be `omitted` at step 3.
    - Read `match` on each candidate: `confirmed`, `contradicted` or `unknown`. Missing data is `unknown`, never `confirmed`. An `unknown` match sends the order to approval, unless the constraint is an allergen and the mandate allows missing allergen data (`allergenData.ifNoData: auto`). Vegan and the other free-from claims always go to approval when unknown.
 3. **Request offers.** Call `quote_offers` (or `get_offers` when the user asks to compare offers) for the shortlist only. Done when every candidate is an offer or is listed in `omitted` with a reason.
    - The candidates come best match first. Send the first three that are the kind of product the user asked for as `lines` of one call, in that order, not one product per call. Do not skip a candidate for a property the user did not rule out, such as lactose free or UHT. When every line is `omitted`, quote the next three candidates before you tell the user that nothing can be delivered. A product whose cut-off has passed says nothing about the others.
@@ -76,6 +79,8 @@ Only a human approves. You have no tool that decides an approval: `decide_approv
 ## Mandate
 
 Only a human registers limits. You draft them.
+
+- To read limits during ordering, call `get_mandate`. It opens no view. Call `show_mandate` only when the user asks to see the limits or settings. It opens the mandate settings view with the same limits.
 
 - To set or change the limits, or after `MANDATE_INVALID`, call `draft_mandate` with the terms the human gave: `limits`, `standingConstraints` and, if the human named one, `exp`. For a term the human did not name, keep the value of the current mandate. Without a current mandate, ask the human, or use `ask` for each policy.
 - Then ask the human to check the draft and press Register in the mandate view. The draft changes nothing.

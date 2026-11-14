@@ -3,10 +3,12 @@ import { type HardConstraint, SearchResultSchema } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import { Elysia } from "elysia";
 import {
+  type AvailabilitySource,
   type CatalogDeps,
   type CurrentMandate,
   lazyCatalog,
   type MandateSource,
+  SEARCH_POOL,
 } from "../application/catalog.ts";
 import { type CatalogProduct, createCatalog } from "../domain/catalog.ts";
 import { MAX_QUANTITY } from "../domain/quantity.ts";
@@ -54,9 +56,24 @@ const fakeMandate = (value: Result<CurrentMandate | null, "UPSTREAM_FAILED">): M
   current: async () => value,
 });
 
+const allDeliverable: AvailabilitySource = {
+  deliverable: async (_deliverBy, productIds) => ok(new Set(productIds)),
+};
+const onlyDeliverable = (...deliverable: string[]) => {
+  const calls: { deliverBy: string; productIds: readonly string[] }[] = [];
+  const source: AvailabilitySource = {
+    deliverable: async (deliverBy, productIds) => {
+      calls.push({ deliverBy, productIds });
+      return ok(new Set(deliverable));
+    },
+  };
+  return { source, calls };
+};
+
 const deps = (overrides: Partial<CatalogDeps> = {}): CatalogDeps => ({
   catalog: async () => ok(createCatalog(products)),
   mandates: noMandate,
+  availability: allDeliverable,
   ...overrides,
 });
 
@@ -98,6 +115,72 @@ const inProcess = (app: { handle: (request: Request) => Promise<Response> }) =>
     async (input: RequestInfo | URL, init?: RequestInit) => app.handle(new Request(input, init)),
     { preconnect: fetch.preconnect },
   );
+
+describe("POST /catalog/search availability", () => {
+  test("a product that cannot be delivered by deliverBy is not a candidate, and dropped counts it", async () => {
+    const { source, calls } = onlyDeliverable("free", "plain");
+    const { status, body } = await post(
+      createApi(deps({ availability: source })),
+      "/search",
+      searchBody,
+    );
+    expect(status).toBe(200);
+    expect(ids(body)).toEqual(["free", "plain"]);
+    expect(SearchResultSchema.parse(body).availability).toEqual({ checked: true, dropped: 1 });
+    expect(calls).toEqual([{ deliverBy: "2026-11-16", productIds: ["free", "low", "plain"] }]);
+  });
+
+  test("when nothing is deliverable the candidates are empty and dropped counts every match", async () => {
+    const { source } = onlyDeliverable();
+    const { body } = await post(createApi(deps({ availability: source })), "/search", searchBody);
+    expect(SearchResultSchema.parse(body)).toMatchObject({
+      candidates: [],
+      availability: { checked: true, dropped: 3 },
+    });
+  });
+
+  test("a failed availability read answers 200 with the unfiltered candidates and checked false", async () => {
+    const failing: AvailabilitySource = { deliverable: async () => err("UPSTREAM_FAILED") };
+    const { status, body } = await post(
+      createApi(deps({ availability: failing })),
+      "/search",
+      searchBody,
+    );
+    expect(status).toBe(200);
+    expect(ids(body)).toEqual(["free", "low", "plain"]);
+    expect(SearchResultSchema.parse(body).availability).toEqual({ checked: false, dropped: 0 });
+  });
+
+  test("a search with no match does not read availability", async () => {
+    const { source, calls } = onlyDeliverable();
+    const { body } = await post(createApi(deps({ availability: source })), "/search", {
+      ...searchBody,
+      terms: ["T-NO-SUCH-WORD"],
+    });
+    expect(SearchResultSchema.parse(body)).toMatchObject({
+      candidates: [],
+      availability: { checked: true, dropped: 0 },
+    });
+    expect(calls).toEqual([]);
+  });
+
+  test("lower-ranked matches fill the 20 places that undeliverable matches leave, from a pool of SEARCH_POOL", async () => {
+    const many = Array.from({ length: SEARCH_POOL + 5 }, (_, index) =>
+      product({ productId: `m${String(index).padStart(3, "0")}` }),
+    );
+    const ranked = many.map((entry) => entry.productId);
+    // The 25 best matches cannot be delivered; the next 35 of the pool can.
+    const { source, calls } = onlyDeliverable(...ranked.slice(25));
+    const { body } = await post(
+      createApi(deps({ catalog: async () => ok(createCatalog(many)), availability: source })),
+      "/search",
+      searchBody,
+    );
+    expect(calls[0]?.productIds).toEqual(ranked.slice(0, SEARCH_POOL));
+    expect(ids(body)).toEqual(ranked.slice(25, 45));
+    expect(SearchResultSchema.parse(body).availability).toEqual({ checked: true, dropped: 25 });
+  });
+});
 
 describe("POST /catalog/search", () => {
   test("search merges the mandate's standing constraints and returns them and the mandate id and version", async () => {
@@ -332,6 +415,7 @@ describe("POST /catalog/search", () => {
       ],
       constraints: { hard: [{ attribute: "lactose", is: "free_from" }], soft: [] },
       mandate: null,
+      availability: { checked: true, dropped: 0 },
     });
   });
 

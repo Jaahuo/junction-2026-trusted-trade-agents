@@ -5,7 +5,8 @@
 The catalogue owns its Drizzle tables and generated migrations under `contexts/catalog/`.
 PostgreSQL stores complete product objects, source order, enrichment rows, the supplied schema and import identity.
 The search index remains a projection. It does not define which source fields survive import.
-Search, ranking, quantities, facts and REST/MCP response schemas stay unchanged.
+This storage cutover preserves search projection, ranking, quantities and facts.
+The current main branch's delivery-availability filter and REST/MCP contracts remain in effect.
 
 Runtime consumers use PostgreSQL only. Migration, startup, reset and first request never import source files.
 There is no source-file fallback or recurring synchronization.
@@ -64,7 +65,8 @@ Keep database credentials in the operator environment, never in command history 
 8. Verify full product objects and every enrichment row against the preserved source bundle on a disposable target.
 9. Exercise `/api/catalog/search` and `/api/catalog/facts`. Compare results with the pre-cutover baseline, not health alone.
 10. After import verification, deploy the PostgreSQL-only image without a data mount.
-11. Verify search, facts and demo metadata-driven reset on the selected release before opening access.
+11. Verify search and facts on the selected release. Verify metadata-driven reset only on a disposable imported database.
+    Production reset or reseeding requires separate approval; import does not perform either operation.
 
 The importer applies catalogue migrations before writing data. Existing file-backed releases ignore the new tables.
 This permits an approved import before changing the running API image.

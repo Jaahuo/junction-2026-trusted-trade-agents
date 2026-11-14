@@ -64,6 +64,7 @@ const announcedUri = ({ view, uri }: (typeof VIEWS)[number]) =>
 const QUIET_TWINS = [
   ["find_products", "search_products"],
   ["quote_offers", "get_offers"],
+  ["get_mandate", "show_mandate"],
 ] as const;
 
 const inputs: { [T in ToolName]: z.input<(typeof TOOL_INPUT)[T]> } = {
@@ -74,6 +75,7 @@ const inputs: { [T in ToolName]: z.input<(typeof TOOL_INPUT)[T]> } = {
   place_order: fixtures.placeOrderRequest,
   get_order_status: { orderId: fixtures.order.orderId },
   get_mandate: {},
+  show_mandate: {},
   draft_mandate: fixtures.draftMandateRequest,
   list_pending_approvals: {},
   decide_approval: fixtures.decideApprovalInput,
@@ -130,7 +132,7 @@ const mcp = (overrides: Partial<McpDeps> = {}) => {
 };
 
 describe("tools/list", () => {
-  test("MCP_VIEW_TOOLS=app lists the nine model tools and the three view tools as app-only", async () => {
+  test("MCP_VIEW_TOOLS=app lists model tools and the three view tools as app-only", async () => {
     const tools = await mcp().listTools();
     expect(tools.map((tool) => tool.name).toSorted()).toEqual(
       [...MODEL_TOOLS, ...VIEW_TOOLS].toSorted(),
@@ -193,7 +195,7 @@ describe("tools/list", () => {
     expect(VIEWS_NOT_IN_CHAT.has("offer-comparison")).toBe(true);
   });
 
-  test("the quiet twins find_products and quote_offers have no view and the same schemas as search_products and get_offers", async () => {
+  test("quiet lookups have no view and the same data schemas as their explicit-view tools", async () => {
     const tools = await mcp().listTools();
     const byName = (name: string) => tools.find((tool) => tool.name === name);
     for (const [quiet, loud] of QUIET_TWINS) {
@@ -212,6 +214,15 @@ describe("tools/list", () => {
     expect(shown === undefined ? undefined : uiOf(shown)?.resourceUri).toBe(
       "ui://trusted-trade/search-results",
     );
+  });
+
+  test("only the explicit mandate tools declare the mandate app view", async () => {
+    const tools = await mcp().listTools();
+    const mandateTools = tools
+      .filter((tool) => uiOf(tool)?.resourceUri === "ui://trusted-trade/mandate-settings")
+      .map((tool) => tool.name)
+      .toSorted();
+    expect(mandateTools).toEqual(["draft_mandate", "show_mandate"]);
   });
 });
 

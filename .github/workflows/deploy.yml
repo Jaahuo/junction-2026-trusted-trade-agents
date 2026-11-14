@@ -101,6 +101,12 @@ jobs:
           sbom: false
           cache-from: type=gha,scope=production-image
           cache-to: type=gha,scope=production-image,mode=max
+      - name: Release API build cache before building chat
+        run: |
+          set -euo pipefail
+          df -h "$RUNNER_TEMP"
+          docker buildx prune --all --force
+          df -h "$RUNNER_TEMP"
       - name: Build chat image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -147,15 +153,20 @@ jobs:
           bun scripts/generate-keys.ts > "$RUNNER_TEMP/image.env"
           printf '%s\n' \
             'DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/image_smoke' \
-            'PORT=3000' 'WHOLESALER_LIVE=fixture' >> "$RUNNER_TEMP/image.env"
-          trap 'docker logs gate-smoke; docker rm -f gate-smoke; rm -f "$RUNNER_TEMP/image.env"' EXIT
+            'PORT=3000' 'WHOLESALER_LIVE=mock' \
+            'VALIO_AIMO_API_KEY=fictional-smoke-key' \
+            'VALIO_AIMO_BASE_URL=http://127.0.0.1:3001' >> "$RUNNER_TEMP/image.env"
+          bun scripts/catalogue-smoke-availability.ts 3001 > "$RUNNER_TEMP/availability.log" 2>&1 &
+          availability_pid=$!
+          trap 'docker logs gate-smoke; docker rm -f gate-smoke; kill "$availability_pid"; rm -f "$RUNNER_TEMP/image.env"' EXIT
+          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --max-time 2 http://127.0.0.1:3001/health
           docker run --detach --name gate-smoke --network host --env-file "$RUNNER_TEMP/image.env" "gate-image:$SHA"
           curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --max-time 2 http://127.0.0.1:3000/api/health
           docker exec gate-smoke /usr/local/bin/bun apps/api/src/remote-reset.ts --yes
           test "$(docker inspect --format '{{json .Mounts}}' gate-smoke)" = '[]'
           curl --fail --silent --show-error -H 'content-type: application/json' \
             -d '{"terms":["fictional oats"],"hard":[],"soft":[],"quantity":{"value":1,"unit":"ST"},"deliverBy":"2026-11-20","paymentTerms":"invoice"}' \
-            http://127.0.0.1:3000/api/catalog/search | jq -e '.candidates | any(.productId == "fictional-oats" and .orderQuantity.value == 1)'
+            http://127.0.0.1:3000/api/catalog/search | jq -e '.availability.checked == true and (.candidates | any(.productId == "fictional-oats" and .orderQuantity.value == 1))'
           curl --fail --silent --show-error -H 'content-type: application/json' \
             -d '{"productIds":["fictional-oats"],"hard":[]}' \
             http://127.0.0.1:3000/api/catalog/facts | jq -e '.products | any(.productId == "fictional-oats" and .deliveryReliability == 0.95 and .co2PerKg == 1.25)'

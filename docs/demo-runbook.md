@@ -117,6 +117,7 @@ Run these from the worktree that serves the demo, in order:
    ```sh
    bun scripts/demo-smoke.ts --scenario 1
    bun scripts/demo-smoke.ts --scenario 2
+   bun scripts/demo-smoke.ts --scenario 4
    ```
 
    Each run starts with `bun run db:reset`, so repeated runs never use up the credit limit.
@@ -125,11 +126,11 @@ Run these from the worktree that serves the demo, in order:
 
 ### Smoke script options
 
-| Option             | Effect                                                                                                                                                               |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--scenario 1\|2`  | Scenario 1: search, offers, place (`placed`, no reasons), audit record. Scenario 2: place (`pending_approval`, `SPEND_OVER_LIMIT`), pending list, approve, `placed`. |
-| `--base-url <url>` | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                      |
-| `--no-reset`       | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                              |
+| Option               | Effect                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--scenario 1\|2\|4` | Scenario 1: search, offers, place (`placed`, no reasons), audit record. Scenario 2: place (`pending_approval`, `SPEND_OVER_LIMIT`), pending list, approve, `placed`. Scenario 4: one search per product, one offers call, one three-line order (`placed`); then the same lines scaled so each line stays under the limit and the total goes over it (`pending_approval`, `SPEND_OVER_LIMIT`). |
+| `--base-url <url>`   | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                                                                                                                                                                                                                                               |
+| `--no-reset`         | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                                                                                                                                                                                                                                                       |
 
 The server, not the script, reads `WHOLESALER_LIVE`; start it with `WHOLESALER_LIVE=mock`.
 If `offers` fails with `omitted: NO_PRICE`, the server has no live price source: check `WHOLESALER_LIVE` and `VALIO_AIMO_API_KEY`.

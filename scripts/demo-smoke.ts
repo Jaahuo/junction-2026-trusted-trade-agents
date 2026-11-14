@@ -1,5 +1,6 @@
-// Proves demo scenarios 1 and 2 against a running server through the SPEC-003 REST routes.
-// Usage: bun scripts/demo-smoke.ts --scenario 1|2 [--base-url <url>] [--no-reset]
+// Proves demo scenarios 1, 2 and 4 against a running server through the SPEC-003 REST routes.
+// Scenario 4 is the multi-product request (#127): one sentence, one order with three lines.
+// Usage: bun scripts/demo-smoke.ts --scenario 1|2|4 [--base-url <url>] [--no-reset]
 // It prints step names, HTTP statuses, order ids and audit event names only, never product data.
 import {
   DecideApprovalRequestSchema,
@@ -12,7 +13,10 @@ import {
   PlaceOrderRequestSchema,
   SearchRequestSchema,
   SearchResultSchema,
+  StoredMandateSchema,
   type DemoProducts,
+  type Order,
+  type Quantity,
 } from "../packages/contract/src/index.ts";
 import { loadRuntime } from "./runtime.ts";
 
@@ -27,6 +31,9 @@ type Schema<T> = {
 const ROOT = `${import.meta.dir}/..`;
 const HARD = [{ attribute: "lactose", is: "free_from" }] as const;
 const S1_AUDIT = ["order_requested", "offer_verified", "check_passed", "placed"];
+const SCENARIOS = [1, 2, 4] as const;
+type Scenario = (typeof SCENARIOS)[number];
+type Call = ReturnType<typeof makeClient>;
 
 class StepFailure extends Error {
   constructor(
@@ -39,21 +46,22 @@ class StepFailure extends Error {
 
 function usage(message: string): never {
   console.error(
-    `${message}\nUsage: bun scripts/demo-smoke.ts --scenario 1|2 [--base-url <url>] [--no-reset]`,
+    `${message}\nUsage: bun scripts/demo-smoke.ts --scenario 1|2|4 [--base-url <url>] [--no-reset]`,
   );
   process.exit(2);
 }
 
 function parseArgs(args: string[]) {
-  let scenario: 1 | 2 | undefined;
+  let scenario: Scenario | undefined;
   let baseUrl: string | undefined;
   let reset = true;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--scenario") {
       const value = args[++i];
-      if (value !== "1" && value !== "2") usage("--scenario must be 1 or 2.");
-      scenario = value === "1" ? 1 : 2;
+      const parsed = SCENARIOS.find((n) => String(n) === value);
+      if (parsed === undefined) usage("--scenario must be 1, 2 or 4.");
+      scenario = parsed;
     } else if (arg === "--base-url") {
       baseUrl = args[++i];
       if (!baseUrl || !/^https?:\/\//.test(baseUrl)) usage("--base-url must be an http(s) URL.");
@@ -147,12 +155,7 @@ function isSubsequence(expected: string[], actual: string[]): boolean {
   return at === expected.length;
 }
 
-async function runScenario(scenario: 1 | 2, baseUrl: string, reset: boolean, demo: DemoProducts) {
-  const call = makeClient(baseUrl);
-  const target = scenario === 1 ? demo.s1 : demo.s2;
-  const terms = { deliverBy: demo.requestedDate, paymentTerms: "invoice", hard: HARD, soft: [] };
-  console.log(`scenario ${scenario} against ${baseUrl}`);
-
+async function prepare(call: Call, reset: boolean) {
   if (reset)
     await step("reset", async () => {
       const child = Bun.spawn(["bun", "run", "db:reset"], {
@@ -179,6 +182,12 @@ async function runScenario(scenario: 1 | 2, baseUrl: string, reset: boolean, dem
     });
     return data;
   });
+}
+
+async function runScenario(scenario: 1 | 2, call: Call, reset: boolean, demo: DemoProducts) {
+  const target = scenario === 1 ? demo.s1 : demo.s2;
+  const terms = { deliverBy: demo.requestedDate, paymentTerms: "invoice", hard: HARD, soft: [] };
+  await prepare(call, reset);
 
   const candidate = await step("search", async () => {
     const body = request(SearchRequestSchema, {
@@ -277,6 +286,179 @@ async function runScenario(scenario: 1 | 2, baseUrl: string, reset: boolean, dem
   });
 }
 
+const S4_REQUEST =
+  "Order lactose-free semi-skimmed milk, lactose-free milk drink and plain soya yoghurt for Monday.";
+
+interface S4Line {
+  readonly label: string;
+  readonly terms: string[];
+  readonly productId: string;
+  readonly quantity: Quantity;
+}
+
+interface Quoted {
+  readonly tokens: string[];
+  readonly grossByLine: number[];
+}
+
+const fifth = (quantity: Quantity): Quantity => ({
+  value: Math.ceil(quantity.value / 5),
+  unit: quantity.unit,
+});
+
+// The three history products of the seed, at the quantities the seed history holds, so each line
+// alone passes every check and only the order total can trip the spend limit.
+function s4Lines(demo: DemoProducts): S4Line[] {
+  const { s3 } = demo;
+  if (s3 === null) throw new StepFailure("setup", "data/demo-products.json has no s3 product");
+  return [
+    { label: "milk", terms: ["milk"], productId: demo.s1.productId, quantity: demo.s1.quantity },
+    {
+      label: "milk drink",
+      terms: ["milk drink"],
+      productId: demo.s2.productId,
+      quantity: fifth(demo.s2.quantity),
+    },
+    { label: "soya", terms: ["soya"], productId: s3.productId, quantity: fifth(s3.quantity) },
+  ];
+}
+
+const sameMoney = (a: number, b: number) => Math.abs(a - b) < 0.015;
+
+async function quote(
+  call: Call,
+  name: string,
+  lines: { productId: string; quantity: Quantity }[],
+  demo: DemoProducts,
+): Promise<Quoted> {
+  return step(name, async () => {
+    const body = request(OffersRequestSchema, {
+      deliverBy: demo.requestedDate,
+      paymentTerms: "invoice",
+      hard: HARD,
+      soft: [],
+      lines,
+    });
+    const { data } = await call("POST", "/api/offers", OffersResultSchema, body);
+    const offers = lines.map((line) => {
+      const offer = data.offers.find((o) => o.claims.productId === line.productId);
+      const omitted = data.omitted.find((o) => o.productId === line.productId);
+      check(
+        offer !== undefined,
+        `no offer for ${line.productId} (omitted: ${omitted?.reason ?? "no reason"})`,
+      );
+      check(
+        offer.precheck?.decision === "auto",
+        `expected pre-check auto for ${line.productId}, got ${offer.precheck?.decision ?? "none"} [${offer.precheck?.reasons.join(", ") ?? ""}]`,
+      );
+      return offer;
+    });
+    console.log(
+      `     line totals ${offers.map((o) => o.claims.total.gross).join(" + ")} EUR gross`,
+    );
+    return {
+      tokens: offers.map((o) => o.token),
+      grossByLine: offers.map((o) => o.claims.total.gross),
+    };
+  });
+}
+
+async function placeAll(call: Call, name: string, quoted: Quoted): Promise<Order> {
+  return step(name, async () => {
+    const body = request(PlaceOrderRequestSchema, {
+      offers: quoted.tokens,
+      idempotencyKey: `demo-smoke-${crypto.randomUUID()}`,
+      originalRequest: S4_REQUEST,
+    });
+    const { status, data } = await call("POST", "/api/orders", OrderSchema, body);
+    check(status === 201, `expected HTTP 201, got ${status}`);
+    check(data.lines.length === 3, `expected one order with 3 lines, got ${data.lines.length}`);
+    const sum = quoted.grossByLine.reduce((a, b) => a + b, 0);
+    check(
+      sameMoney(data.total.gross, sum),
+      `expected order total ${sum.toFixed(2)} gross, got ${data.total.gross}`,
+    );
+    console.log(
+      `     order ${data.orderId} ${data.status}, 3 lines, ${data.total.gross} EUR gross`,
+    );
+    return data;
+  });
+}
+
+async function runScenario4(call: Call, reset: boolean, demo: DemoProducts) {
+  const lines = s4Lines(demo);
+  await prepare(call, reset);
+
+  const limit = await step("mandate", async () => {
+    const { data } = await call("GET", "/api/mandates/current", StoredMandateSchema);
+    const max = data.mandate.limits.maxOrderTotal.value;
+    console.log(`     order limit ${max} EUR gross`);
+    return max;
+  });
+
+  const shortlist: { productId: string; quantity: Quantity }[] = [];
+  for (const line of lines)
+    shortlist.push(
+      await step(`search ${line.label}`, async () => {
+        const body = request(SearchRequestSchema, {
+          deliverBy: demo.requestedDate,
+          paymentTerms: "invoice",
+          hard: HARD,
+          soft: [],
+          terms: line.terms,
+          quantity: line.quantity,
+          originalRequest: S4_REQUEST,
+        });
+        const { data } = await call("POST", "/api/catalog/search", SearchResultSchema, body);
+        const found = data.candidates.find((c) => c.productId === line.productId);
+        check(found !== undefined, `the ${line.label} product is not among the candidates`);
+        check(found.orderQuantity !== null, `the ${line.label} product has no orderQuantity`);
+        return { productId: found.productId, quantity: found.orderQuantity };
+      }),
+    );
+
+  const quoted = await quote(call, "offers", shortlist, demo);
+  const placed = await placeAll(call, "place", quoted);
+  await step("placed under the limit", async () => {
+    check(placed.status === "placed", `expected status placed, got ${placed.status}`);
+    check(placed.reasons.length === 0, `expected no reasons, got [${placed.reasons.join(", ")}]`);
+    check(placed.total.gross <= limit, `the order total is over the ${limit} EUR limit`);
+  });
+
+  // Scale every line by the same factor: each line stays under the limit, the total goes over it.
+  const sum = quoted.grossByLine.reduce((a, b) => a + b, 0);
+  const factor = Math.floor(limit / sum) + 1;
+  const largest = Math.max(...quoted.grossByLine) * factor;
+  if (largest >= limit)
+    throw new StepFailure(
+      "scale",
+      `a ${factor}x line costs ${largest.toFixed(2)} EUR, not under the ${limit} EUR limit`,
+    );
+  console.log(`     scale every line by ${factor}`);
+  const scaled = await quote(
+    call,
+    "offers at scale",
+    shortlist.map((line) => ({
+      productId: line.productId,
+      quantity: { value: line.quantity.value * factor, unit: line.quantity.unit },
+    })),
+    demo,
+  );
+  const pending = await placeAll(call, "place at scale", scaled);
+  await step("total over the limit", async () => {
+    check(
+      pending.status === "pending_approval",
+      `expected pending_approval, got ${pending.status}`,
+    );
+    check(
+      pending.reasons.length === 1 && pending.reasons[0] === "SPEND_OVER_LIMIT",
+      `expected reasons [SPEND_OVER_LIMIT], got [${pending.reasons.join(", ")}]`,
+    );
+    check(pending.total.gross > limit, `the order total is not over the ${limit} EUR limit`);
+    console.log(`     approvalUrl ${pending.approvalUrl ?? "none"}`);
+  });
+}
+
 async function main() {
   const { scenario, baseUrl: flag, reset } = parseArgs(process.argv.slice(2));
   let baseUrl = flag ?? Bun.env["PUBLIC_BASE_URL"];
@@ -286,7 +468,11 @@ async function main() {
   }
   const demo = DemoProductsSchema.parse(await Bun.file(`${ROOT}/data/demo-products.json`).json());
   try {
-    await runScenario(scenario, baseUrl.replace(/\/$/, ""), reset, demo);
+    const base = baseUrl.replace(/\/$/, "");
+    const call = makeClient(base);
+    console.log(`scenario ${scenario} against ${base}`);
+    if (scenario === 4) await runScenario4(call, reset, demo);
+    else await runScenario(scenario, call, reset, demo);
     console.log(`scenario ${scenario} passed`);
   } catch (error) {
     if (!(error instanceof StepFailure)) throw error;

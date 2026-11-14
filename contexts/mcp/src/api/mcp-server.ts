@@ -72,11 +72,11 @@ const GetSkillRequestSchema = z.object({
 
 const DESCRIPTIONS: Record<ToolName, string> = {
   search_products:
-    "Find candidate products for a structured need: search terms, hard and soft constraints, a quantity with unit and a deliver-by date. Returns each candidate with a per-constraint match and the quantity in sales units. Uses static data only.",
+    "Find candidate products for a structured need: search terms, hard and soft constraints, a quantity with unit and a deliver-by date. Call it once per product the user names. Returns each candidate with a per-constraint match and the quantity in sales units. Uses static data only.",
   get_offers:
-    "Get one signed offer per shortlisted product, with price, delivery date, stock and a pre-check result. Pass the offer tokens to place_order.",
+    "Get one signed offer per shortlisted product, with price, delivery date, stock and a pre-check result. Request the shortlist of every product in one call. For each product choose by pre-check auto first, then the lower gross price per standard unit, then the earlier delivery date. Pass the chosen offer tokens to place_order.",
   place_order:
-    "Place an order from signed offer tokens with an idempotency key. The order is placed, pending human approval or rejected, with reason codes. A pending order has an approvalUrl for the human; do not approve it yourself.",
+    "Place one order from signed offer tokens, one per product, with an idempotency key. Put every product of a request in the same order; never place one order per product, because the limits apply to the order total. The order is placed, pending human approval or rejected, with reason codes. A pending order has an approvalUrl for the human; do not approve it yourself.",
   get_order_status: "Get the current status and the audit record of an order.",
   get_mandate: "Get the purchasing limits currently in force for this agent.",
   list_pending_approvals: "List the orders that wait for a human approval decision.",

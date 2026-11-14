@@ -11,16 +11,22 @@ The wholesaler's server checks every order against the buyer's mandate. This ski
 
 Do the steps in order. Each step ends when its output is in hand.
 
+One request gives one order. When the user names several products in one request, search for each product, request all offers in one `get_offers` call and place one `place_order` with every chosen offer. Never place one order per product: the server checks the limits on the order total, and one order per product splits the order around a limit.
+
 1. **Read the mandate.** Call `get_mandate`. Done when you know the limits in force: spend per order (EUR, gross), allowed categories, substitution policy, payment terms. A 404 means no mandate exists. Tell the user that an approver must register one, and stop.
-2. **Search.** Call `search_products` with the user's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words). Done when you hold a shortlist of candidates.
+2. **Search.** Call `search_products` once per product the user names, with that product's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words, the same full sentence for every product). Done when you hold a shortlist of candidates for every product.
    - Put a requirement the user cannot waive in `hard`. Only `{ attribute: "lactose", is: "free_from" }` is supported. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
    - Put a preference in `soft`. It only changes the ranking.
    - Read `match` on each candidate: `confirmed`, `contradicted` or `unknown`. Missing data is `unknown`, never `confirmed`. An `unknown` match sends the order to approval, unless the mandate allows missing allergen data (`allergenData.ifNoData: auto`).
-3. **Request offers.** Call `get_offers` for the shortlist only. Done when every candidate is an offer or is listed in `omitted` with a reason.
+3. **Request offers.** Call `get_offers` once, with one line per shortlisted candidate of every product. Done when every candidate is an offer or is listed in `omitted` with a reason.
    - Read `precheck` on each offer. It is guidance: `place_order` runs the checks again.
    - Read `claims.deliveryDate`, `claims.shortfall` and `claims.replaces`. A later date or a shortfall adds `AVAILABILITY_DIFFERS`. A substitute names the product it replaces.
-4. **Choose.** Among the offers that meet the user's need, prefer one whose `precheck.decision` is `auto`. When none is `auto`, take the best offer that meets the need: the human then decides. Done when you hold one offer token per line. Keep the unchosen offers: pass them as `alternatives`.
-5. **Place the order.** Call `place_order` with `offers` (tokens), optional `alternatives`, `originalRequest`, and a new `idempotencyKey`. After a timeout or a lost reply, send the same tokens with the same key: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
+4. **Choose.** For each product, choose one offer among the offers that meet the user's need. Done when you hold one offer token per product. Keep the unchosen offers: pass them as `alternatives`.
+   Apply the choice rule in this order, and go to the next rule only on a tie:
+   1. **Pre-check.** Prefer `precheck.decision` `auto`. When no offer is `auto`, take the best offer that meets the need: the human then decides.
+   2. **Price per standard unit.** Prefer the lower gross price per `LTR` or `KGM`: `claims.total.gross` divided by the candidate's `equals.value`.
+   3. **Delivery date.** Prefer the earlier `claims.deliveryDate`.
+5. **Place the order.** Call `place_order` once, with `offers` (one token per product, up to 20), optional `alternatives`, `originalRequest`, and a new `idempotencyKey`. After a timeout or a lost reply, send the same tokens with the same key: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
 6. **Act on the status.**
 
 | Status                                       | Action                                                                                                                                    |

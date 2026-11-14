@@ -238,6 +238,89 @@ describe("partial stock quantities", () => {
       },
     });
   });
+  test("composes decimal stock planning and substitution against integer lot arithmetic", () => {
+    const original = product({ allowedLotSize: 0.1, perSalesUnit: { value: 1, unit: "LTR" } });
+    const substitute = product({ perSalesUnit: { value: 0.1, unit: "LTR" } });
+    const regression = planOriginalQuantity({ value: 4.4, unit: "CASE" }, original, {
+      stock: "confirmed",
+      amount: 4.3,
+    });
+    expect(regression.ok).toBe(true);
+    if (!regression.ok || regression.value.shortfall === null)
+      throw new Error("Expected shortfall");
+    expect(quantityForShortfall(regression.value.shortfall, original, substitute)).toEqual({
+      value: 1,
+      unit: "CASE",
+    });
+    const fullRequest = { value: 0.9, unit: "CASE" };
+    expect(
+      planOriginalQuantity(fullRequest, product({ allowedLotSize: 0.3 }), {
+        stock: "confirmed",
+        amount: 0.9,
+      }),
+    ).toEqual({ ok: true, value: { quantity: fullRequest, shortfall: null } });
+
+    const scale = 1000;
+    for (const originalLotTicks of [100, 250, 500, 1000]) {
+      for (const originalConversionTicks of [100, 250, 1000]) {
+        for (const substituteLotTicks of [100, 500, 1000]) {
+          for (const substituteConversionTicks of [100, 250, 1000]) {
+            const source = product({
+              allowedLotSize: originalLotTicks / scale,
+              perSalesUnit: { value: originalConversionTicks / scale, unit: "LTR" },
+            });
+            const target = product({
+              salesUnit: "PACK",
+              allowedLotSize: substituteLotTicks / scale,
+              perSalesUnit: { value: substituteConversionTicks / scale, unit: "LTR" },
+            });
+            for (const availableCount of [43, 999, 100000]) {
+              const requested = {
+                value: (availableCount * originalLotTicks) / scale,
+                unit: "CASE",
+              };
+              for (const extraCount of [0, 1]) {
+                expect(
+                  planOriginalQuantity(requested, source, {
+                    stock: "confirmed",
+                    amount: ((availableCount + extraCount) * originalLotTicks) / scale,
+                  }),
+                ).toEqual({ ok: true, value: { quantity: requested, shortfall: null } });
+              }
+              for (const missingCount of [1, 2, 3]) {
+                const plan = planOriginalQuantity(
+                  {
+                    value: ((availableCount + missingCount) * originalLotTicks) / scale,
+                    unit: "CASE",
+                  },
+                  source,
+                  { stock: "confirmed", amount: (availableCount * originalLotTicks) / scale },
+                );
+                expect(plan.ok).toBe(true);
+                if (!plan.ok || plan.value.shortfall === null)
+                  throw new Error("Expected shortfall");
+                const standardTicks = missingCount * originalLotTicks * originalConversionTicks;
+                const substituteLotStandardTicks = substituteLotTicks * substituteConversionTicks;
+                const expectedCount = Math.ceil(standardTicks / substituteLotStandardTicks);
+                const quantity = quantityForShortfall(plan.value.shortfall, source, target);
+                expect(quantity?.unit).toBe("PACK");
+                expect(quantity?.value).toBeCloseTo(
+                  (expectedCount * substituteLotTicks) / scale,
+                  10,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(
+      planOriginalQuantity({ value: 100000.01, unit: "CASE" }, product(), {
+        stock: "confirmed",
+        amount: 99999,
+      }),
+    ).toEqual({ ok: false, error: "INVALID_QUANTITY" });
+  });
 });
 
 describe("substitute ranking", () => {

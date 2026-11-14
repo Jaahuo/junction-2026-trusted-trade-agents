@@ -246,6 +246,89 @@ describe("getOffers", () => {
     }
   });
 
+  test("generated near-equal decimal originals retain substitutes with exactly enough stock", async () => {
+    const sub = "prod_test_composed_sub";
+    const scale = 1000;
+    for (const lotTicks of [50, 100, 125, 250]) {
+      for (const conversion of [1, 2]) {
+        for (const requestedLots of [3, 7, 44, 83]) {
+          for (const missingLots of [1, 2]) {
+            const requested = (requestedLots * lotTicks) / scale;
+            const available = ((requestedLots - missingLots) * lotTicks) / scale;
+            const setup = fakeOffersDeps({
+              products: [
+                fakeProduct(OAT, {
+                  allowedLotSize: lotTicks / scale,
+                  perSalesUnit: { value: conversion, unit: "LTR" },
+                  substitutes: [sub],
+                }),
+                fakeProduct(sub, {
+                  perSalesUnit: { value: (lotTicks * conversion) / scale, unit: "LTR" },
+                }),
+              ],
+              live: {
+                ...quoted(OAT, { amount: available, stock: "confirmed" }),
+                ...quoted(sub, { amount: missingLots, stock: "confirmed" }),
+              },
+            });
+            const result = valueOf(
+              await getOffers(setup.deps, principal, request({ lines: [line(OAT, requested)] })),
+            );
+            expect(result.omitted).toEqual([]);
+            const original = result.offers.find((offer) => offer.claims.productId === OAT);
+            const substitutes = result.offers.filter((offer) => offer.claims.replaces === OAT);
+            expect(original?.claims.quantity.value).toBeCloseTo(available, 12);
+            expect(original?.claims.shortfall?.value).toBeCloseTo(
+              (missingLots * lotTicks * conversion) / scale,
+              12,
+            );
+            expect(substitutes).toHaveLength(1);
+            expect(substitutes[0]?.claims.quantity).toEqual({ value: missingLots, unit: "CT" });
+            expect(setup.signer.signed.some((entry) => entry.claims.replaces === OAT)).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  test("generated full and excess decimal stock never creates a phantom shortfall", async () => {
+    const sub = "prod_test_full_stock_sub";
+    const scale = 1000;
+    for (const lotTicks of [100, 125, 300, 350]) {
+      for (const lots of [3, 7, 11, 44]) {
+        const requested = (lots * lotTicks) / scale;
+        for (const extraTicks of [0, lotTicks]) {
+          const setup = fakeOffersDeps({
+            products: [
+              fakeProduct(OAT, {
+                allowedLotSize: lotTicks / scale,
+                perSalesUnit: { value: 1, unit: "LTR" },
+                substitutes: [sub],
+              }),
+              fakeProduct(sub, { perSalesUnit: { value: 1, unit: "LTR" } }),
+            ],
+            live: {
+              ...quoted(OAT, { amount: (lots * lotTicks + extraTicks) / scale }),
+              ...quoted(sub),
+            },
+          });
+          const result = valueOf(
+            await getOffers(setup.deps, principal, request({ lines: [line(OAT, requested)] })),
+          );
+          expect(result.omitted).toEqual([]);
+          expect(result.offers).toHaveLength(1);
+          expect(result.offers[0]?.claims).toMatchObject({
+            productId: OAT,
+            quantity: { value: requested, unit: "CT" },
+            shortfall: null,
+            replaces: null,
+          });
+          expect(setup.signer.signed.map((entry) => entry.claims.productId)).toEqual([OAT]);
+        }
+      }
+    }
+  });
+
   test("shared substitutes are looked up once but ranked and signed for each requested occurrence", async () => {
     const sub = "prod_test_sub";
     const perSalesUnit = { value: 1, unit: "LTR" };
@@ -393,7 +476,7 @@ describe("getOffers", () => {
       ],
       live: {
         ...quoted(OAT, { amount: 2, cutoffAt: "2026-11-14T10:00:05Z" }),
-        ...quoted(sub, {}, { validTo: "2026-11-14T10:00:05Z" }),
+        ...quoted(sub),
       },
     });
     const signer: OfferSigner = {
@@ -406,6 +489,10 @@ describe("getOffers", () => {
     const result = valueOf(await getOffers({ ...setup.deps, signer }, principal, request()));
     expect(result.offers).toEqual([]);
     expect(reasons(result.omitted)).toEqual({ [OAT]: "NO_DELIVERY_DATE" });
+    expect(setup.signer.signed.map((entry) => entry.claims.productId)).toEqual([OAT, sub]);
+    expect(setup.signer.signed[1]?.exp.getTime()).toBeGreaterThan(
+      Date.parse("2026-11-14T10:00:05Z"),
+    );
   });
 
   test("a substitute lookup failure happens before any offer is signed", async () => {

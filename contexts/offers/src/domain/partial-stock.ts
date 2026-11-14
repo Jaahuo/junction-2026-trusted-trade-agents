@@ -14,8 +14,7 @@ const safe = (value: number): boolean =>
   Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
 const positive = (value: number): boolean => safe(value) && value > 0;
 
-// Bound the adjustment in lot counts: relative floating-point noise must never
-// grow large enough to erase a real fractional lot at large quantities.
+// Cap noise correction so large counts cannot erase a fractional lot.
 function normalizeLots(lots: number): number {
   const nearest = Math.round(lots);
   const tolerance = Math.min(1e-9, 4 * Number.EPSILON * Math.max(1, lots));
@@ -57,12 +56,19 @@ export function planOriginalQuantity(
 > {
   if (checkQuantity(requested, product) !== null || !safe(requested.value))
     return err("INVALID_QUANTITY");
+  const requestedCount = normalizeLots(requested.value / product.allowedLotSize);
+  if (!Number.isSafeInteger(requestedCount) || requestedCount < 1) return err("INVALID_QUANTITY");
   if (stock.stock !== "confirmed") return ok({ quantity: requested, shortfall: null });
-  const available = floorToLot(stock.amount, product.allowedLotSize);
-  if (available === null) return err("INVALID_QUANTITY");
-  if (available <= 0) return err("INSUFFICIENT_STOCK");
-  if (available >= requested.value) return ok({ quantity: requested, shortfall: null });
-  const missing = requested.value - available;
+  if (!safe(stock.amount) || stock.amount < 0) return err("INVALID_QUANTITY");
+  const availableLots = stock.amount / product.allowedLotSize;
+  if (!safe(availableLots)) return err("INVALID_QUANTITY");
+  const availableCount = Math.floor(normalizeLots(availableLots));
+  if (!Number.isSafeInteger(availableCount)) return err("INVALID_QUANTITY");
+  if (availableCount <= 0) return err("INSUFFICIENT_STOCK");
+  if (availableCount >= requestedCount) return ok({ quantity: requested, shortfall: null });
+  const available = availableCount * product.allowedLotSize;
+  const missing = (requestedCount - availableCount) * product.allowedLotSize;
+  if (!safe(available)) return err("INVALID_QUANTITY");
   const conversion = product.perSalesUnit;
   if (
     conversion !== null &&

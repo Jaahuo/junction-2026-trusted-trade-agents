@@ -20,8 +20,9 @@ const FONTS = [
 
 let loaded = false;
 
+/** Adds the brand fonts to the page once; does nothing without a DOM (tests, server). */
 export function loadFonts() {
-  if (loaded) return;
+  if (loaded || typeof document === "undefined") return;
   loaded = true;
   for (const [family, weight, url] of FONTS)
     document.fonts.add(

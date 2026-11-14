@@ -18,9 +18,9 @@ Leave this path only for a branch that [Flow](#flow) names.
 ## Reply
 
 - Stay silent until the order has a status or you need an answer. Write no progress note, no plan and no list of what you found.
-- Give the outcome first, in one or two short sentences: product, quantity, delivery day and gross total.
-- For a sign-off, say that the order needs a sign-off, give the reason in a few plain words and give `approvalUrl`.
-- Leave out what a card shows, and leave out tool names, codes and ids.
+- A host that renders MCP App views shows the order as a card after `place_order`. The card carries the product, quantity, delivery day, total, reasons and the approval buttons. Then reply with one short sentence that gives only the status: the order is placed, or it needs a sign-off. Repeat nothing that the card shows and give no link.
+- Without a card, give the outcome in one or two short sentences: product, quantity, delivery day and gross total. For a sign-off, add the reason in a few plain words and `approvalUrl`.
+- Leave out tool names, codes and ids.
 - End on the outcome. Offer no menu of next steps.
 
 "Tell the user" in this skill and in [reason-codes.md](reason-codes.md) means one such sentence.

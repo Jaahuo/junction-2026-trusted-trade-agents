@@ -1,0 +1,34 @@
+{
+  "draft": {
+    "limits": {
+      "maxOrderTotal": {
+        "value": 500,
+        "currency": "EUR",
+        "basis": "gross"
+      },
+      "categories": null,
+      "substitutions": "ask",
+      "newProducts": "ask",
+      "minDeliveryReliability": {
+        "value": 0.9,
+        "ifNoData": "auto"
+      },
+      "maxCo2PerKg": {
+        "value": 3,
+        "ifNoData": "auto"
+      },
+      "allergenData": {
+        "ifNoData": "ask"
+      },
+      "paymentTerms": {
+        "invoice": "auto",
+        "pay_on_order": "ask"
+      }
+    },
+    "standingConstraints": {
+      "hard": [],
+      "soft": []
+    }
+  },
+  "current": null
+}

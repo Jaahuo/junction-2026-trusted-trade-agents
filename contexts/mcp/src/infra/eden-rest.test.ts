@@ -49,6 +49,14 @@ test("search posts the input as the body and returns the REST body", async () =>
   ]);
 });
 
+test("draft posts the input to /api/mandates/drafts and returns the draft", async () => {
+  const { rest, sent } = fakeFetch(() => Response.json(fixtures.mandateDraft));
+  expect(await rest.draft(fixtures.draftMandateRequest)).toEqual(ok(fixtures.mandateDraft));
+  expect(sent).toEqual([
+    { method: "POST", path: "/api/mandates/drafts", body: fixtures.draftMandateRequest },
+  ]);
+});
+
 test("revoke puts mandateId in the path", async () => {
   const { rest, sent } = fakeFetch(() => Response.json(fixtures.storedMandate));
   await rest.revoke("mnd_7");

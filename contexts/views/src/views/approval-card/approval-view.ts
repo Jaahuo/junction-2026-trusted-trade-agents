@@ -1,4 +1,10 @@
-import type { DecideApprovalRequest, Order, PendingList } from "@app/contract";
+import {
+  type DecideApprovalRequest,
+  type Order,
+  type PendingList,
+  samePair,
+  type SubstitutionRule,
+} from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { css, html, nothing } from "lit";
 import {
@@ -12,10 +18,12 @@ import checkCircle from "../../shared/icons/check-circle-32.svg?raw";
 import warningSmall from "../../shared/icons/warning-16.svg?raw";
 import warningLarge from "../../shared/icons/warning-32.svg?raw";
 import { pick } from "../../shared/locale.ts";
+import { saveRules } from "../../shared/substitution-rules.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
-import { defineApprovalCard, reasonSummaries } from "./approval-card.ts";
+import { defineApprovalCard, reasonSummaries, type RuleChoice } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
+import { readCurrent, withCurrent } from "./current-state.ts";
 import { brandHeader, cardStyles, icon, money, orderName, vat, when } from "./parts.ts";
 import { VIEW } from "./strings.ts";
 
@@ -28,11 +36,15 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   static override properties = {
     ...ViewElement.properties,
     openId: { state: true },
+    inApp: { attribute: false },
     busyId: { state: true },
     updatingId: { state: true },
     orderLimit: { state: true },
     decisionError: { state: true },
     pending: { state: true },
+    remembered: { state: true },
+    rules: { state: true },
+    unchecked: { state: true },
   };
 
   static override styles = [
@@ -190,6 +202,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   readonly entry = viewEntry("approval-card");
   declare private openId: string | null;
+  /**
+   * Shown on a page of the web app: each order has its own page, so opening one (or going back)
+   * asks the app to navigate (`tt-approval-navigate`, detail: the order id or null).
+   */
+  declare inApp: boolean;
   declare private busyId: string | null;
   /** The order the agent is updating after a message (prototype P4). */
   declare private updatingId: string | null;
@@ -200,15 +217,31 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   private limitAsked = false;
   /** What the tool is doing, from its arguments, while the result is on its way. */
   declare private pending: { placing: boolean; request: string | null };
+  /** The orders whose substitution rule is saved in the mandate. */
+  declare private remembered: ReadonlySet<string>;
+  /** The mandate's substitution rules, read once when a declined order has a substitute. */
+  declare private rules: SubstitutionRule[];
+  /** Orders whose current state the server could not give: their decisions stay off. */
+  declare private unchecked: ReadonlySet<string>;
+  /** True once the shown orders were read from the server after the tool result arrived. */
+  private checked = false;
+  /** Reads the orders again when the approver comes back to the chat or the tab. */
+  private readonly recheck = () => {
+    if (globalThis.document?.visibilityState !== "hidden") void this.refresh();
+  };
 
   constructor() {
     super();
     this.openId = null;
+    this.inApp = false;
     this.busyId = null;
     this.updatingId = null;
     this.orderLimit = null;
     this.decisionError = null;
     this.pending = { placing: false, request: null };
+    this.remembered = new Set();
+    this.rules = [];
+    this.unchecked = new Set();
   }
 
   override connectedCallback() {
@@ -219,13 +252,42 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         request: typeof args["originalRequest"] === "string" ? args["originalRequest"] : null,
       };
     });
+    globalThis.addEventListener?.("focus", this.recheck);
+    globalThis.document?.addEventListener("visibilitychange", this.recheck);
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    globalThis.removeEventListener?.("focus", this.recheck);
+    globalThis.document?.removeEventListener("visibilitychange", this.recheck);
   }
 
   /**
-   * Reads the order limit once, when an over-limit order is shown; without it the block shows no
-   * limit. Other orders need no limit, so the host shows no tool call for them.
+   * Reads the shown orders from the server and shows each newer copy. A host replays the
+   * original tool result after a refresh, and a decision may come from another tab or the
+   * approval page, so the tool result alone can be out of date.
+   */
+  private async refresh() {
+    const source = this.source;
+    const state = this.state;
+    if (source === null || state.kind !== "done") return;
+    const { current, unread } = await readCurrent(source, state.data);
+    const latest = this.state;
+    if (latest.kind !== "done") return;
+    this.state = { kind: "done", data: withCurrent(latest.data, current) };
+    this.unchecked = unread;
+  }
+
+  /**
+   * Reads the mandate once, when an over-limit order or a declined substitute is shown: the order
+   * limit for the block, and the rules so a pair with a rule is not offered again. Other orders
+   * need neither, so the host shows no tool call for them.
    */
   override updated() {
+    if (!this.checked && this.state.kind === "done") {
+      this.checked = true;
+      void this.refresh();
+    }
     const order = this.state.kind === "done" ? this.selectedOrder(this.state.data) : undefined;
     this.dispatchEvent(
       new CustomEvent("tt-approval-selection", { detail: order?.orderId ?? null }),
@@ -233,18 +295,34 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const state = this.state;
     if (this.limitAsked || this.source === null || state.kind !== "done") return;
     const orders = "orders" in state.data ? state.data.orders : [state.data];
-    if (!orders.some((o) => o.reasons.includes("SPEND_OVER_LIMIT"))) return;
+    if (!orders.some((o) => o.reasons.includes("SPEND_OVER_LIMIT") || declinedSubstitute(o)))
+      return;
     this.limitAsked = true;
     void callAction(this.source, "get_mandate", {}, null).then((result) => {
-      if (result.kind === "done" && result.data.status === "active")
-        this.orderLimit = result.data.mandate.limits.maxOrderTotal.value;
+      if (result.kind !== "done" || result.data.status !== "active") return;
+      this.orderLimit = result.data.mandate.limits.maxOrderTotal.value;
+      this.rules = result.data.mandate.limits.substitutionRules ?? [];
     });
   }
 
+  /** True on the plain page, where the view loads from REST rather than from a chat host. */
+  private get plain() {
+    return this.source !== null && this.source.message === undefined;
+  }
+
+  /**
+   * Try again: the plain page loads again. In a chat the tool result arrived once, so reading it
+   * again gives the same failure; the view asks the server for the open approvals instead.
+   */
   private reload() {
-    if (this.source === null) return;
+    const source = this.source;
+    if (source === null) return;
     this.state = { kind: "loading" };
-    void loadView(this.entry, this.source).then((state) => (this.state = state));
+    void (
+      this.plain
+        ? loadView(this.entry, source)
+        : callAction(source, "list_pending_approvals", {}, null)
+    ).then((state) => (this.state = state));
   }
 
   /**
@@ -252,7 +330,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
    * is approved at once, unless it brings a reason the order did not have: then it is shown.
    */
   private async decide(order: Order, request: DecideApprovalRequest, thenApprove = false) {
-    if (this.source === null) return;
+    if (this.source === null || this.unchecked.has(order.orderId)) return;
     this.busyId = order.orderId;
     const result = await callAction(
       this.source,
@@ -264,6 +342,9 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     // A failed decision keeps the card and says why there (an expired offer, a conflict …).
     if (result.kind !== "done") {
       this.decisionError = { orderId: order.orderId, message: decisionFailure(result) };
+      // Already decided or gone: show the order as the server has it now.
+      if (result.kind === "error" && /^(CONFLICT|NOT_FOUND):/.test(result.message))
+        void this.refresh();
       return;
     }
     this.decisionError = null;
@@ -281,6 +362,27 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   }
 
   /**
+   * Saves the human's rule for a substitute pair as a new version of the current mandate, with
+   * its limits, constraints and expiry unchanged otherwise. A rule for the same pair is replaced.
+   */
+  private async remember(order: Order, choice: RuleChoice) {
+    const source = this.source;
+    if (source === null) return;
+    this.busyId = order.orderId;
+    const saved = await saveRules(source, (rules) => [
+      ...rules.filter((rule) => !samePair(rule, choice)),
+      { ...choice, decidedAt: new Date().toISOString() },
+    ]);
+    this.busyId = null;
+    if (saved.kind !== "done") {
+      this.decisionError = { orderId: order.orderId, message: pick(VIEW).ruleNotSaved };
+      return;
+    }
+    this.decisionError = null;
+    this.remembered = new Set([...this.remembered, order.orderId]);
+  }
+
+  /**
    * The model learns the decision made on the card, with the order id, so it does not say the
    * order still waits. Only "Reject, allow alternatives" leaves the agent work to do: that one is
    * also said in the chat, which starts the agent's turn. A host that refuses it changes nothing
@@ -293,8 +395,15 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       await this.source?.message?.(text).catch(() => undefined);
   }
 
-  /** Opens an order from the list (or goes back with null) at the top of the view. */
+  /**
+   * Opens an order from the list (or goes back with null) at the top of the view. In the web
+   * app the app's own page changes, so its address and back button follow.
+   */
   private open(orderId: string | null) {
+    if (this.inApp) {
+      this.dispatchEvent(new CustomEvent("tt-approval-navigate", { detail: orderId }));
+      return;
+    }
     this.openId = orderId;
     this.decisionError = null;
     window.scrollTo({ top: 0 });
@@ -328,6 +437,9 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         this.decisionError = { orderId: order.orderId, message: decisionFailure(rejected) };
         return;
       }
+      const state = this.state;
+      if (state.kind === "done")
+        this.state = { kind: "done", data: replace(state.data, rejected.data) };
       void source.context?.(
         `Order ${order.orderId} was rejected on the approval card because the approver asked for a new offer. Place the new order for approval when you have it.`,
       );
@@ -391,7 +503,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   private empty() {
     const text = pick(VIEW);
-    return html`<article class="card" part="empty">
+    return html` <article class="card" part="empty">
       ${brandHeader(text.brandApprovals(brand.name), html`<h2 class="title">${text.approvals}</h2>`)}
       <div class="body center">
         ${icon(checkCircle)}
@@ -404,7 +516,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   private list(orders: Order[]) {
     const pending = orders.filter((o) => o.status === "pending_approval").length;
     const text = pick(VIEW);
-    return html`<div class="top-row" aria-hidden="true"></div>
+    // The empty row lines the list up with an open order's back link; the app has its top bar.
+    return html`${this.inApp ? nothing : html`<div class="top-row" aria-hidden="true"></div>`}
       <article class="card" part="list">
         ${brandHeader(
           text.brandApprovals(brand.name),
@@ -452,14 +565,19 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   override render() {
     const state = this.state;
     if (state.kind === "loading") return this.loading();
-    if (state.kind === "error") return errorCard(state.plainUrl, () => this.reload());
+    if (state.kind === "error")
+      return errorCard(state.plainUrl, () => this.reload(), state.message);
     if (state.kind === "empty") return this.empty();
     return this.renderDone(state.data);
   }
 
   private selectedOrder(data: ViewData<"approval-card">) {
-    const orders = "orders" in data ? data.orders : [data];
-    return orders.length === 1 ? orders[0] : orders.find((o) => o.orderId === this.openId);
+    if (!("orders" in data)) return data;
+    // A list of one opens its order, except in the web app, where an order has its own page.
+    const { orders } = data;
+    return orders.length === 1 && !this.inApp
+      ? orders[0]
+      : orders.find((o) => o.orderId === this.openId);
   }
 
   protected override renderDone(data: ViewData<"approval-card">) {
@@ -468,11 +586,20 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     if (open === undefined) return orders.length === 0 ? this.empty() : this.list(orders);
     if (this.updatingId === open.orderId) return this.updating(open);
     // The back link sits in a row the list keeps too, so the card does not move.
+    const text = pick(VIEW);
     return html`${
-        orders.length > 1
+        orders.length > 1 || this.inApp
           ? html`<div class="top-row">
-              <button class="back" @click=${() => this.open(null)}>
-                ${pick(VIEW).allApprovals}
+              <button class="back" @click=${() => this.open(null)}>${text.allApprovals}</button>
+            </div>`
+          : nothing
+      }
+      ${
+        this.unchecked.has(open.orderId)
+          ? html`<div class="message" role="status" part="unchecked">
+              <p>${text.unchecked}</p>
+              <button class="btn ghost" @click=${() => void this.refresh()}>
+                ${text.checkAgain}
               </button>
             </div>`
           : nothing
@@ -480,6 +607,9 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       <tt-approval-card
         .order=${open}
         ?busy=${this.busyId === open.orderId}
+        ?locked=${this.unchecked.has(open.orderId)}
+        ?remembered=${this.remembered.has(open.orderId)}
+        .rules=${this.rules}
         ?can-ask=${this.source?.message !== undefined}
         .orderLimit=${this.orderLimit}
         .error=${this.decisionError?.orderId === open.orderId ? this.decisionError.message : null}
@@ -488,9 +618,14 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
           this.decide(open, e.detail, true)}
         @tt-ask-agent=${(e: CustomEvent<string>) => this.ask(open, e.detail, true)}
         @tt-talk=${(e: CustomEvent<string>) => this.ask(open, e.detail, false)}
+        @tt-remember=${(e: CustomEvent<RuleChoice>) => this.remember(open, e.detail)}
       ></tt-approval-card>`;
   }
 }
+
+/** A declined order with a substitute line: the card may offer to stop suggesting it. */
+const declinedSubstitute = (o: Order) =>
+  o.status === "declined" && o.lines.some((line) => line.claims.replaces !== null);
 
 /** Plain words for a failed decision, by the server's error code ("CODE: message"). */
 const decisionFailure = (result: { kind: string; message?: string }) => {
@@ -510,8 +645,20 @@ export const decisionText = (order: Order) => {
   return order.decision?.next === "alternatives" ? decided.alternatives(name) : decided.stop(name);
 };
 
-/** The error state: the approval page when there is one, and Try again. */
-export const errorCard = (approvalUrl: string | null, retry: () => void) => {
+/** The app's page of open approvals, on the server that served the view (relative without a DOM). */
+const listPageUrl = () => {
+  const server =
+    globalThis.document?.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ??
+    globalThis.location?.origin ??
+    "";
+  return `${server}/approvals`;
+};
+
+/**
+ * The error state: the approval page when there is one, else the list of open approvals, and
+ * Try again. The reason is shown small, so a host that sends an unreadable result is visible.
+ */
+export const errorCard = (approvalUrl: string | null, retry: () => void, reason = "") => {
   const text = pick(VIEW);
   return html`<article class="card" part="error" role="alert">
     ${brandHeader(text.brandApprovals(brand.name))}
@@ -520,16 +667,13 @@ export const errorCard = (approvalUrl: string | null, retry: () => void) => {
       <p class="headline">${text.cantShowTitle}</p>
       <p class="secondary">${approvalUrl === null ? text.cantShowRetry : text.cantShowBody}</p>
       <div class="actions">
-        ${
-          approvalUrl === null
-            ? nothing
-            : html`<a class="btn primary" href=${approvalUrl} target="_blank" rel="noreferrer"
-                >${text.openApprovalPage}</a
-              >`
-        }
+        <a class="btn primary" href=${approvalUrl ?? listPageUrl()} target="_blank" rel="noreferrer"
+          >${approvalUrl === null ? text.openApprovals : text.openApprovalPage}</a
+        >
         <button class="btn ghost" @click=${retry}>${text.tryAgain}</button>
       </div>
-      ${approvalUrl === null ? nothing : html`<p class="label-small secondary">${text.opensNewTab}</p>`}
+      <p class="label-small secondary">${text.opensNewTab}</p>
+      ${reason === "" ? nothing : html`<p class="label-small secondary">${reason}</p>`}
     </div>
   </article>`;
 };

@@ -93,6 +93,8 @@ Open WebUI 0.13.3 also works as a host against `/mcp` (voice spike #45).
 ## 6. Before each rehearsal and recording
 
 Run these from the worktree that serves the demo, in order:
+Import the private catalogue bundle first with the [catalogue import procedure](catalogue-import.md). Include its demo metadata.
+Resets preserve that import. Scripts read PostgreSQL, not the source directory.
 
 1. Reset the database to the demo state:
 
@@ -103,7 +105,7 @@ Run these from the worktree that serves the demo, in order:
    It resets only this worktree's database, so run it in the worktree whose server the host reaches.
 
 2. Before a recording, check that the demo products still fit the live data.
-   Use the `requestedDate` of `data/demo-products.json`, or the deliver-by date that the demo sentence names:
+   Use the requested date from imported demo metadata, or the deliver-by date that the demo sentence names:
 
    ```sh
    bun scripts/check-demo-data.ts --date <YYYY-MM-DD>
@@ -119,18 +121,32 @@ Run these from the worktree that serves the demo, in order:
    bun scripts/demo-smoke.ts --scenario 2
    ```
 
-   Each run starts with `bun run db:reset`, so repeated runs never use up the credit limit.
+   Each run starts with `bun run db:reset`.
    Each step prints `ok <step>`; a failure prints `FAIL step <step>` with the HTTP status and error code, and exits 1.
    The run leaves a placed order, so run `bun run db:reset` once more before you record.
    Wait a few seconds between smoke scripts and before the first chat request to avoid upstream rate limits.
 
+### Trust that grows: the substitute beats
+
+`bun run db:reset` seeds two approved orders of the scenario 3 substitute (`s3Substitute` in imported demo metadata), so the next approval of that pair is the third.
+
+1. Ask for the scenario 3 product. The original is short, so the agent offers the substitute for the rest, and the order waits for approval with `SUBSTITUTION`.
+2. Approve it. The confirmation asks "✦ You've approved … 3 times. Let the agent do this without asking?". Press **Yes, automatically**.
+3. Ask for the scenario 3 product again, and have the agent place the substitute's offer as its own order. It is placed without asking, and the order log says "Substitute allowed without asking: standing approval given …". The short original still asks, because its amount differs from the request.
+4. Show the rule in the agent limits view, and remove it there.
+
+The reject beat: reject a substitute and press **Don't suggest again** on the declined card. The next request for the scenario 3 product gets no offer of that substitute.
+
+Run `bun run db:reset` between takes: a saved rule lasts until the reset, and a new mandate version makes open orders stale.
+
 ### Smoke script options
 
-| Option             | Effect                                                                                                                                                               |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--scenario 1\|2`  | Scenario 1: search, offers, place (`placed`, no reasons), audit record. Scenario 2: place (`pending_approval`, `SPEND_OVER_LIMIT`), pending list, approve, `placed`. |
-| `--base-url <url>` | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                      |
-| `--no-reset`       | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                              |
+| Option                | Effect                                                                                                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--scenario 1\|2`     | Scenario 1: search, offers, place (`placed`, no reasons), audit record. Scenario 2: place (`pending_approval`, `SPEND_OVER_LIMIT`), pending list, approve, `placed`. |
+| `--base-url <url>`    | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                      |
+| `--no-reset`          | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                              |
+| `--database-env NAME` | Read imported demo metadata from the database URL in environment variable `NAME`. Required for another application target. Also requires `--no-reset`.               |
 
 The server, not the script, reads `WHOLESALER_LIVE`; start it with `WHOLESALER_LIVE=mock`.
 If `offers` fails with `omitted: NO_PRICE`, the server has no live price source: check `WHOLESALER_LIVE` and `VALIO_AIMO_API_KEY`.

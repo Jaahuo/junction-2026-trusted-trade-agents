@@ -18,6 +18,7 @@ import {
   pendingSummary,
   searchSummary,
 } from "../domain/summary.ts";
+import { placeOrderInput } from "./place-order-input.ts";
 
 type ToolInput<T extends ToolName> = z.infer<(typeof TOOL_INPUT)[T]>;
 type ToolOutput<T extends ToolName> = z.infer<(typeof TOOL_OUTPUT)[T]>;
@@ -70,9 +71,15 @@ const decide = (
     : Promise.resolve(err(badRequest(issueText(body.error))));
 };
 
+// A quiet twin (SPEC-012) calls the same route as the tool with the view.
 const TOOLS: { [T in ToolName]: Tool<T> } = {
   search_products: {
     input: TOOL_INPUT.search_products,
+    call: (rest, input) => rest.search(input),
+    text: searchSummary,
+  },
+  find_products: {
+    input: TOOL_INPUT.find_products,
     call: (rest, input) => rest.search(input),
     text: searchSummary,
   },
@@ -81,8 +88,13 @@ const TOOLS: { [T in ToolName]: Tool<T> } = {
     call: (rest, input) => rest.offers(input),
     text: offersSummary,
   },
+  quote_offers: {
+    input: TOOL_INPUT.quote_offers,
+    call: (rest, input) => rest.offers(input),
+    text: offersSummary,
+  },
   place_order: {
-    input: TOOL_INPUT.place_order,
+    input: placeOrderInput,
     call: (rest, input) => rest.place(input),
     text: orderSummary,
   },
@@ -93,6 +105,11 @@ const TOOLS: { [T in ToolName]: Tool<T> } = {
   },
   get_mandate: {
     input: TOOL_INPUT.get_mandate,
+    call: (rest) => rest.mandate(),
+    text: mandateSummary,
+  },
+  show_mandate: {
+    input: TOOL_INPUT.show_mandate,
     call: (rest) => rest.mandate(),
     text: mandateSummary,
   },

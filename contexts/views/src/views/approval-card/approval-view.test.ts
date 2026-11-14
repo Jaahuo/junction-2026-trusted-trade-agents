@@ -8,11 +8,14 @@ const fixtures = resolve(import.meta.dir, "../../../fixtures/approval-card");
 const order = async (name: string) =>
   OrderSchema.parse(await Bun.file(resolve(fixtures, `${name}.json`)).json());
 
-test("the error card names the approval page only when there is one", () => {
-  const without = markup(errorCard(null, () => undefined));
+test("the error card names the approval page when there is one, else the open approvals", () => {
+  const without = markup(errorCard(null, () => undefined, "The tool result does not match."));
   expect(without).not.toContain("approval page");
-  expect(without).not.toContain("href");
+  expect(without).toContain("Open approvals");
+  expect(without).toContain("/approvals");
+  expect(without).not.toContain("/views/approval-card");
   expect(without).toContain("Try again in a moment.");
+  expect(without).toContain("The tool result does not match.");
 
   const url = "https://example.test/approvals?order=ord_1";
   const withPage = markup(errorCard(url, () => undefined));

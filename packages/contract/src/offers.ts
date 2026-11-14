@@ -21,6 +21,16 @@ export const OffersRequestSchema = z.strictObject({
 });
 export type OffersRequest = z.infer<typeof OffersRequestSchema>;
 
+/** Which of these products can be delivered on or before the date (SPEC-006 `availability`). */
+export const AvailabilityRequestSchema = z.strictObject({
+  deliverBy: DateSchema,
+  productIds: z.array(z.string()).min(1).max(1000),
+});
+export type AvailabilityRequest = z.infer<typeof AvailabilityRequestSchema>;
+
+export const AvailabilityResultSchema = z.strictObject({ deliverable: z.array(z.string()) });
+export type AvailabilityResult = z.infer<typeof AvailabilityResultSchema>;
+
 export const OfferClaimsSchema = z.strictObject({
   iss: z.string(),
   offerId: z.string(),
@@ -117,6 +127,18 @@ export type RequoteRequest = z.infer<typeof RequoteRequestSchema>;
 
 export const ValidateRequestSchema = z.strictObject({ tokens: TokensSchema });
 export type ValidateRequest = z.infer<typeof ValidateRequestSchema>;
+
+/** The offer IDs whose tokens the caller wants back (SPEC-006 `issued`). */
+export const IssuedOffersRequestSchema = z.strictObject({
+  offerIds: z.array(z.string()).min(1).max(40),
+});
+export type IssuedOffersRequest = z.infer<typeof IssuedOffersRequestSchema>;
+
+/** The unexpired tokens issued to the principal for the requested IDs; an unknown ID is left out. */
+export const IssuedOffersSchema = z.strictObject({
+  offers: z.array(z.strictObject({ offerId: z.string(), token: z.string() })),
+});
+export type IssuedOffers = z.infer<typeof IssuedOffersSchema>;
 
 export const ValidateResultSchema = z.strictObject({
   results: z.array(

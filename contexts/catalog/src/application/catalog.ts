@@ -6,7 +6,7 @@ import type {
   WholesalerCatalog,
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
-import { isSupportedSoftAttribute, parseTerms } from "../domain/catalog.ts";
+import { isSupportedSoftAttribute, MAX_CANDIDATES, parseTerms } from "../domain/catalog.ts";
 import { type Constraints, mergeConstraints } from "../domain/match.ts";
 import { isValidQuantity } from "../domain/quantity.ts";
 
@@ -26,10 +26,22 @@ export type CatalogLoader = () => Promise<WholesalerCatalog>;
 
 export type CatalogSource = () => Promise<Result<WholesalerCatalog, "CATALOG_UNAVAILABLE">>;
 
+export interface AvailabilitySource {
+  /** The ids, of those given, that the wholesaler can deliver on or before the date. */
+  deliverable(
+    deliverBy: string,
+    productIds: readonly string[],
+  ): Promise<Result<ReadonlySet<string>, "UPSTREAM_FAILED">>;
+}
+
 export interface CatalogDeps {
   catalog: CatalogSource;
   mandates: MandateSource;
+  availability: AvailabilitySource;
 }
+
+/** Ranked matches read before the availability filter, so that lower-ranked matches fill the 20 places. */
+export const SEARCH_POOL = 60;
 
 export type SearchError =
   | "EMPTY_TERMS"
@@ -69,8 +81,23 @@ export const searchProducts = async (
     return err("UNSUPPORTED_SOFT_ATTRIBUTE");
   const catalog = await deps.catalog();
   if (!catalog.ok) return catalog;
+  const pool = catalog.value.searchCatalog({ ...request, ...constraints }, SEARCH_POOL);
+  // A failed availability read keeps the search usable: the offers step reads availability again.
+  const deliverable =
+    pool.length === 0
+      ? null
+      : await deps.availability.deliverable(
+          request.deliverBy,
+          pool.map((candidate) => candidate.productId),
+        );
+  const checked = deliverable === null || deliverable.ok;
+  const kept =
+    deliverable?.ok === true
+      ? pool.filter((candidate) => deliverable.value.has(candidate.productId))
+      : pool;
   return ok({
-    candidates: [...catalog.value.searchCatalog({ ...request, ...constraints })],
+    candidates: kept.slice(0, MAX_CANDIDATES),
+    availability: { checked, dropped: pool.length - kept.length },
     constraints,
     mandate:
       mandate.value === null ? null : { id: mandate.value.id, version: mandate.value.version },

@@ -1,9 +1,7 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { DEMO_ACCOUNT, type DemoProducts } from "@app/contract";
 import { type Db, mountContext } from "@app/server-kit";
+import { postgresOrderStore } from "../infra/order-store.ts";
 import { history } from "../infra/schema.ts";
 import { context } from "./index.ts";
 import { seedHistory } from "./seed.ts";
@@ -26,43 +24,60 @@ const demo: DemoProducts = {
   triedForS3: [],
 };
 
-test("the seed reads the demo products file for history", async () =>
+test("the seed uses imported demo metadata for history", async () =>
   withSeedDatabase(async (db) => {
-    const dir = await mkdtemp(join(tmpdir(), "orders-seed-"));
-    try {
-      const path = join(dir, "demo-products.json");
-      await Bun.write(path, JSON.stringify(demo));
-      await seedHistory(db, { path, warn: () => undefined });
-      const rows = await db
-        .select({
-          customer: history.customer,
-          productId: history.productId,
-          quantity: history.quantity,
-        })
-        .from(history);
-      const small = {
-        customer: DEMO_ACCOUNT.customer,
-        productId: "prod_test_small",
-        quantity: { value: 20, unit: "LTR" },
-      };
-      const large = {
-        customer: DEMO_ACCOUNT.customer,
-        productId: "prod_test_large",
-        quantity: { value: 201, unit: "LTR" },
-      };
-      expect(rows).toEqual([small, small, small, large, large, large]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    await seedHistory(db, { demo, warn: () => undefined });
+    const rows = await db
+      .select({
+        customer: history.customer,
+        productId: history.productId,
+        quantity: history.quantity,
+      })
+      .from(history);
+    const small = {
+      customer: DEMO_ACCOUNT.customer,
+      productId: "prod_test_small",
+      quantity: { value: 20, unit: "LTR" },
+    };
+    const large = {
+      customer: DEMO_ACCOUNT.customer,
+      productId: "prod_test_large",
+      quantity: { value: 201, unit: "LTR" },
+    };
+    expect(rows).toEqual([small, small, small, large, large, large]);
   }));
 
-test("without the file the seed adds no history and warns once", async () =>
+test("without imported demo metadata the seed adds no history and warns once", async () =>
   withSeedDatabase(async (db) => {
     const warnings: string[] = [];
     await seedHistory(db, {
-      path: join(tmpdir(), `missing-${crypto.randomUUID()}.json`),
       warn: (m) => warnings.push(m),
     });
     expect(warnings).toHaveLength(1);
     expect(await db.select().from(history)).toEqual([]);
+  }));
+
+test("with a scenario 3 substitute the seed adds two approvals of the pair and its history", async () =>
+  withSeedDatabase(async (db) => {
+    await seedHistory(db, {
+      demo: {
+        ...demo,
+        s3: { productId: "prod_test_partial", quantity: { value: 220, unit: "ST" } },
+        s3Substitute: { productId: "prod_test_substitute" },
+      },
+      warn: () => undefined,
+    });
+    const pair = { replaces: "prod_test_partial", productId: "prod_test_substitute" };
+    const approved = await postgresOrderStore(db).withCustomerLock(DEMO_ACCOUNT.customer, (tx) =>
+      tx.approvedWithPair(DEMO_ACCOUNT.customer, pair),
+    );
+    expect(approved.map((order) => [order.status, order.decision?.action])).toEqual([
+      ["placed", "approve"],
+      ["placed", "approve"],
+    ]);
+    expect(approved.every((order) => order.auditAnchor?.count === order.audit.length)).toBe(true);
+    const substituteRows = (await db.select().from(history)).filter(
+      (row) => row.productId === pair.productId,
+    );
+    expect(substituteRows).toHaveLength(2);
   }));

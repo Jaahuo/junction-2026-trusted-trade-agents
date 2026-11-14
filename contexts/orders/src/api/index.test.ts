@@ -242,6 +242,25 @@ test("two parallel automatic orders that together exceed the creditLimit of 5000
     ]);
   }));
 
+test("the demo account has no credit check: two orders over 5000 together are both placed", async () =>
+  withDatabase(async (db) => {
+    const { appWith, register, sign } = await mount(db);
+    const app = appWith({ principal: async () => DEMO_ACCOUNT });
+    expect(DEMO_ACCOUNT.creditLimit).toBeNull();
+    const mandate = await register(
+      limitsWith({ maxOrderTotal: { value: 10_000, currency: "EUR", basis: "gross" } }),
+    );
+    const big = {
+      total: { net: 2700, gross: 3000 },
+      mandateId: mandate.mandateId,
+      mandateVersion: mandate.version,
+    };
+    const orders = await Promise.all(
+      [await place(app, [await sign(big)]), await place(app, [await sign(big)])].map(orderOf),
+    );
+    expect(orders.map((order) => order.status)).toEqual(["placed", "placed"]);
+  }));
+
 test("an unknown order id gives 404", async () =>
   withDatabase(async (db) => {
     const { app } = await mount(db);

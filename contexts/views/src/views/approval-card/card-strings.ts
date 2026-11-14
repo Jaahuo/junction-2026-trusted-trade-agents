@@ -2,6 +2,11 @@ import { REASON_TEXT, type ReasonCode } from "@app/contract";
 
 // The approval card's text in each language. Read it at render time with `pick(CARD)`.
 
+/** The replaced product in a rule sentence; null when the order does not name it. */
+const replacedEn = (name: string | null) => name ?? "the out-of-stock product";
+const replacedFi = (name: string | null) =>
+  name === null ? "loppuneen tuotteen" : `tuotteen ${name}`;
+
 const en = {
   // The contract sentence says the date or amount "changed"; on the card it differs from the request.
   reason: {
@@ -10,6 +15,8 @@ const en = {
   } satisfies Record<ReasonCode, string>,
   overOrderLimit: "Over your order limit",
   newProduct: "New product",
+  priceUnknown: "price per unit unknown",
+  offerDetails: "offer details",
   newProductDetail: (customer: string) =>
     `${customer} has not ordered a product in this order before`,
   substituteProposed: "Substitute proposed",
@@ -63,7 +70,10 @@ const en = {
   overYourLimit: "Over your limit",
   underYourLimit: "Under your limit",
   totalInclVat: "Total incl. VAT",
-  letAgentReduce: "Let the agent reduce it",
+  reduceToFit: "Reduce to fit the limit",
+  reducedToFit: (limit: string) =>
+    `Reduced to fit your ${limit} limit. Check the amounts and confirm.`,
+  cannotFit: "Even one of each is over your limit. Remove products or reject the order.",
   reducePrompt: (orderId: string) =>
     `Get order ${orderId} under my order limit. Keep the products we need most. Send me a new offer to approve.`,
   reduceChips: ["Drop the items I need least", "Switch to cheaper brands", "Lower every quantity"],
@@ -78,6 +88,7 @@ const en = {
   twoDeliveries: "Two deliveries, same price",
   allOn: (day: string) => `All on ${day}`,
   orderFewer: "Order fewer",
+  topUpWith: (name: string) => `Top up with ${name}`,
   only: (value: string) => `${value} only`,
   recommended: "Recommended",
   howToHandle: (missing: string) => `How to handle the missing ${missing}`,
@@ -110,9 +121,6 @@ const en = {
   changedAmounts: "You changed amounts. Confirming gets the new price and places the order.",
   reject: "Reject",
   rejecting: "Rejecting…",
-  approveQuestion: (total: string) => `Approve order of ${total}?`,
-  rejectQuestion: "Reject this order?",
-  cancel: "Cancel",
   aboutOrder: (orderId: string) =>
     `I'd like to discuss order ${orderId} before I decide. Give me a short summary and ask what I want to change.`,
   discussWithAgent: "Discuss order with agent",
@@ -173,6 +181,17 @@ const en = {
   receiptMismatch: "Confirmation doesn’t match your order",
   receiptMismatchText: (brand: string) =>
     `${brand}’s confirmation differs from the offer you approved. Contact ${brand} before the delivery.`,
+  standingOffer: (substitute: string, replaced: string | null, times: number) =>
+    `You’ve approved ${substitute} as a replacement for ${replacedEn(replaced)} ${times} times. Let the agent do this without asking?`,
+  yesAutomatically: "Yes, automatically",
+  keepAsking: "Keep asking",
+  standingSaved: (substitute: string, replaced: string | null) =>
+    `The agent now orders ${substitute} instead of ${replacedEn(replaced)} without asking. You can undo this in your limits.`,
+  neverSuggest: (substitute: string, replaced: string | null) =>
+    `Should the agent keep suggesting ${substitute} instead of ${replacedEn(replaced)}?`,
+  dontSuggestAgain: "Don’t suggest again",
+  neverSaved: (substitute: string, replaced: string | null) =>
+    `The agent won’t suggest ${substitute} instead of ${replacedEn(replaced)} again. You can undo this in your limits.`,
 };
 
 const FI_REASON: Record<ReasonCode, string> = {
@@ -203,6 +222,8 @@ const fi: typeof en = {
   reason: FI_REASON,
   overOrderLimit: "Tilausraja ylittyy",
   newProduct: "Uusi tuote",
+  priceUnknown: "yksikköhinta ei tiedossa",
+  offerDetails: "tarjouksen tiedot",
   newProductDetail: (customer) => `${customer} ei ole aiemmin tilannut yhtä tilauksen tuotteista`,
   substituteProposed: "Korvaavaa tuotetta ehdotetaan",
   substituteDetail: "tilauksen tuote on loppu varastosta",
@@ -252,7 +273,9 @@ const fi: typeof en = {
   overYourLimit: "Yli rajan",
   underYourLimit: "Alle rajan",
   totalInclVat: "Yhteensä sis. ALV",
-  letAgentReduce: "Anna agentin muokata tilausta",
+  reduceToFit: "Pienennä tilausrajaan",
+  reducedToFit: (limit) => `Määrät pienennetty ${limit} tilausrajaan. Tarkista määrät ja vahvista.`,
+  cannotFit: "Jo yksi kutakin ylittää rajasi. Poista tuotteita tai hylkää tilaus.",
   reducePrompt: (orderId) =>
     `Pienennä tilaus ${orderId} tilausrajani alle. Pidä tärkeimmät tuotteet. Lähetä minulle uusi tarjous hyväksyttäväksi.`,
   reduceChips: [
@@ -271,6 +294,7 @@ const fi: typeof en = {
   twoDeliveries: "Kaksi toimitusta, sama hinta",
   allOn: (day) => `Kaikki ${day}`,
   orderFewer: "Tilaa vähemmän",
+  topUpWith: (name) => `Täydennä tuotteella ${name}`,
   only: (value) => `vain ${value}`,
   recommended: "Suositeltu",
   howToHandle: (missing) => `Miten puuttuva ${missing} hoidetaan`,
@@ -304,9 +328,6 @@ const fi: typeof en = {
   changedAmounts: "Muutit määriä. Vahvistus hakee uuden hinnan ja tekee tilauksen.",
   reject: "Hylkää",
   rejecting: "Hylätään…",
-  approveQuestion: (total) => `Hyväksytäänkö tilaus, ${total}?`,
-  rejectQuestion: "Hylätäänkö tilaus?",
-  cancel: "Peruuta",
   aboutOrder: (orderId) =>
     `Haluan käydä tilauksen ${orderId} läpi ennen kuin päätän. Kerro lyhyesti, mitä se sisältää, ja kysy, mitä haluan muuttaa.`,
   discussWithAgent: "Keskustele tilauksesta agentin kanssa",
@@ -366,6 +387,17 @@ const fi: typeof en = {
   receiptMismatch: "Vahvistus ei vastaa tilaustasi",
   receiptMismatchText: (brand) =>
     `Vahvistus poikkeaa hyväksymästäsi tarjouksesta. Ota yhteyttä toimittajaan (${brand}) ennen toimitusta.`,
+  standingOffer: (substitute, replaced, times) =>
+    `Olet hyväksynyt tuotteen ${substitute} ${replacedFi(replaced)} tilalle ${times} kertaa. Saako agentti tehdä tämän kysymättä?`,
+  yesAutomatically: "Kyllä, automaattisesti",
+  keepAsking: "Kysy jatkossakin",
+  standingSaved: (substitute, replaced) =>
+    `Agentti tilaa nyt tuotteen ${substitute} ${replacedFi(replaced)} tilalle kysymättä. Voit perua tämän valtuutuksen asetuksista.`,
+  neverSuggest: (substitute, replaced) =>
+    `Ehdottaako agentti jatkossakin tuotetta ${substitute} ${replacedFi(replaced)} tilalle?`,
+  dontSuggestAgain: "Älä ehdota enää",
+  neverSaved: (substitute, replaced) =>
+    `Agentti ei enää ehdota tuotetta ${substitute} ${replacedFi(replaced)} tilalle. Voit perua tämän valtuutuksen asetuksista.`,
 };
 
 export const CARD = { en, fi };

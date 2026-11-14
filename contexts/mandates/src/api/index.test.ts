@@ -336,6 +336,31 @@ test("a draft returns the draft and null without a current mandate, and the curr
     expect(await current(app)).toEqual(stored);
   }));
 
+const substitutionRule = (policy: "auto" | "never", productId: string) => ({
+  replaces: "prod_test_original",
+  productId,
+  policy,
+  decidedAt: "2026-11-14T10:00:00+00:00",
+});
+
+test("a draft keeps the current substitution rules, so the agent can neither add nor drop one", async () =>
+  withDatabase(async (db) => {
+    const { app } = await mount(db);
+    const human = [substitutionRule("never", "prod_test_blocked")];
+    await register(app, { ...request, limits: { ...request.limits, substitutionRules: human } });
+    const draft = fixtures.draftMandateRequest;
+    const drafted = await call(app, "POST", "/drafts", {
+      ...draft,
+      limits: {
+        ...draft.limits,
+        substitutionRules: [substitutionRule("auto", "prod_test_granted")],
+      },
+    });
+    expect(MandateDraftSchema.parse(await drafted.json()).draft.limits.substitutionRules).toEqual(
+      human,
+    );
+  }));
+
 test("a draft does not return a revoked or expired mandate as current", async () =>
   withDatabase(async (db) => {
     const { app, clock } = await mount(db);
@@ -367,7 +392,7 @@ test("a draft with an exp at or before now, an operationId, a server-set field o
       { ...draft, iss: "cust_other" },
       {
         ...draft,
-        standingConstraints: { hard: [{ attribute: "gluten", is: "free_from" }], soft: [] },
+        standingConstraints: { hard: [{ attribute: "unicorn", is: "free_from" }], soft: [] },
       },
     ]) {
       const response = await call(app, "POST", "/drafts", body);

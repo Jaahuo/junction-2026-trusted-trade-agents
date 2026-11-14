@@ -29,3 +29,14 @@ test("another failure gives UPSTREAM_FAILED", async () => {
   const { views } = pages(() => new Response("boom", { status: 500 }));
   expect(await views.html("order-timeline")).toEqual(err("UPSTREAM_FAILED"));
 });
+
+test("a body that fails while it is read gives UPSTREAM_FAILED", async () => {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("<html>"));
+      controller.error(new Error("connection closed"));
+    },
+  });
+  const { views } = pages(() => new Response(body));
+  expect(await views.html("approval-card")).toEqual(err("UPSTREAM_FAILED"));
+});

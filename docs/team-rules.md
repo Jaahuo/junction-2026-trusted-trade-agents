@@ -25,8 +25,8 @@ These rules are for every person and agent who works on an issue of the product 
 19. R-19 Fetch `origin/main` before you create a worktree, and run `task.ts sync` after a dependency merges (AGENTS.md:5; workflow.md:7).
 20. R-20 An issue is done when its PR merged through `bun run ship` lists each acceptance criterion with its actual result, the gate result, the screenshots, and the risk evidence, and `bun run task finish` ran (workflow.md:9-11, 47-53).
 21. R-21 Approval is human only. Never give the model a tool that decides an approval or changes a mandate; such tools are view-only (docs/specs.md SPEC-012).
-22. R-22 Call the wholesaler mock only with targeted requests for the products a task needs, or through the app's adapter, and never pull whole data sets from it: the product file in `data/` is the bulk source (docs/specs.md SPEC-005). A script that calls the mock states its request ceiling.
-23. R-23 The challenge dataset files under `data/` are for this challenge only: do not copy their rows or values into docs, issues, PRs, tracked fixtures or seed files, and use invented products in test fixtures. The one exception: `data/demo-products.json` may hold product ids, quantities, observation time and scenario status for the demo, and no other value from the dataset. Do not make the repository public before the data files are removed from it.
+22. R-22 Call the wholesaler mock only with targeted requests for the products a task needs, or through the app's adapter. Never pull whole datasets from it. Import the private challenge files once into PostgreSQL for bulk catalogue access. A script that calls the mock states its request ceiling.
+23. R-23 Challenge data is for this challenge only. Keep its source files outside Git. Do not copy source rows or values into docs, issues, PRs, tracked fixtures or seed files. Use invented products in tests. Import optional demo product ids, quantities, observation time and scenario status as private metadata. Removing current files does not remove their Git history; do not make the repository public without a separate history and disclosure review.
 
 ## Labels
 

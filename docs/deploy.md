@@ -55,9 +55,9 @@ tofu -chdir=infra apply
 
 The image targets `linux/amd64`. Its build uses Bun 1.4.3 and Node 24.22.2. Its runtime uses the digest-pinned official Bun 1.4.3 distroless image as UID 1000. It has no OS shell or package manager. A separate stage installs production dependencies without automatic peer dependencies. Each runtime dependency must be declared explicitly; build tools stay outside the runtime. The final stage copies the application, migrations, fixtures, skill assets and built web/view assets. It excludes the unused compiled API binary and build-stage dependencies. It must not contain challenge data or secrets. Keep the GHCR package private.
 
-The root manifest declares Elysia's required peers (`typebox`, `exact-mirror` and `openapi-types`) explicitly. Knip excludes these declarations because Elysia consumes them indirectly. Do not remove them as unused packages. The image gate starts the production container against disposable PostgreSQL before it records release evidence.
+The root manifest declares Elysia's required peers (`typebox`, `exact-mirror` and `openapi-types`) explicitly. Knip excludes these declarations because Elysia consumes them indirectly. Do not remove them as unused packages. The publication job starts the production container against disposable PostgreSQL before it publishes the image.
 
-The image gate uses Bun to verify the runtime UID and the absence of common shells and package managers. It does not depend on `sh` or `id` inside the container. Use `docker exec trusted-trade /usr/local/bin/bun -e 'console.log(process.getuid())'` to inspect the UID. Rebuild the image for dependency or OS updates; do not install tools into the running container.
+The publication job uses Bun to verify the runtime UID and the absence of common shells and package managers. It does not depend on `sh` or `id` inside the container. Use `docker exec trusted-trade /usr/local/bin/bun -e 'console.log(process.getuid())'` to inspect the UID. Rebuild the image for dependency or OS updates; do not install tools into the running container.
 
 For a manual deploy, select a published digest from a successful deployment record. Obtain a GitHub token with `read:packages` access. Enter the token without echoing it. The deploy script passes it to the host through standard input, not as a command argument. Verify the host's SSH fingerprint through the provider console before adding it to `~/.ssh/known_hosts`.
 
@@ -68,7 +68,7 @@ export DEPLOY_REGISTRY_TOKEN
 export DEPLOY_IMAGE="ghcr.io/jaahuo/junction-2026-trusted-trade-agents@sha256:<64-character digest from deployment evidence>"
 ```
 
-Stop if the digest has no matching successful gate and image scan evidence. The workflow publishes the scanned image without rebuilding it. Manual deployment does not run those checks for you. For an initial deployment, reset the database with the hosted keys, then deploy:
+Stop if the digest has no matching successful code gate and deployment identity evidence. Dependency audits, image vulnerability scans and SBOM generation are temporarily paused under #233. Manual deployment does not run those checks for you. For an initial deployment, reset the database with the hosted keys, then deploy:
 
 ```sh
 bun scripts/deploy.ts reset --yes
@@ -85,10 +85,10 @@ The URL is `tofu -chdir=infra output -raw public_base_url`: `https://<ip>.sslip.
 
 ## Automatic deploy from main
 
-`.github/workflows/deploy.yml` runs after a successful main-push `gate`, or by hand on `main`. It selects the current main commit's successful push gate run and its exact run attempt. It verifies that run's image archive, scan, SBOM and manifest checksums, then publishes that same image to private GHCR. The deploy job receives its immutable digest.
-The manifest's `imageId` is the image config digest that `scripts/ci-image.ts config-digest` reads and verifies from the OCI archive. Publish compares it with the archive before loading and with the registry manifest's config digest after pushing; either mismatch stops the run before deployment. It does not use `docker image inspect` because the classic image store reports the config digest as the Id and the containerd store, the default in Docker 29, reports the manifest digest (#198).
-If main has moved to a commit whose push gate has not passed yet, the run skips publish and deploy, writes a `Skipped:` summary line and ends green; that commit's own gate starts its deploy.
-`bun run ship` warns when the latest completed deploy of main failed. It never rebuilds an image or consumes PR artifacts. Publication has package write access; deployment has package read access and the production secrets. Deployment remains serialized and checks main again before changing the host. Scheduled gates never deploy. It never resets data.
+`.github/workflows/deploy.yml` runs after a successful main-push `gate`, or by hand on `main`. It selects the current main commit's successful push gate run and exact attempt. It checks out that commit, builds an amd64 image with cached Docker layers, runs the production smoke test and publishes the image to private GHCR. PR gates do not build images.
+The manifest's `imageId` is the image config digest that `scripts/ci-image.ts config-digest` verifies from the build archive. Publish compares it with the registry manifest's config digest after pushing. A mismatch stops deployment. Tags include the source SHA and deployment run id and attempt, so concurrent rebuilds do not overwrite each other's tag. The deploy job receives an immutable digest.
+If main has moved to a commit whose push gate has not passed yet, the run skips publish and deploy, writes a `Skipped:` summary line and ends green. That commit's own gate starts its deployment.
+`bun run ship` warns when the latest completed deployment failed. Build and publication have package write access but no production environment or deployment secrets. Only publication can write the Docker layer cache. Deployment has package read access and the production secrets. It restores Bun downloads, installs with the frozen lockfile, remains serialized and checks main again before changing the host. Scheduled gates never deploy. Deployment never resets data.
 
 After the first `apply` and `push`, set the secrets of the `production` environment:
 
@@ -104,7 +104,7 @@ gh secret set DEPLOY_KNOWN_HOSTS --env production < verified_known_hosts
 
 ### Security and audit evidence
 
-The [delivery gates](workflow.md#ci-stages-and-security-evidence) define the severity policy and evidence limits. Gate artifacts bind the image archive, CycloneDX SBOM and scan report to the commit, lockfile, run and attempt. Deployment evidence records the published digest and result without credentials. Private image archives expire after 7 days; reports and deployment evidence expire after 90 days. Rerun the selected main-push gate run if its archive expires before deployment. A new manual gate run is not a push gate. Preserve records elsewhere before expiry if your audit period is longer. Registry images require a separate retention policy.
+The [delivery gates](workflow.md#ci-stages-and-security-evidence) describe the temporary security pause under #233 and its restoration path. There are no dependency audit reports, image vulnerability reports or SBOMs in this mode. Deployment evidence records source and lockfile identity, gate and build runs, image config digest, published digest and deployment result. It explicitly marks security scans as paused. Evidence expires after 90 days; build archives are temporary runner files, not retained artifacts. Preserve records elsewhere before expiry when needed. Registry images require a separate retention policy.
 
 The four application deployment secrets above are required, including `DEPLOY_KNOWN_HOSTS`. A missing secret is not a successful deployment. Verify a successful health check and the digest in deployment evidence before reporting a release.
 

@@ -64,7 +64,7 @@ jobs:
         run: |
           mkdir -p deployment-evidence
           printf 'sourceSha=%s\ngateRunId=%s\ngateRunAttempt=%s\n' "$SHA" "$RUN_ID" "$ATTEMPT" > deployment-evidence/identity.txt
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: delivery-${{ needs.target.outputs.sha }}-${{ needs.target.outputs.attempt }}
           path: evidence
@@ -121,7 +121,7 @@ jobs:
           printf 'image=%s\n' "$pinned" >> deployment-evidence/identity.txt
       - name: Retain deployment evidence
         if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: deployment-${{ github.run_id }}-${{ github.run_attempt }}
           path: deployment-evidence
@@ -188,7 +188,7 @@ jobs:
             "$SHA" "$RUN_ID" "$ATTEMPT" "$IMAGE" "$OUTCOME" "${STATUS:-not-healthy}" > "$RUNNER_TEMP/deploy-result/result.txt"
       - name: Retain deployment result
         if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: deployment-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/deploy-result

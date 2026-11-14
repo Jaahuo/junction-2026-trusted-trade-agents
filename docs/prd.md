@@ -65,30 +65,37 @@ One service sits in front of a wholesaler's existing systems and adds the order 
 
 **Choices so far**
 
-| Topic                       | Choice                                                                                                                                            | Status  |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Interface                   | REST API with an MCP server on top                                                                                                                | Decided |
-| MCP extensions              | Apps for user-facing views, Skills so any agent can run the flow                                                                                  | Decided |
-| Demo host                   | An MCP host with MCP Apps, reached through a public tunnel. First test host: ChatGPT; switch when its spike fails. A custom agent UI comes later. | Decided |
-| Search input                | Structured fields only. The host agent turns the sentence into fields.                                                                            | Decided |
-| Mandate                     | AP2-style, signed by the buyer, registered with and stored on the wholesaler's server                                                             | Decided |
-| Signing                     | Real signed JWTs                                                                                                                                  | Decided |
-| Authentication              | None in the first build: one demo account, the invoice customer. A second account, an account picker and the MCP authorization step come later.   | Decided |
-| Missing product data        | Goes to approval. Users may opt to auto-approve for reliability, CO2 and allergen data.                                                           | Decided |
-| Offer expires while pending | Auto re-quote. Ask again on a price rise, an availability change or a rule break.                                                                 | Decided |
-| Second wholesaler adapter   | Only if time remains                                                                                                                              | Decided |
-| Mandate build order         | Plain stored JSON first, signature wrapper second                                                                                                 | Decided |
-| Allergen data               | Missing allergen data goes to approval unless the mandate sets allergen data to auto.                                                             | Decided |
-| Naming                      | Nothing in the spec or tool names mentions Valio or Aimo. Only the adapter does.                                                                  | Decided |
-| Demo exception              | Partial stock and substitution chained in one request, on real mock data. If no product fits, the missed cut-off clip replaces it.                | Decided |
-| Public URL                  | Quick tunnel first; hosted deploy is decided later                                                                                                | Decided |
-| Order store                 | Our own store; the mock has no order endpoint                                                                                                     | Decided |
-| Offer input                 | `place_order` takes the signed offer tokens                                                                                                       | Decided |
-| Reject                      | Two actions: reject and stop, reject and allow alternatives                                                                                       | Decided |
-| Unconfirmed stock           | Large orders of unconfirmed-stock products need approval                                                                                          | Decided |
-| Buyer limits                | The wholesaler uses them only for enforcement                                                                                                     | Decided |
-| Approval                    | Human only, on the approval card or the approval page; no decision tool is visible to the model                                                   | Decided |
-| Views                       | All five, in priority order: approval card, offer comparison, order timeline, search results, mandate settings                                    | Decided |
+| Topic                       | Choice                                                                                                                                                          | Status   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Interface                   | REST API with an MCP server on top                                                                                                                              | Decided  |
+| MCP extensions              | Apps for user-facing views, Skills so any agent can run the flow                                                                                                | Decided  |
+| Demo host                   | An MCP host with MCP Apps, reached through a public tunnel. First test host: ChatGPT; switch when its spike fails. A custom agent UI comes later.               | Decided  |
+| Search input                | Structured fields only. The host agent turns the sentence into fields.                                                                                          | Decided  |
+| Mandate                     | AP2-style, signed by the buyer, registered with and stored on the wholesaler's server                                                                           | Decided  |
+| Signing                     | Real signed JWTs                                                                                                                                                | Decided  |
+| Authentication              | None in the first build: one demo account, the invoice customer. A second account, an account picker and the MCP authorization step come later.                 | Decided  |
+| Missing product data        | Goes to approval. Users may opt to auto-approve for reliability, CO2 and allergen data.                                                                         | Decided  |
+| Offer expires while pending | Auto re-quote. Ask again on a price rise, an availability change or a rule break.                                                                               | Decided  |
+| Second wholesaler adapter   | Only if time remains                                                                                                                                            | Decided  |
+| Mandate build order         | Plain stored JSON first, signature wrapper second                                                                                                               | Decided  |
+| Allergen data               | Missing allergen data goes to approval unless the mandate sets allergen data to auto.                                                                           | Decided  |
+| Naming                      | Nothing in the spec or tool names mentions Valio or Aimo. Only the adapter does.                                                                                | Decided  |
+| Demo exception              | Partial stock and substitution chained in one request, on real mock data. If no product fits, the missed cut-off clip replaces it.                              | Decided  |
+| Public URL                  | Quick tunnel first; hosted deploy is decided later                                                                                                              | Decided  |
+| Order store                 | Our own store; the mock has no order endpoint                                                                                                                   | Decided  |
+| Offer input                 | `place_order` takes the signed offer tokens                                                                                                                     | Decided  |
+| Reject                      | Two actions: reject and stop, reject and allow alternatives                                                                                                     | Decided  |
+| Unconfirmed stock           | Large orders of unconfirmed-stock products need approval                                                                                                        | Decided  |
+| Buyer limits                | The wholesaler uses them only for enforcement                                                                                                                   | Decided  |
+| Approval                    | Human only, on the approval card or the approval page; no decision tool is visible to the model                                                                 | Decided  |
+| Views                       | All five, in priority order: approval card, offer comparison, order timeline, search results, mandate settings                                                  | Decided  |
+| Demo hosts                  | Open WebUI is the main host (#44). Claude or ChatGPT shows the in-chat card on the same server. `curl` shows plain REST. Replaces "Demo host" once agreed.      | Proposed |
+| Hard constraints            | Every GS1 allergen code and free-from claim in the product data. `MAY_CONTAIN` counts as contradicted.                                                          | Proposed |
+| Agent rationale             | The agent may send a `purpose` and a `rationale` per line. The server stores them and shows them on the card and in the audit record. It never parses them.     | Proposed |
+| Trust chain                 | The views and an independent script verify offer signatures against the published keys. A placed order gets a signed receipt. The audit record is hash-chained. | Proposed |
+| Attack demo                 | A chat jailbreak and a rogue-agent script show the guardrails holding. The demo shows only attacks that the first build stops.                                  | Proposed |
+| Approval page design        | The page embeds the same card as the chat view, mobile-first. The web app uses the view palette. Each reason code has one plain-words sentence.                 | Proposed |
+| Spend across orders         | The spend limit applies per order. A rolling budget across orders comes only if time remains.                                                                   | Proposed |
 
 ## Flow at a glance
 
@@ -111,6 +118,8 @@ Three roles exist. Through the MCP tools, the agent can never approve its own or
 - Approver actions are tools that only a view calls. The model does not see them, so the agent cannot approve. A person approves on the approval card or the approval page.
 - Anyone who reaches the demo URL can open the approval page and call the REST API, including decisions. The README says so.
 - Later: a pay-on-order account, an account picker and the MCP authorization step (OAuth, as MCP specifies).
+- Known gap: hiding the approver tools stops the model, not the client. Any MCP client or REST caller can call the decision action and approve its own order. The demo does not show this attack.
+- Production path: a decision needs the approver's own authentication, separate from the agent's credentials, for example passkey re-authentication or OpenID CIBA, where the agent's request makes the approver confirm on their own device.
 
 ## Tools
 
@@ -302,6 +311,8 @@ The approver sets these in the mandate.
 | Allergen data                | A hard allergen constraint has data for the product            | No data means ask, unless the user chose auto.                                               |
 | Payment terms                | Which terms the agent may use alone                            | Invoice or pay-on-order                                                                      |
 
+Known gap: the spend limit applies to one order. An agent can split one purchase into several orders that each pass it. A rolling budget across orders is the Proposed fix, built only if time remains.
+
 ### Reason codes
 
 The list is fixed and part of the open contract, so any agent can act on a result without reading free text.
@@ -454,6 +465,7 @@ The contract is vendor-neutral and each wholesaler hosts its own endpoint, with 
 
 - Delivery reliability and CO2 come from two CSV files, joined on product ID.
 - All calls send the API key in the `X-API-Key` header.
+- Assumption: Valio Aimo's production API authenticates clients with OAuth2. We do not build that flow because it is out of scope and not relevant to the demo; a production adapter would replace the API key with an OAuth2 access token.
 - Never query all products. Filter on static data first, then send the shortlist in one call. Rate limits are undisclosed, so cache results within their validity.
 - Products shipped from a supplier's warehouse always report an amount of 999999, which means the stock is unconfirmed.
 - The mock ignores the customer number. Customer-specific limits and terms are simulated in our layer, and the README says so.
@@ -483,6 +495,10 @@ Judging weights: working end-to-end demo 30%, solving the user's need 20%, auton
 
 A missed cut-off with a later delivery date is the backup clip.
 
+Proposed: a rogue-agent clip after the scenarios. A chat jailbreak asks the agent to ignore its limits, and the order still goes to approval. A script then sends a changed offer, a reused offer token, an expired offer, an order over the credit limit and an order past the cut-off, and each ends with its reason code. Self-approval and order splitting stay out, because the first build does not stop them.
+
+The mock returns real dates. The demo sentence must name a deliver-by date after the run day, before that date's cut-off.
+
 **Find real products in the mock before scripting**
 
 - [ ] A lactose-free milk with confirmed stock that covers the request
@@ -509,7 +525,7 @@ Submission also needs demo and source links and a pitch deck PDF. All code is wr
 
 ## Open questions
 
-Two points still need a mentor answer or a check.
+These points still need a team decision, a mentor answer or a check.
 
 **For the team**
 
@@ -518,11 +534,16 @@ Two points still need a mentor answer or a check.
 - [x] Should large orders of unconfirmed-stock products need approval? Yes, `UNCONFIRMED_STOCK`.
 - [x] Which host runs the demo, Claude or ChatGPT? ChatGPT is the first test host. The build uses only standard MCP, Apps and Skills features; the host spike states when to switch.
 - [x] Is a README note enough for the fact that the wholesaler sees the buyer's limits? Yes. The wholesaler uses the limits only to enforce them.
+- [ ] The live mock had no short-stock or late product in the first search. Where does scenario 3 get its data: a wider live search (zero stock, or an order larger than the stock), the disclosed fixture mode `WHOLESALER_LIVE=fixture`, or no scenario 3?
+- [ ] Do the team agree to the Proposed rows in "Choices so far"?
 
 **For the mentors**
 
 - [x] Should orders end in our own order store, or go through the webshop test accounts once they arrive? Our own store.
 - [ ] How do credit limits and pay-on-order work for real customers, so the mock matches?
+- [ ] May an offer show the exact available stock amount, or is that confidential? A partial-stock offer exposes it today.
+- [ ] Which substitutions do customers accept without asking, and what spend limit does a real customer set?
+- [ ] Who would hold and rotate the offer signing key, and does OpenID CIBA fit the identity setup for approver authentication?
 
 **To verify**
 

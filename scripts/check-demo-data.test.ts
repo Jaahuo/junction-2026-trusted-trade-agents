@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { DemoProductsSchema } from "../packages/contract/src/index.ts";
+import type { CatalogProduct } from "../contexts/catalog/src/domain/catalog.ts";
 import {
   isLate,
   isShortWithSubstitute,
   mapRow,
   parseArgs,
   salesUnits,
+  scenario1TopProduct,
   selectDatabaseUrl,
   validateCandidates,
 } from "./check-demo-data";
@@ -26,6 +28,29 @@ const row = (overrides: Partial<Parameters<typeof isShortWithSubstitute>[0]["row
 const substitute = row({ productId: "synthetic-sub", substitutes: [] });
 const check = (r: ReturnType<typeof row>, units: number, substitutes = [substitute]) =>
   isShortWithSubstitute({ row: r, units, substitutes, date: "2026-11-16" });
+
+/** Invented catalogue products: two whole milks and a semi-skimmed one. */
+const milk = (productId: string, name: string, origin: string | null): CatalogProduct => ({
+  productId,
+  gtin: null,
+  name,
+  searchText: name.toLowerCase(),
+  category: "T-MILK",
+  salesUnit: "ST",
+  allowedLotSize: 1,
+  perSalesUnit: { value: 1, unit: "LTR" },
+  countryOfOrigin: origin,
+  deliveryReliability: null,
+  co2PerKg: null,
+  claims: new Set(),
+  substitutes: [],
+});
+const milks = [
+  milk("synthetic-semi", "Synthetic semi skimmed milk 1 l", "fi"),
+  milk("synthetic-a-whole-abroad", "Synthetic whole milk 1 l", "se"),
+  milk("synthetic-whole", "Synthetic whole milk 1 l", "fi"),
+];
+const s1 = (productId: string) => ({ productId, quantity: { value: 20, unit: "LTR" as const } });
 
 describe("demo data checker", () => {
   test("maps a recorded availability and price response in the documented shape to a row with amount, date, stock and net price", () => {
@@ -82,6 +107,15 @@ describe("demo data checker", () => {
         .stock,
     ).toBe("unavailable");
   });
+  test("the scenario 1 sentence finds the S1 product first, preferring Finnish origin", () => {
+    expect(scenario1TopProduct(milks, s1("synthetic-whole"), "2026-11-16")).toBe("synthetic-whole");
+  });
+
+  test("the scenario 1 check names another product when the sentence does not find S1 first", () => {
+    expect(scenario1TopProduct(milks, s1("synthetic-semi"), "2026-11-16")).toBe("synthetic-whole");
+    expect(scenario1TopProduct([], s1("synthetic-whole"), "2026-11-16")).toBeNull();
+  });
+
   test("refuses to run with more than 40 candidate ids", () => {
     expect(() => validateCandidates(Array.from({ length: 41 }, (_, i) => String(i)))).toThrow(
       "40 candidate ids",

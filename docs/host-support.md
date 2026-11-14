@@ -10,12 +10,17 @@ SPEC-012 describes the manifest as "(path, digest, size)". The pinned spec uses 
 
 ### Capability declaration
 
-The server declares the extension in `capabilities.extensions` of the `server/discover` result, not in `initialize`. The value is `{}`. This repo does not implement `resources/directory/read`, so it does not set `directoryRead`. The server must also declare `resources`. The client declares no capability key.
+The pinned spec puts the declaration in the `server/discover` result of protocol revision 2026-07-28. The server SDK (1.32.2) speaks only the `initialize` era (revisions up to 2025-11-25), and its HTTP transport answers a request with `MCP-Protocol-Version: 2026-07-28` with 400. This server therefore declares the extension in two places:
+
+- the `initialize` result, in `capabilities.extensions`;
+- a `server/discover` answer whose `supportedVersions` are the legacy versions the SDK speaks, not `2026-07-28`. A client on the 2026 revision falls back to `initialize`.
+
+The value is `{}`. This repo does not implement `resources/directory/read`, so it does not set `directoryRead`. The server must also declare `resources`. The client declares no capability key. `skills/list`, `skills/get` and `resources/read` of the `skill://` URIs work on the legacy transport. The `skill://` files are read as a resource template, so `resources/list` lists only the `ui://` views.
 
 ```json
 {
   "capabilities": {
-    "resources": {},
+    "resources": { "listChanged": true },
     "extensions": {
       "io.modelcontextprotocol/skills": {}
     }
@@ -23,7 +28,7 @@ The server declares the extension in `capabilities.extensions` of the `server/di
 }
 ```
 
-Every request carries `params._meta` with `io.modelcontextprotocol/protocolVersion` (`"2026-07-28"`), `io.modelcontextprotocol/clientInfo`, and `io.modelcontextprotocol/clientCapabilities`.
+A 2026-07-28 client carries `params._meta` with `io.modelcontextprotocol/protocolVersion`, `io.modelcontextprotocol/clientInfo`, and `io.modelcontextprotocol/clientCapabilities` on every request. This server ignores them.
 
 ### Discovery methods
 

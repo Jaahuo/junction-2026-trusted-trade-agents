@@ -8,7 +8,7 @@ import {
 } from "@app/contract";
 import type { McpUiToolMeta } from "@modelcontextprotocol/ext-apps";
 import { RESOURCE_MIME_TYPE, RESOURCE_URI_META_KEY } from "@modelcontextprotocol/ext-apps/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   type CallToolResult,
@@ -16,10 +16,14 @@ import {
   ErrorCode,
   ListToolsRequestSchema,
   McpError,
+  SUPPORTED_PROTOCOL_VERSIONS,
+  type ServerCapabilities,
   type Tool,
   ToolSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { SKILL_NAME, skillUri } from "../domain/skill.ts";
+import { loadSkill, type SkillPack } from "../application/skills.ts";
 import { runTool, type ToolReply, type TradeRest, type ViewPages } from "../application/tools.ts";
 
 export type ViewToolsMode = "app" | "off";
@@ -34,10 +38,37 @@ export interface McpDeps {
   readonly rest: TradeRest;
   readonly views: ViewPages;
   readonly viewTools: ViewToolsMode;
+  readonly skills: SkillPack;
 }
 
 // MCP's resource-not-found code; the SDK's ErrorCode enum does not list it.
 const RESOURCE_NOT_FOUND = -32002;
+
+const SKILLS_EXTENSION = "io.modelcontextprotocol/skills";
+const SERVER_INFO = { name: "trusted-trade", version: "0.1.0" };
+// The skill files are static, so a host may cache the answers.
+const CACHE = { ttlMs: 300_000, cacheScope: "public" } as const;
+
+// What initialize reports; McpServer adds the same resources capability when it registers a resource.
+const CAPABILITIES: ServerCapabilities = {
+  tools: {},
+  resources: { listChanged: true },
+  extensions: { [SKILLS_EXTENSION]: {} },
+};
+
+const DiscoverRequestSchema = z.object({
+  method: z.literal("server/discover"),
+  params: z.looseObject({}).optional(),
+});
+const ListSkillsRequestSchema = z.object({
+  method: z.literal("skills/list"),
+  params: z.looseObject({ cursor: z.string().optional() }).optional(),
+});
+const GetSkillRequestSchema = z.object({
+  method: z.literal("skills/get"),
+  // Checked in the handler: a schema failure would answer -32603, not -32602.
+  params: z.looseObject({ uri: z.unknown().optional() }).optional(),
+});
 
 const DESCRIPTIONS: Record<ToolName, string> = {
   search_products:
@@ -88,12 +119,12 @@ const toolDefinition = (name: ToolName): Tool =>
   });
 
 /** One MCP server with the SPEC-003 tools and the SPEC-013 view resources. */
-const createMcpServer = ({ rest, views, viewTools }: McpDeps): McpServer => {
-  const server = new McpServer({ name: "trusted-trade", version: "0.1.0" });
+const createMcpServer = ({ rest, views, viewTools, skills }: McpDeps): McpServer => {
+  const server = new McpServer(SERVER_INFO);
+  server.server.registerCapabilities(CAPABILITIES);
   const tools: readonly ToolName[] =
     viewTools === "app" ? [...MODEL_TOOLS, ...VIEW_TOOLS] : MODEL_TOOLS;
   // Tools use the low-level handlers: registerTool answers invalid input with its own text, without BAD_REQUEST.
-  server.server.registerCapabilities({ tools: {} });
   server.server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: tools.map(toolDefinition),
   }));
@@ -114,7 +145,60 @@ const createMcpServer = ({ rest, views, viewTools }: McpDeps): McpServer => {
       return { contents: [{ uri, mimeType: RESOURCE_MIME_TYPE, text: html.value }] };
     });
   }
+  registerSkills(server, skills);
   return server;
+};
+
+/** The Skills extension. The SDK speaks only the initialize era, so `server/discover` answers with the legacy versions. */
+const registerSkills = (server: McpServer, skills: SkillPack): void => {
+  const loaded = async () => {
+    const skill = await loadSkill(skills);
+    if (!skill.ok) {
+      throw new McpError(ErrorCode.InternalError, `The skill is not available: ${skill.error}.`);
+    }
+    return skill.value;
+  };
+  server.server.setRequestHandler(DiscoverRequestSchema, () => ({
+    resultType: "complete",
+    supportedVersions: SUPPORTED_PROTOCOL_VERSIONS,
+    capabilities: CAPABILITIES,
+    ...CACHE,
+    _meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO },
+  }));
+  server.server.setRequestHandler(ListSkillsRequestSchema, async () => ({
+    resultType: "complete",
+    skills: [(await loaded()).entry],
+    ...CACHE,
+  }));
+  server.server.setRequestHandler(GetSkillRequestSchema, async ({ params }) => {
+    const { entry } = await loaded();
+    if (params?.uri !== entry.uri) {
+      throw new McpError(ErrorCode.InvalidParams, `Unknown skill: ${String(params?.uri)}.`);
+    }
+    return { resultType: "complete", skill: entry, ...CACHE };
+  });
+  // A template, so the files stay out of resources/list, which lists the views.
+  server.registerResource(
+    SKILL_NAME,
+    new ResourceTemplate(skillUri("{file}"), { list: undefined }),
+    { mimeType: "text/markdown" },
+    async (uri, { file }) => {
+      const name = Array.isArray(file) ? file[0] : file;
+      const found = (await loaded()).files.find((entry) => entry.name === name);
+      if (name === undefined || found === undefined) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown skill file: ${uri.href}.`);
+      }
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "text/markdown",
+            text: new TextDecoder().decode(found.bytes),
+          },
+        ],
+      };
+    },
+  );
 };
 
 /** Stateless streamable HTTP: a new server and transport per request, with JSON responses. */

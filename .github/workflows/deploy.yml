@@ -133,9 +133,8 @@ jobs:
           set -euo pipefail
           docker load --input "$RUNNER_TEMP/image.tar"
           rm "$RUNNER_TEMP/image.tar"
-          gzip -1 "$RUNNER_TEMP/chat-image.tar"
-          docker load --input "$RUNNER_TEMP/chat-image.tar.gz"
-          rm "$RUNNER_TEMP/chat-image.tar.gz"
+          docker load --input "$RUNNER_TEMP/chat-image.tar"
+          rm "$RUNNER_TEMP/chat-image.tar"
           df -h "$RUNNER_TEMP"
       - name: Smoke production runtime
         run: |

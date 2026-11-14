@@ -92,6 +92,7 @@ const defaultDeps = (db: Db): ApiDeps => {
   return {
     store: postgresOrderStore(db),
     verifyOffer: processOfferVerifier(),
+    issuedOffers: offersClient,
     // Resolved on first use: the base URL needs the server's environment.
     mandates: {
       current: (agentId) => (mandates ??= mandateClient(`${selfBaseUrl()}/api`)).current(agentId),

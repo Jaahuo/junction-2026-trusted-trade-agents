@@ -3,7 +3,6 @@ import {
   type Evaluate,
   type Evaluation,
   GUARDRAILS,
-  type Mandate,
   type MandateLimits,
   type OfferClaims,
   type Quantity,
@@ -11,7 +10,6 @@ import {
   REJECT_REASONS,
   type SubstitutionRule,
   samePair,
-  type ValidateResult,
 } from "@app/contract";
 
 export interface HistoryRow {
@@ -81,47 +79,25 @@ const median = (values: number[]): number | null => {
   return sorted.length % 2 === 1 ? upper : ((sorted[middle - 1] ?? 0) + upper) / 2;
 };
 
-const isQuantityUnusual = (product: ProductSum, rows: HistoryRow[]): boolean => {
-  const usual = median(
-    rows.flatMap((row) => {
-      const value = inSalesUnits(row.quantity, product);
-      return value === null ? [] : [value];
-    }),
-  );
-  if (usual !== null) return product.sales > GUARDRAILS.quantityCapFactor * usual;
-  return product.std === null || product.std > GUARDRAILS.quantityCapNoHistory;
+const quantityEvidence = (product: ProductSum, rows: HistoryRow[]): string | null => {
+  const values = rows.flatMap((row) => {
+    const value = inSalesUnits(row.quantity, product);
+    return value === null ? [] : [value];
+  });
+  const usual = median(values);
+  if (usual !== null) {
+    const limit = GUARDRAILS.quantityCapFactor * usual;
+    return product.sales > limit
+      ? `Summed quantity ${Number.isFinite(product.sales) ? product.sales : "unknown (incompatible units)"} ${product.salesUnit}; median of ${values.length} convertible history rows ${usual} ${product.salesUnit}, limit ${limit} ${product.salesUnit} (${GUARDRAILS.quantityCapFactor} times median).`
+      : null;
+  }
+  return product.std === null || product.std > GUARDRAILS.quantityCapNoHistory
+    ? `Summed quantity ${product.std ?? "unknown (conversion unavailable)"} standard units; no convertible history (${rows.length} rows), fallback limit ${GUARDRAILS.quantityCapNoHistory} standard units.`
+    : null;
 };
-
-const isUnconfirmedStockOverCap = (product: ProductSum): boolean =>
-  product.claims.some((claim) => claim.stock === "unconfirmed") &&
-  (product.std === null || product.std > GUARDRAILS.unconfirmedStockMax);
 
 const isAllergenAttribute = (attribute: string): boolean =>
   ALLERGEN_ATTRIBUTES.some((allergen) => allergen === attribute);
-
-/**
- * True when a hard constraint of the line is not confirmed in a way the mandate accepts:
- * contradicted or missing always, unknown unless allergen data is set to auto.
- */
-const hasUnconfirmedHardConstraint = (claim: OfferClaims, mandate: Mandate): boolean =>
-  claim.constraints.hard.some(({ attribute }) => {
-    const match = claim.product.match[attribute];
-    if (match === "confirmed") return false;
-    if (match === "unknown")
-      return !isAllergenAttribute(attribute) || mandate.limits.allergenData.ifNoData === "ask";
-    return true;
-  });
-
-const thresholdReasons = (
-  value: number | null,
-  limit: { value: number; ifNoData: "auto" | "ask" } | null,
-  breaks: (value: number, limit: number) => boolean,
-  reason: ReasonCode,
-): ReasonCode[] => {
-  if (limit === null) return [];
-  if (value === null) return limit.ifNoData === "ask" ? ["UNCONFIRMED_DATA"] : [];
-  return breaks(value, limit.value) ? [reason] : [];
-};
 
 /** The human's rule for a substitute line, while substitutions is ask. */
 export const ruleFor = (
@@ -134,50 +110,6 @@ export const ruleFor = (
     samePair(rule, { replaces, productId: claim.productId }),
   );
 };
-
-const buyerLimitReasons = (
-  claim: OfferClaims,
-  mandate: Mandate,
-  historyOf: (productId: string) => HistoryRow[],
-): ReasonCode[] => {
-  const { limits } = mandate;
-  const reasons: ReasonCode[] = [];
-  if (limits.categories !== null && !limits.categories.includes(claim.product.category))
-    reasons.push("CATEGORY_NOT_ALLOWED");
-  if (
-    claim.replaces !== null &&
-    limits.substitutions !== "auto" &&
-    ruleFor(limits, claim)?.policy !== "auto"
-  )
-    reasons.push("SUBSTITUTION");
-  if (historyOf(claim.productId).length === 0 && limits.newProducts === "ask")
-    reasons.push("NEW_PRODUCT");
-  reasons.push(
-    ...thresholdReasons(
-      claim.product.deliveryReliability,
-      limits.minDeliveryReliability,
-      (value, min) => value < min,
-      "RELIABILITY_BELOW_MIN",
-    ),
-    ...thresholdReasons(
-      claim.product.co2PerKg,
-      limits.maxCo2PerKg,
-      (value, max) => value > max,
-      "CO2_ABOVE_MAX",
-    ),
-  );
-  if (hasUnconfirmedHardConstraint(claim, mandate)) reasons.push("UNCONFIRMED_ALLERGEN");
-  if (limits.paymentTerms[claim.paymentTerms] === "ask") reasons.push("PAYMENT_TERMS");
-  if (claim.deliveryDate > claim.requestedDate || claim.shortfall !== null)
-    reasons.push("AVAILABILITY_DIFFERS");
-  return reasons;
-};
-
-const liveReasons = (live: ValidateResult | null): ReasonCode[] =>
-  (live?.results ?? []).flatMap((result) => {
-    if (result.ok) return [];
-    return [result.reason === "SALES_BLOCKED" ? "SALES_BLOCKED" : "CUTOFF_PASSED"];
-  });
 
 const cutoffPassed = (claim: OfferClaims, now: Date): boolean =>
   claim.cutoffAt !== null && Date.parse(claim.cutoffAt) <= now.getTime();
@@ -196,63 +128,189 @@ export const nextDeliveryDateAfterCutoff = (claims: OfferClaims[], now: Date): s
     .flatMap((claim) => (claim.nextDeliveryDate === null ? [] : [claim.nextDeliveryDate]))
     .toSorted()[0] ?? null;
 
-/** Reasons about the order as a whole, even when a line raises them. */
-const ORDER_LEVEL: ReadonlySet<ReasonCode> = new Set(["PAYMENT_TERMS"]);
+interface CheckEvidence {
+  reason: ReasonCode;
+  rule: string;
+  detail: string;
+  productId?: string;
+}
 
-/**
- * The buyer-limit reasons each product raises, so the audit can name the product a check
- * failed for (a new product, CO₂ above the maximum …). Order-level reasons are left out.
- */
-export const reasonsByProduct = (
-  claims: OfferClaims[],
-  mandate: Mandate | null,
-  history: HistoryRow[],
-): Map<string, ReasonCode[]> => {
-  const byProduct = new Map<string, ReasonCode[]>();
-  if (mandate === null) return byProduct;
-  const historyOf = (productId: string) => history.filter((row) => row.productId === productId);
-  for (const claim of claims) {
-    const reasons = buyerLimitReasons(claim, mandate, historyOf).filter(
-      (reason) => !ORDER_LEVEL.has(reason),
-    );
-    byProduct.set(claim.productId, [...(byProduct.get(claim.productId) ?? []), ...reasons]);
-  }
-  return byProduct;
-};
+export interface EvaluatedChecks {
+  evaluation: Evaluation;
+  evidence: CheckEvidence[];
+}
 
 const isReject = (reason: ReasonCode): boolean =>
   REJECT_REASONS.some((rejectReason) => rejectReason === reason);
-
-/** Steps 1-5 of SPEC-009. Pure: no I/O, no writes. */
-export const evaluate: Evaluate = ({ claims, mandate, history, live, now }): Evaluation => {
-  const reasons: ReasonCode[] = [];
-  if (mandate === null) reasons.push("MANDATE_INVALID");
-
+/** Steps 1-5 of SPEC-009, with the evidence produced by each check. */
+export const evaluateWithEvidence = ({
+  claims,
+  mandate,
+  history,
+  live,
+  now,
+}: Parameters<Evaluate>[0]): EvaluatedChecks => {
+  const evidence: CheckEvidence[] = [];
+  const add = (reason: ReasonCode, rule: string, detail: string, productId?: string) =>
+    evidence.push({ reason, rule, detail, ...(productId === undefined ? {} : { productId }) });
+  if (mandate === null)
+    add("MANDATE_INVALID", "Current mandate", "No current mandate is available.");
   for (const claim of claims) {
-    if (cutoffPassed(claim, now)) reasons.push("CUTOFF_PASSED");
-    else if (claim.exp <= Math.floor(now.getTime() / 1000)) reasons.push("OFFER_EXPIRED");
+    if (cutoffPassed(claim, now))
+      add(
+        "CUTOFF_PASSED",
+        "Delivery cutoff",
+        `Product ${claim.product.name} (${claim.productId}): cutoff ${claim.cutoffAt}; checked at ${now.toISOString()}.`,
+      );
+    else if (claim.exp <= Math.floor(now.getTime() / 1000))
+      add(
+        "OFFER_EXPIRED",
+        "Offer expiry",
+        `Product ${claim.product.name} (${claim.productId}): expiry ${new Date(claim.exp * 1000).toISOString()}; checked at ${now.toISOString()}.`,
+      );
   }
-
-  reasons.push(...liveReasons(live));
+  for (const result of live?.results ?? []) {
+    if (!result.ok) {
+      const reason = result.reason === "SALES_BLOCKED" ? "SALES_BLOCKED" : "CUTOFF_PASSED";
+      const claim = claims.find((entry) => entry.offerId === result.offerId);
+      add(
+        reason,
+        "Live offer validation",
+        `${claim === undefined ? "Unknown product" : `Product ${claim.product.name} (${claim.productId})`}, offer ${result.offerId}: ${result.reason}; next delivery ${result.nextDeliveryDate ?? "unknown"}.`,
+      );
+    }
+  }
   const historyOf = (productId: string) => history.filter((row) => row.productId === productId);
-  const products = sumByProduct(claims);
-  for (const [productId, product] of products) {
-    if (isQuantityUnusual(product, historyOf(productId))) reasons.push("QUANTITY_UNUSUAL");
+  for (const [productId, product] of sumByProduct(claims)) {
+    const quantity = quantityEvidence(product, historyOf(productId));
+    if (quantity !== null)
+      add(
+        "QUANTITY_UNUSUAL",
+        "Quantity guardrail",
+        `Product ${product.claims[0]?.product.name ?? productId} (${productId}): ${quantity}`,
+      );
+    if (
+      product.claims.some((claim) => claim.stock === "unconfirmed") &&
+      (product.std === null || product.std > GUARDRAILS.unconfirmedStockMax)
+    )
+      add(
+        "UNCONFIRMED_STOCK",
+        "Unconfirmed stock cap",
+        `Product ${product.claims[0]?.product.name ?? productId} (${productId}): summed quantity ${product.std ?? "unknown (conversion unavailable)"} standard units; stock unconfirmed, limit ${GUARDRAILS.unconfirmedStockMax} standard units.`,
+      );
   }
-  for (const product of products.values()) {
-    if (isUnconfirmedStockOverCap(product)) reasons.push("UNCONFIRMED_STOCK");
-  }
-
   if (mandate !== null) {
-    if (grossTotal(claims) > mandate.limits.maxOrderTotal.value) reasons.push("SPEND_OVER_LIMIT");
-    for (const claim of claims) reasons.push(...buyerLimitReasons(claim, mandate, historyOf));
+    const { limits } = mandate;
+    const total = grossTotal(claims);
+    if (total > limits.maxOrderTotal.value)
+      add(
+        "SPEND_OVER_LIMIT",
+        "Maximum order total",
+        `Gross spend ${total} EUR; limit ${limits.maxOrderTotal.value} EUR.`,
+      );
+    for (const claim of claims) {
+      const id = claim.productId;
+      if (limits.categories !== null && !limits.categories.includes(claim.product.category))
+        add(
+          "CATEGORY_NOT_ALLOWED",
+          "Allowed categories",
+          `Category ${claim.product.category}; allowed categories ${limits.categories.join(", ") || "none"}.`,
+          id,
+        );
+      if (
+        claim.replaces !== null &&
+        limits.substitutions !== "auto" &&
+        ruleFor(limits, claim)?.policy !== "auto"
+      )
+        add(
+          "SUBSTITUTION",
+          "Substitution policy",
+          `Replaces ${claim.replaces}; policy ${limits.substitutions}, pair policy ${ruleFor(limits, claim)?.policy ?? "none"}.`,
+          id,
+        );
+      const count = historyOf(id).length;
+      if (count === 0 && limits.newProducts === "ask")
+        add(
+          "NEW_PRODUCT",
+          "New product policy",
+          `History count ${count}; policy ${limits.newProducts}.`,
+          id,
+        );
+      const threshold = (
+        value: number | null,
+        limit: { value: number; ifNoData: "auto" | "ask" } | null,
+        label: string,
+        reason: ReasonCode,
+        breaks: (a: number, b: number) => boolean,
+      ) => {
+        if (limit === null) return;
+        if (value === null && limit.ifNoData === "ask")
+          add(
+            "UNCONFIRMED_DATA",
+            label,
+            `${label} unknown; limit ${limit.value}, missing-data policy ${limit.ifNoData}.`,
+            id,
+          );
+        else if (value !== null && breaks(value, limit.value))
+          add(
+            reason,
+            label,
+            `${label} ${value}; limit ${limit.value}, missing-data policy ${limit.ifNoData}.`,
+            id,
+          );
+      };
+      threshold(
+        claim.product.deliveryReliability,
+        limits.minDeliveryReliability,
+        "Minimum delivery reliability",
+        "RELIABILITY_BELOW_MIN",
+        (a, b) => a < b,
+      );
+      threshold(
+        claim.product.co2PerKg,
+        limits.maxCo2PerKg,
+        "Maximum CO2 per kg",
+        "CO2_ABOVE_MAX",
+        (a, b) => a > b,
+      );
+      for (const { attribute } of claim.constraints.hard) {
+        const match = claim.product.match[attribute];
+        if (
+          match === "confirmed" ||
+          (match === "unknown" &&
+            isAllergenAttribute(attribute) &&
+            limits.allergenData.ifNoData === "auto")
+        )
+          continue;
+        add(
+          "UNCONFIRMED_ALLERGEN",
+          "Hard constraint",
+          `Hard constraint ${attribute}; match ${match ?? "missing"}, allergen missing-data policy ${limits.allergenData.ifNoData}.`,
+          id,
+        );
+      }
+      if (limits.paymentTerms[claim.paymentTerms] === "ask")
+        add(
+          "PAYMENT_TERMS",
+          "Payment terms policy",
+          `Payment terms ${claim.paymentTerms}; policy ${limits.paymentTerms[claim.paymentTerms]}.`,
+        );
+      if (claim.deliveryDate > claim.requestedDate || claim.shortfall !== null)
+        add(
+          "AVAILABILITY_DIFFERS",
+          "Requested availability",
+          `Requested date ${claim.requestedDate}; delivery date ${claim.deliveryDate}; shortfall ${claim.shortfall === null ? "none" : JSON.stringify(claim.shortfall)}.`,
+          id,
+        );
+    }
   }
-
-  const unique = [...new Set(reasons)];
-  const decision = unique.some(isReject)
+  const reasons = [...new Set(evidence.map((item) => item.reason))];
+  const decision = reasons.some(isReject)
     ? "rejected"
-    : unique.length > 0
+    : reasons.length > 0
       ? "needs_approval"
       : "auto";
-  return { decision, reasons: unique };
+  return { evaluation: { decision, reasons }, evidence };
 };
+
+export const evaluate: Evaluate = (input) => evaluateWithEvidence(input).evaluation;

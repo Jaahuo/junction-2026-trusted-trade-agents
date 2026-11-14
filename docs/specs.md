@@ -160,6 +160,8 @@ export const TOOL_INPUT = {
 | register     | register_mandate       | POST /api/mandates                   | mandates  | input = body                                                          | RegisterMandateRequest → 201 StoredMandate (200 on replay) |
 | revoke       | revoke_mandate         | POST /api/mandates/:mandateId/revoke | mandates  | `mandateId` → path                                                    | → StoredMandate                                            |
 | facts        | —                      | POST /api/catalog/facts              | catalog   | —                                                                     | FactsRequest → FactsResult                                 |
+| orders       | —                      | GET /api/orders                      | orders    | —                                                                     | → OrderList                                                |
+| refusals     | —                      | GET /api/orders/refusals             | orders    | —                                                                     | → RefusalList                                              |
 | precheck     | —                      | POST /api/orders/precheck            | orders    | —                                                                     | PrecheckRequest → Precheck                                 |
 | requote      | —                      | POST /api/offers/requote             | offers    | —                                                                     | RequoteRequest → OffersResult                              |
 | issued       | —                      | POST /api/offers/issued              | offers    | —                                                                     | IssuedOffersRequest → IssuedOffers                         |
@@ -593,6 +595,12 @@ export interface Order {
   auditIntegrity?: "intact" | "unverified" | "broken";
   standingOffer?: SubstitutePair & { timesApproved: number; replacesName?: string };
 }
+export interface OrderList {
+  orders: Order[];
+}
+export interface RefusalList {
+  refusals: { id: number; at: string; code: string }[];
+}
 export interface PendingList {
   orders: Order[];
 }
@@ -618,8 +626,12 @@ export interface PrecheckRequest {
 - Placement operation `commitPlacement(orderId)`: every move to `placed` goes through it, from `place_order` and from approval. In one transaction with a per-customer lock: re-validate the offers (SPEC-006 `validate`, with its live-amount rule; until that route exists, skipped); invoice: remaining credit = principal's `creditLimit` − gross of placed invoice orders, total above it → `rejected CREDIT_LIMIT`; pay-on-order: a `PaymentPort` step, `awaiting_payment`, then simulated authorization that fails above `paymentFailAbove` → `rejected PAYMENT_FAILED`, else `payment_authorized`; then `placed`. Each step writes its audit event in the same transaction.
 - First build: only invoice terms reach `commitPlacement` (SPEC-002); the `PaymentPort` adapter for pay-on-order arrives with the second account.
 - Order, lines and audit are written in one transaction. `order_refused` records have no order id and appear in no `Order.audit`.
+- `GET /api/orders` lists orders for the principal's customer, newest first.
+- `GET /api/orders/refusals` lists that customer's refusal id, time and code, newest first. The id is the stable `orders_refusals` row primary key. Refusals have no order id.
+- These routes are for the wholesaler activity screen. They are not model tools. In the demo, the principal uses the demo customer scope.
+- The browser-safe contract exports `OrderListSchema`, `OrderList`, `RefusalListSchema`, and `RefusalList`.
 
-Order integrity: each new audit event contains `previousHash` and `hash`. The genesis predecessor is null. The hash is SHA-256 over recursively key-sorted JSON containing `scope`, zero-based `index`, `previousHash`, and `event`. The event contains every event property except `hash` and `previousHash`. Non-JSON values are invalid. The order scope is `order:${orderId}`; refusal records use `refusals:${customer}`. The shared hash code has no event field allowlist. Issue #125 can add rule or value properties to `AuditEventSchema`; the hash will include them automatically.
+Order integrity: each new audit event contains `previousHash` and `hash`. The genesis predecessor is null. The hash is SHA-256 over recursively key-sorted JSON containing `scope`, zero-based `index`, `previousHash`, and `event`. The event contains every event property except `hash` and `previousHash`. Non-JSON values are invalid. The order scope is `order:${orderId}`; refusal records use `refusals:${customer}`. The shared hash code has no event field allowlist.
 
 `auditAnchor` records the chain head and event count. An unsigned stored anchor detects audit-only modification, not a change to both the audit and its anchor. A placed order also has a durable ES256 `receipt+jwt`, signed with the offer key and verifiable with the published JWKS. The receipt signs the final selected lines, offer IDs, customer, agent, account, mandate, payment terms, total, decision, creation and placement times, status, and audit anchor. It has no expiry. Verification checks the signature, the complete signed projection, and every audit event, including the signed prefix. Signing must succeed before placement history is written: returning `Result.err` does not roll back prior writes.
 

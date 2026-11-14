@@ -56,7 +56,10 @@ export const decodePull = (value: unknown) => ({
 export const decodeDependency = (value: unknown) => ({
   merged: boolean(field(value, "merged")),
   merge_commit_sha: nullableText(field(value, "merge_commit_sha")),
-  head: { ref: text(field(field(value, "head"), "ref")) },
+  head: {
+    ref: text(field(field(value, "head"), "ref")),
+    sha: text(field(field(value, "head"), "sha")),
+  },
   base: { ref: text(field(field(value, "base"), "ref")) },
 });
 export const decodeMerge = (value: unknown) => ({ merged: boolean(field(value, "merged")) });

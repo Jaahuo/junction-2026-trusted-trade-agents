@@ -11,6 +11,7 @@ import {
 import { err, ok, type Result } from "@app/kernel";
 import { env } from "@app/server-kit";
 import { z } from "zod";
+import { toHelsinkiTime } from "../domain/helsinki-time.ts";
 
 const DEFAULT_BASE_URL = "https://junction26.valioaimo.fi";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -66,71 +67,6 @@ const PriceItemSchema = z.object({
 const PriceResponseSchema = z.object({ products: z.array(z.unknown()) });
 const ProductIdSchema = z.object({ productId: z.string() });
 type PriceItem = z.infer<typeof PriceItemSchema>;
-
-const HELSINKI = "Europe/Helsinki";
-const helsinkiParts = new Intl.DateTimeFormat("en-US", {
-  timeZone: HELSINKI,
-  hourCycle: "h23",
-  year: "numeric",
-  month: "numeric",
-  day: "numeric",
-  hour: "numeric",
-  minute: "numeric",
-  second: "numeric",
-});
-
-const helsinkiOffsetMinutes = (instantMs: number): number => {
-  const parts: Record<string, number> = {};
-  for (const part of helsinkiParts.formatToParts(new Date(instantMs))) {
-    if (part.type !== "literal") parts[part.type] = Number(part.value);
-  }
-  const asUtc = Date.UTC(
-    parts["year"] ?? 0,
-    (parts["month"] ?? 1) - 1,
-    parts["day"] ?? 1,
-    parts["hour"] ?? 0,
-    parts["minute"] ?? 0,
-    parts["second"] ?? 0,
-  );
-  return Math.round((asUtc - Math.floor(instantMs / 1000) * 1000) / 60_000);
-};
-
-const formatOffset = (minutes: number): string => {
-  const sign = minutes < 0 ? "-" : "+";
-  const abs = Math.abs(minutes);
-  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
-  const mm = String(abs % 60).padStart(2, "0");
-  return `${sign}${hh}:${mm}`;
-};
-
-/** The Helsinki offset of a local date and time; the +03:00 offset (the earlier instant) wins in a clock overlap. */
-const helsinkiOffset = (localMs: number): string => {
-  const candidates = [180, 120];
-  const match = candidates.find(
-    (minutes) => helsinkiOffsetMinutes(localMs - minutes * 60_000) === minutes,
-  );
-  return formatOffset(match ?? helsinkiOffsetMinutes(localMs - 120 * 60_000));
-};
-
-const TIME_PATTERN =
-  /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2})(?::(\d{2}(?:\.\d+)?))?(Z|[+-]\d{2}:?\d{2})?)?$/;
-
-/** ISO 8601 with offset, or null. A time with no offset is Europe/Helsinki local time; `dateOnly` is the time of a bare date. */
-const toHelsinkiTime = (value: string, dateOnly: string | null): string | null => {
-  const match = TIME_PATTERN.exec(value.trim());
-  const date = match?.[1];
-  if (date === undefined) return null;
-  const hm = match?.[2];
-  if (hm === undefined && dateOnly === null) return null;
-  const time = hm === undefined ? (dateOnly ?? "") : `${hm}:${match?.[3] ?? "00"}`;
-  const withSeconds = time.length === 5 ? `${time}:00` : time;
-  const offset =
-    hm === undefined ? undefined : match?.[4]?.replace(/^([+-]\d{2})(\d{2})$/, "$1:$2");
-  const local = `${date}T${withSeconds}`;
-  const localMs = Date.parse(`${local}Z`);
-  if (Number.isNaN(localMs)) return null;
-  return `${local}${offset ?? helsinkiOffset(localMs)}`;
-};
 
 const addOneDay = (date: string): string => {
   const next = new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000);

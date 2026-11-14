@@ -375,7 +375,8 @@ The pending list contains only proposals that still need a decision. When the bu
 
 ### Delivery later than requested
 
-- Availability returns the earliest possible date. If it is after the deliver-by date, the offer carries the real date and its pre-check lists `AVAILABILITY_DIFFERS`.
+- Availability returns the earliest possible date. When that date is on or before `deliverBy`, the offer selects `deliverBy` as its delivery date. When the earliest date is earlier, the offer marks stock unconfirmed for the selected date. It shifts the cutoff by the same number of calendar days, keeping the same `Europe/Helsinki` clock time and applying daylight-saving changes. The offer uses the price for its selected delivery date. Its next delivery date is later than the selected date, or null if none is known.
+- If the earliest date is after `deliverBy`, the offer carries that date and its pre-check lists `AVAILABILITY_DIFFERS`.
 - The agent can look for an alternative that arrives on time, or order the late offer, which goes to approval.
 - If the closing time passes between offer and order, the order is rejected with `CUTOFF_PASSED` and the next available date.
 

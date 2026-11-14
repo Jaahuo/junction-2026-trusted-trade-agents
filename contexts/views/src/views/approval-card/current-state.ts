@@ -26,6 +26,23 @@ export const withCurrent = (data: Order | PendingList, current: readonly Order[]
   return "orders" in data ? { orders: data.orders.map(newest) } : newest(data);
 };
 
+/** How long after its last change a shown order counts as current without a read. */
+const FRESH_MS = 120_000;
+
+const changedAt = (order: Order) =>
+  Math.max(
+    Date.parse(order.createdAt),
+    ...order.audit.map((event) => Date.parse(event.at)),
+    order.decision === null ? Number.NEGATIVE_INFINITY : Date.parse(order.decision.at),
+  );
+
+/**
+ * True when every shown order changed within the last two minutes: the tool has just run, so a
+ * read gives the same data and costs the approver a host confirmation.
+ */
+export const isFresh = (data: Order | PendingList, now: number) =>
+  ordersOf(data).every((order) => Math.abs(now - changedAt(order)) < FRESH_MS);
+
 /**
  * Reads every shown order from the server. A host replays the original tool result on a refresh,
  * so the shown data may be older than the order. Returns the server copies and the ids that could

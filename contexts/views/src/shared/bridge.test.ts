@@ -175,3 +175,36 @@ test("host mode tells the model about a decision without a chat message", async 
   expect(contexts).toEqual(["The approver rejected order ord_test_1."]);
   expect(messages).toEqual([]);
 });
+
+test("host mode sends one request at a time, as Open WebUI cancels a second one", async () => {
+  const { host } = fakeHost({});
+  let open = 0;
+  let most = 0;
+  const releases: (() => void)[] = [];
+  const wait = async <T>(value: T) => {
+    open++;
+    most = Math.max(most, open);
+    await new Promise<void>((done) => releases.push(done));
+    open--;
+    return value;
+  };
+  const source = hostSource({
+    ...host,
+    callServerTool: (request) =>
+      wait(request.name === "get_mandate" ? { isError: true, text: "NOT_FOUND" } : {}),
+    sendMessage: () => wait(true),
+  });
+  const calls = [
+    source.call("get_order_status", { orderId: "ord_1" }),
+    source.call("get_mandate", {}),
+    Promise.resolve(source.message?.("Hello")),
+  ];
+  for (let step = 0; step < 3; step++) {
+    await Bun.sleep(1);
+    expect(releases).toHaveLength(1);
+    releases.shift()?.();
+  }
+  const settled = await Promise.allSettled(calls);
+  expect(most).toBe(1);
+  expect(settled.map((s) => s.status)).toEqual(["fulfilled", "rejected", "fulfilled"]);
+});

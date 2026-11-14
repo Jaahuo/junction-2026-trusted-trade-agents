@@ -5,6 +5,7 @@ import {
   batchIds,
   checkQuantity,
   contradictedAttribute,
+  deliveryOnRequestedDate,
   expiredOmitReason,
   isDeliverableBy,
   lineTotal,
@@ -103,6 +104,22 @@ describe("quantity", () => {
       checkQuantity({ value: 0.3, unit: "KGM" }, { salesUnit: "KGM", allowedLotSize: 0.1 }),
     ).toBeNull();
   });
+});
+
+test("advancing preserves Helsinki wall time across DST and discards a stale next slot", () => {
+  const quote = availability({
+    availableDate: "2027-03-27",
+    nextDeliveryDate: "2027-03-28",
+    cutoffAt: "2027-03-26T15:30:00Z",
+  });
+  expect(deliveryOnRequestedDate(quote, "2027-03-29")).toMatchObject({
+    availableDate: "2027-03-29",
+    nextDeliveryDate: null,
+    cutoffAt: "2027-03-28T17:30:00.000+03:00",
+    stock: "unconfirmed",
+  });
+  expect(deliveryOnRequestedDate(quote, "2027-03-27")).toBe(quote);
+  expect(deliveryOnRequestedDate(quote, "2027-03-26")).toBe(quote);
 });
 
 const cutoffDeliverable = (cutoffAt: string) =>

@@ -23,7 +23,7 @@ import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { defineApprovalCard, reasonSummaries, type RuleChoice } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
-import { onReturn, readCurrent, withCurrent } from "./current-state.ts";
+import { isFresh, onReturn, readCurrent, withCurrent } from "./current-state.ts";
 import { brandHeader, cardStyles, icon, money, orderName, vat, when } from "./parts.ts";
 import { VIEW } from "./strings.ts";
 
@@ -283,7 +283,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   override updated() {
     if (!this.checked && this.state.kind === "done") {
       this.checked = true;
-      void this.refresh();
+      if (!isFresh(this.state.data, Date.now())) void this.refresh();
     }
     const order = this.state.kind === "done" ? this.selectedOrder(this.state.data) : undefined;
     this.dispatchEvent(

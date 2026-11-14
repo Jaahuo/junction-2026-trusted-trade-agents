@@ -5,6 +5,7 @@ import type {
   Quantity,
   SoftConstraint,
 } from "@app/contract";
+import { shiftHelsinkiDays } from "./helsinki-time.ts";
 
 export interface Constraints {
   hard: HardConstraint[];
@@ -116,6 +117,27 @@ export function availabilityOmitReason(
   return null;
 }
 
+/** Advance an earlier available slot to the requested date without asserting future stock. */
+export function deliveryOnRequestedDate(
+  quote: AvailabilityQuote,
+  requestedDate: string,
+): AvailabilityQuote {
+  if (quote.availableDate === null || quote.availableDate >= requestedDate) return quote;
+  const days =
+    (Date.parse(`${requestedDate}T00:00:00Z`) - Date.parse(`${quote.availableDate}T00:00:00Z`)) /
+    86_400_000;
+  return {
+    ...quote,
+    availableDate: requestedDate,
+    nextDeliveryDate:
+      quote.nextDeliveryDate !== null && quote.nextDeliveryDate > requestedDate
+        ? quote.nextDeliveryDate
+        : null,
+    cutoffAt: quote.cutoffAt === null ? null : shiftHelsinkiDays(quote.cutoffAt, days),
+    stock: "unconfirmed",
+  };
+}
+
 /**
  * True when the product can arrive on or before the requested date and its order cut-off has not
  * passed. Stock is not checked: a product with partial stock still gets an offer with a shortfall.
@@ -126,9 +148,9 @@ export function isDeliverableBy(
   now: Date,
 ): boolean {
   if (availability === undefined || availabilityOmitReason(availability, 0) !== null) return false;
-  if (availability.cutoffAt !== null && new Date(availability.cutoffAt) <= now) return false;
-  // Both are YYYY-MM-DD, so string order is date order.
-  return availability.availableDate !== null && availability.availableDate <= deliverBy;
+  const dated = deliveryOnRequestedDate(availability, deliverBy);
+  if (dated.cutoffAt !== null && new Date(dated.cutoffAt) <= now) return false;
+  return dated.availableDate !== null && dated.availableDate <= deliverBy;
 }
 
 export function batchIds(ids: readonly string[], max = 1000): string[][] {

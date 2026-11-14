@@ -16,6 +16,7 @@ import {
   batchIds,
   checkQuantity,
   contradictedAttribute,
+  deliveryOnRequestedDate,
   expiredOmitReason,
   lineTotal,
   mergeConstraints,
@@ -222,7 +223,8 @@ export async function getOffers(
         productIds,
       });
       if (!read.ok) return false;
-      for (const quote of read.value.quotes) availability.set(quote.productId, quote);
+      for (const quote of read.value.quotes)
+        availability.set(quote.productId, deliveryOnRequestedDate(quote, req.deliverBy));
     }
     return true;
   };

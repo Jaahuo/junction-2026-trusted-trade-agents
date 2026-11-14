@@ -1,3 +1,4 @@
+import { latestDeployWarning } from "./deploy.ts";
 import { fail, git } from "./lib.ts";
 import { command, ghJson, option, repository } from "./workflow.ts";
 import { equivalentHeads } from "./review-equivalence.ts";
@@ -39,6 +40,8 @@ check and merge; GitHub still checks the exact PR head during merge.`);
   process.exit(0);
 }
 const risk = parseRisk(`Risk: ${option(args, "--risk") ?? ""}`);
+const deployWarningText = await latestDeployWarning();
+if (deployWarningText) console.error(deployWarningText);
 if ((await git("status", "--porcelain")).out) fail("Commit all changes before shipping.");
 const branch = await command("git", "branch", "--show-current");
 if (!branch || branch === "main") fail("Ship from a task branch, never main.");

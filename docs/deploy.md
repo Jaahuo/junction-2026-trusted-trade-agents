@@ -84,7 +84,10 @@ The URL is `tofu -chdir=infra output -raw public_base_url`: `https://<ip>.sslip.
 
 ## Automatic deploy from main
 
-`.github/workflows/deploy.yml` runs after a successful main-push `gate`, or by hand on `main`. It selects the current main commit's successful push gate run and its exact run attempt. It verifies that run's image archive, scan, SBOM and manifest checksums, then publishes that same image to private GHCR. The deploy job receives its immutable digest. It never rebuilds an image or consumes PR artifacts. Publication has package write access; deployment has package read access and the production secrets. Deployment remains serialized and checks main again before changing the host. Scheduled gates never deploy. It never resets data.
+`.github/workflows/deploy.yml` runs after a successful main-push `gate`, or by hand on `main`. It selects the current main commit's successful push gate run and its exact run attempt. It verifies that run's image archive, scan, SBOM and manifest checksums, then publishes that same image to private GHCR. The deploy job receives its immutable digest.
+The manifest's `imageId` is the image config digest that `scripts/ci-image.ts config-digest` reads and verifies from the OCI archive. Publish compares it with the archive before loading and with the registry manifest's config digest after pushing; either mismatch stops the run before deployment. It does not use `docker image inspect` because the classic image store reports the config digest as the Id and the containerd store, the default in Docker 29, reports the manifest digest (#198).
+If main has moved to a commit whose push gate has not passed yet, the run skips publish and deploy, writes a `Skipped:` summary line and ends green; that commit's own gate starts its deploy.
+`bun run ship` warns when the latest completed deploy of main failed. It never rebuilds an image or consumes PR artifacts. Publication has package write access; deployment has package read access and the production secrets. Deployment remains serialized and checks main again before changing the host. Scheduled gates never deploy. It never resets data.
 
 After the first `apply` and `push`, set the secrets of the `production` environment:
 

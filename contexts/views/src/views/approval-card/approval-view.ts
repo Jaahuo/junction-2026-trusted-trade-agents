@@ -35,36 +35,9 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     base,
     cardStyles,
     css`
-      /* A slow, soft shimmer moves across the placeholders: the same white sweep everywhere,
-         over a light petrol tint in the body and a translucent white in the header. */
       .skeleton {
-        --shimmer-base: var(--color-bg-brand-subtle);
-        --shimmer-sweep: color-mix(in srgb, var(--color-white) 85%, transparent);
         display: block;
         height: 14px;
-        border-radius: 0;
-        background:
-          linear-gradient(90deg, transparent 0%, var(--shimmer-sweep) 50%, transparent 100%) 0 0 /
-            200% 100% no-repeat,
-          var(--shimmer-base);
-        animation: shimmer 2.4s ease-in-out infinite;
-      }
-      @keyframes shimmer {
-        from {
-          background-position:
-            150% 0,
-            0 0;
-        }
-        to {
-          background-position:
-            -50% 0,
-            0 0;
-        }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .skeleton {
-          animation: none;
-        }
       }
       .loading-text {
         display: flex;
@@ -72,8 +45,6 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         gap: var(--spacing-xs);
       }
       .header .skeleton {
-        --shimmer-base: color-mix(in srgb, var(--color-text-on-brand) 18%, transparent);
-        --shimmer-sweep: color-mix(in srgb, var(--color-text-on-brand) 30%, transparent);
         height: 18px;
       }
       .w-60 {
@@ -149,6 +120,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         text-decoration: none;
       }
       .updating {
+        position: relative;
         display: flex;
         align-items: center;
         gap: var(--spacing-lg);
@@ -158,6 +130,12 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       }
       .updating-text {
         flex: 1;
+      }
+      .strip-bar {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
       }
       .back {
         margin-bottom: var(--spacing-sm);
@@ -282,7 +260,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         <p class="strong">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</p>
         <p class="body-small">The agent is updating this order</p>
       </div>
-      <span class="spinner" aria-hidden="true"></span>
+      <span class="shimmer load-bar strip-bar" aria-hidden="true"></span>
     </article>`;
   }
 
@@ -296,9 +274,10 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     return html`<article class="card" part="loading" aria-busy="true">
       ${brandHeader(
         title,
-        html`<span class="skeleton w-60"></span>`,
-        html`<span class="skeleton w-45"></span>`,
+        html`<span class="skeleton shimmer w-60" aria-hidden="true"></span>`,
+        html`<span class="skeleton shimmer w-45" aria-hidden="true"></span>`,
       )}
+      <span class="shimmer load-bar" aria-hidden="true"></span>
       <div class="body">
         <div class="loading-text" role="status">
           <p class="strong">${title}</p>
@@ -311,10 +290,12 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
           }
           ${request === null ? nothing : html`<p class="body-small">“${request}”</p>`}
         </div>
-        <span class="skeleton w-80"></span><span class="skeleton w-60"></span
-        ><span class="skeleton w-75"></span>
+        <span class="skeleton shimmer w-80" aria-hidden="true"></span
+        ><span class="skeleton shimmer w-60" aria-hidden="true"></span
+        ><span class="skeleton shimmer w-75" aria-hidden="true"></span>
         <div class="actions">
-          <span class="skeleton button"></span><span class="skeleton button small"></span>
+          <span class="skeleton shimmer button" aria-hidden="true"></span
+          ><span class="skeleton shimmer button small" aria-hidden="true"></span>
         </div>
       </div>
     </article>`;

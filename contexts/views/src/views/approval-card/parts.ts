@@ -7,13 +7,30 @@ import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 // Parts that the card and the view share: the petrol header, the card frame and
 // the formatters. Figma: Junction 2026 › Screens › "Approval request — v8".
 
+/** Units in words, including the Valio Aimo sales units of real offers (KI, SK, PAK …). */
 const UNIT: Record<string, string> = {
   LTR: "l",
   KGM: "kg",
+  KG: "kg",
   GRM: "g",
   CT: "packs",
   PCE: "pcs",
   ST: "pcs",
+  KI: "cases",
+  CS: "cases",
+  PAK: "packs",
+  BAG: "bags",
+  RAS: "boxes",
+  PRK: "tubs",
+  BOT: "bottles",
+  SK: "sacks",
+  KLE: "packages",
+  KRT: "cartons",
+  KAN: "canisters",
+  PAL: "pallets",
+  NIP: "bundles",
+  DSP: "displays",
+  DZ: "dozen",
 };
 /** "packs", "kg": the short name of a unit code. */
 export const unit = (code: string) => UNIT[code] ?? code;
@@ -141,7 +158,7 @@ export const cardStyles = css`
     gap: var(--spacing-xs);
     padding: var(--spacing-xs) var(--spacing-md) var(--spacing-xs) var(--spacing-sm);
     border-radius: var(--radius-full);
-    background: var(--color-bg-attention);
+    background: var(--color-yellow-aimo-soft);
     color: var(--color-text);
     font-size: var(--font-size-2xs);
     font-weight: 700;

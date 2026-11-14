@@ -12,6 +12,9 @@ import { z } from "zod";
 
 const DEFAULT_BASE_URL = "https://junction26.valioaimo.fi";
 const REQUEST_TIMEOUT_MS = 10_000;
+// The challenge API: a Terminal product ships from the supplier's warehouse, and its amount is always
+// 999999 because the real amount is unknown. A Stock product's amount is known, however large.
+const TERMINAL = "Terminal";
 const UNCONFIRMED_AMOUNT = 999_999;
 const COMPARISON_UNITS: Readonly<Record<string, "KGM" | "LTR">> = { KG: "KGM", L: "LTR" };
 
@@ -24,6 +27,7 @@ const ProductAvailabilitySchema = z.object({
   productId: z.string(),
   closingTime: z.string().nullish(),
   salesBlock: z.boolean(),
+  logisticModel: z.string().nullish(),
   scheduleLines: z.array(ScheduleLineSchema),
 });
 const AvailabilityResponseSchema = z.object({ products: z.array(z.unknown()) });
@@ -115,6 +119,10 @@ const addOneDay = (date: string): string => {
 
 type Mapped<T> = Result<T, "UPSTREAM_FAILED">;
 
+const unconfirmed = (logisticModel: string | null | undefined, amount: number): boolean =>
+  logisticModel === TERMINAL ||
+  ((logisticModel === null || logisticModel === undefined) && amount === UNCONFIRMED_AMOUNT);
+
 const mapAvailability = (
   item: ProductAvailability,
 ): { quote: AvailabilityQuote; later: string | null } | null => {
@@ -140,7 +148,7 @@ const mapAvailability = (
     cutoffAt,
     salesBlocked:
       item.salesBlock || (open === undefined && item.scheduleLines.some((line) => line.salesBlock)),
-    stock: amount === UNCONFIRMED_AMOUNT ? "unconfirmed" : "confirmed",
+    stock: unconfirmed(item.logisticModel, amount) ? "unconfirmed" : "confirmed",
   });
   return quote.success ? { quote: quote.data, later } : null;
 };
@@ -155,7 +163,10 @@ const mapPrice = (item: PriceItem): PriceQuote | null => {
   const quote = PriceQuoteSchema.safeParse({
     productId: item.productId,
     unitPrice: { net: catalogPrice.value, vatRate: tax.taxRate, currency: "EUR" },
+    // The price response has no deposit amount, and the product file names deposit materials
+    // without a price, so deposits are left out and the offer says so (SPEC-005).
     deposit: 0,
+    depositKnown: false,
     comparisonPrice:
       unit === undefined || item.comparisonPrice === null || item.comparisonPrice === undefined
         ? null

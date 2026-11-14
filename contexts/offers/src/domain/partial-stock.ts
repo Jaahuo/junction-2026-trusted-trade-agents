@@ -8,7 +8,7 @@ import type {
   SoftConstraint,
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
-import { checkQuantity } from "./offer-rules.ts";
+import { checkQuantity, toCents } from "./offer-rules.ts";
 import { lotCount, lotProduct } from "./lot-arithmetic.ts";
 
 const safe = (value: number): boolean =>
@@ -112,6 +112,25 @@ export function pricePerStdUnit(
     return null;
   const value = unitPrice.net / perSalesUnit.value;
   return safe(value) ? { value, unit: perSalesUnit.unit } : null;
+}
+
+/**
+ * Gross price (VAT, no deposit) per litre or kilogram (SPEC-006): the wholesaler's comparison price
+ * first, else the unit price over the sales unit's standard quantity, else null.
+ */
+export function grossPerStandardUnit(
+  price: Pick<PriceQuote, "unitPrice" | "comparisonPrice">,
+  perSalesUnit: Quantity | null,
+): { gross: number; unit: "LTR" | "KGM" } | null {
+  const net =
+    price.comparisonPrice !== null &&
+    safe(price.comparisonPrice.value) &&
+    price.comparisonPrice.value >= 0
+      ? price.comparisonPrice
+      : pricePerStdUnit(price.unitPrice, perSalesUnit);
+  if (net === null) return null;
+  const gross = toCents(net.value * (1 + price.unitPrice.vatRate / 100));
+  return safe(gross) ? { gross, unit: net.unit } : null;
 }
 
 export interface QuotedProduct {

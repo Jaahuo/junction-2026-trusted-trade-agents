@@ -335,7 +335,7 @@
   "mandateId": "mnd_test_1",
   "mandateVersion": 1,
   "status": "pending_approval",
-  "reasons": ["NEW_PRODUCT"],
+  "reasons": ["NEW_PRODUCT", "CO2_ABOVE_MAX"],
   "proposalVersion": 1,
   "approvalUrl": "http://127.0.0.1:3000/approvals/ord_test_4474",
   "paymentTerms": "invoice",
@@ -363,7 +363,16 @@
       "actor": "server",
       "event": "check_failed",
       "reason": "NEW_PRODUCT",
-      "detail": "prod_test_off_test_17"
+      "detail": "The product has not been ordered before.",
+      "productId": "prod_test_off_test_17"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "check_failed",
+      "reason": "CO2_ABOVE_MAX",
+      "detail": "The product's estimated CO2 per kg is above the mandate's maximum.",
+      "productId": "prod_test_off_test_11"
     },
     {
       "at": "2026-11-14T10:05:00+00:00",

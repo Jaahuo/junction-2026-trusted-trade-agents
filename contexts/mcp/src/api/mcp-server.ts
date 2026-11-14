@@ -87,13 +87,19 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   revoke_mandate: "Revoke a mandate. Only the mandate view calls this tool.",
 };
 
+/**
+ * Views a host does not show in the chat yet. The offer comparison is a placeholder until #22,
+ * and the agent calls get_offers several times per order, so each call would add an empty card.
+ */
+export const VIEWS_NOT_IN_CHAT: ReadonlySet<string> = new Set(["offer-comparison"]);
+
 const toolMeta = (name: ToolName): Record<string, unknown> => {
   if (VIEW_TOOLS.some((tool) => tool === name)) {
     const ui: McpUiToolMeta = { visibility: ["app"] };
     return { ui };
   }
   const view = VIEWS.find((entry) => entry.tools.some((tool) => tool === name));
-  if (view === undefined) return {};
+  if (view === undefined || VIEWS_NOT_IN_CHAT.has(view.view)) return {};
   const ui: McpUiToolMeta = { resourceUri: view.uri };
   // The flat key mirrors ext-apps' registerAppTool, for hosts that read the older form.
   return { ui, [RESOURCE_URI_META_KEY]: view.uri };

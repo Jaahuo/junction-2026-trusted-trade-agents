@@ -66,7 +66,7 @@ const verifyAll = async (
   return ok(lines);
 };
 
-/** SPEC-009 R3-R5. Neither precheck nor place_order goes past a refusal. */
+/** SPEC-009 R3-R5, plus the payment terms of SPEC-002. Neither precheck nor place_order goes past a refusal. */
 const checkTokens = async (
   deps: OrderDeps,
   principal: Principal,
@@ -85,12 +85,19 @@ const checkTokens = async (
   const claims = [...lines.value, ...alternativeLines.value].map((line) => line.claims);
   if (claims.some((claim) => claim.customer !== principal.customer))
     return err(refusal("BAD_REQUEST", "An offer was issued to another customer."));
-  if (new Set(lines.value.map((line) => line.claims.paymentTerms)).size > 1)
-    return err(refusal("BAD_REQUEST", "The offers have different payment terms."));
+  // Every token, alternatives included, must carry the account's payment terms; so they also agree.
+  if (claims.some((claim) => claim.paymentTerms !== principal.paymentTerms))
+    return err(refusal("BAD_REQUEST", "The offers' payment terms are not the account's."));
 
   const mandate = await deps.mandates.current();
   if (!mandate.ok) return err(refusal("UPSTREAM_FAILED", "The mandate could not be read."));
-  const current = mandate.value;
+  // A mandate signed for another agent or customer is not this principal's mandate.
+  const current =
+    mandate.value !== null &&
+    mandate.value.agent === principal.agentId &&
+    mandate.value.iss === principal.customer
+      ? mandate.value
+      : null;
   const stale = claims.some(
     (claim) =>
       claim.agentId !== principal.agentId ||

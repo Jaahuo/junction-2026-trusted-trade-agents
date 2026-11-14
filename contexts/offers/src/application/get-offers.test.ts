@@ -144,6 +144,30 @@ describe("getOffers", () => {
     expect(setup.live.calls.map((call) => call.query.productIds)).toEqual([[OAT], [OAT]]);
   });
 
+  test.each([
+    {
+      name: "a line in another unit says: use the sales unit; search gives the order quantity",
+      quantity: { value: 20, unit: "LTR" },
+      detail: "use the sales unit CT; search gives the order quantity in orderQuantity",
+    },
+    {
+      name: "a quantity in the sales unit that is not a lot-size multiple keeps the lot-size text",
+      quantity: { value: 3, unit: "CT" },
+      detail: "the quantity must be a positive multiple of 2 CT",
+    },
+  ])("$name", async ({ quantity, detail }) => {
+    const setup = fakeOffersDeps({
+      products: [fakeProduct(OAT, { allowedLotSize: 2 })],
+      live: quoted(OAT),
+    });
+    const result = valueOf(
+      await getOffers(setup.deps, principal, request({ lines: [{ productId: OAT, quantity }] })),
+    );
+    expect(result.offers).toEqual([]);
+    expect(result.omitted).toEqual([{ productId: OAT, reason: "INVALID_QUANTITY", detail }]);
+    expect(setup.live.calls).toEqual([]);
+  });
+
   test("a contradicted standing constraint is omitted CONSTRAINT_CONTRADICTED", async () => {
     const setup = fakeOffersDeps({
       mandate: mandate({ hard: [lactose], soft: [] }),

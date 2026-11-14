@@ -3,7 +3,11 @@ import { REASON_TEXT, type ReasonCode } from "@app/contract";
 // The approval card's text in each language. Read it at render time with `pick(CARD)`.
 
 const en = {
-  reason: REASON_TEXT,
+  // The contract sentence says the date or amount "changed"; on the card it differs from the request.
+  reason: {
+    ...REASON_TEXT,
+    AVAILABILITY_DIFFERS: "The delivery is later, or the amount is smaller, than requested.",
+  } satisfies Record<ReasonCode, string>,
   overOrderLimit: "Over your order limit",
   newProduct: "New product",
   newProductDetail: (customer: string) =>
@@ -25,7 +29,8 @@ const en = {
   outOfStockTitle: (until: string | null) =>
     `Out of stock${until === null ? "" : ` until ${until}`}`,
   outOfStockNamed: (names: string) => `Out of stock: ${names}`,
-  notAllOnTime: (name: string) => `Not all arrives on time: ${name}`,
+  notAllOnTime: (names: string) => `Not all arrives on time: ${names}`,
+  arrivesLateNamed: (names: string) => `Arrives late: ${names}`,
   approved: "Approved",
   approvedWaiting: "Approved · waiting for payment",
   rejected: "Rejected",
@@ -47,6 +52,9 @@ const en = {
   stockIsNotConfirmed: "Stock is not confirmed",
   shortForDelivery: (value: string) => `${value} short for this delivery`,
   checkAmount: "Check the amount",
+  chooseHowToHandle: "Choose how to handle the missing amount",
+  arrivesOn: (day: string, asked: string) => `Arrives ${day}, you asked for ${asked}`,
+  approveOrRemove: "Approve with this date, or remove it",
   needsYourApproval: "Needs your approval",
   orTellIt: "Or tell it what to do:",
   yourOrderLimit: "Your order limit",
@@ -78,7 +86,11 @@ const en = {
   allOnWeekday: (weekday: string) => `All on ${weekday}`,
   onlyPacks: (packs: string) => `Only ${packs}`,
   anotherProduct: "Another product",
+  letAgentFindOnTime: "Let the agent find one on time",
+  latePrompt: (name: string, asked: string, day: string) =>
+    `${name} arrives ${day}, but I need it by ${asked}. Find an offer that arrives on time. Send me a new offer to approve.`,
   remove: (name: string) => `Remove ${name}`,
+  removeProduct: "Remove this product",
   showFewerProducts: "Show fewer products",
   showMoreProducts: (count: number) => `Show ${count} more product${count === 1 ? "" : "s"}`,
   removed: (name: string) => `${name} removed`,
@@ -168,7 +180,7 @@ const FI_REASON: Record<ReasonCode, string> = {
   QUANTITY_UNUSUAL: "Määrä on paljon tavallista suurempi tälle tuotteelle.",
   PAYMENT_TERMS: "Valtuutus vaatii näille maksuehdoille hyväksynnän.",
   PRICE_CHANGED: "Hinta on muuttunut tarjouksen jälkeen.",
-  AVAILABILITY_DIFFERS: "Toimituspäivä tai määrä on muuttunut tarjouksen jälkeen.",
+  AVAILABILITY_DIFFERS: "Toimitus on pyydettyä myöhemmin tai määrä pyydettyä pienempi.",
   NOT_AUTHENTICATED: "Pyyntöä ei ole tunnistettu.",
   MANDATE_INVALID: "Agentilla ei ole voimassa olevaa valtuutusta.",
   OFFER_INVALID: "Tarjouksen tunnisteen tarkistus epäonnistui.",
@@ -200,7 +212,8 @@ const fi: typeof en = {
   outOfStock: (until) => `loppu varastosta${until === null ? "" : ` ${until} asti`}`,
   outOfStockTitle: (until) => `Loppu varastosta${until === null ? "" : ` ${until} asti`}`,
   outOfStockNamed: (names) => `Loppu varastosta: ${names}`,
-  notAllOnTime: (name) => `Kaikki ei saavu ajoissa: ${name}`,
+  notAllOnTime: (names) => `Kaikki ei saavu ajoissa: ${names}`,
+  arrivesLateNamed: (names) => `Saapuu myöhässä: ${names}`,
   approved: "Hyväksytty",
   approvedWaiting: "Hyväksytty · odottaa maksua",
   rejected: "Hylätty",
@@ -222,6 +235,9 @@ const fi: typeof en = {
   stockIsNotConfirmed: "Saldoa ei ole vahvistettu",
   shortForDelivery: (value) => `Tästä toimituksesta puuttuu ${value}`,
   checkAmount: "Tarkista määrä",
+  chooseHowToHandle: "Valitse, miten puuttuva määrä hoidetaan",
+  arrivesOn: (day, asked) => `Saapuu ${day}, pyysit toimitusta ${asked}`,
+  approveOrRemove: "Hyväksy tällä päivällä tai poista tuote",
   needsYourApproval: "Tarvitsee hyväksyntäsi",
   orTellIt: "Tai kerro agentille, mitä tehdä:",
   yourOrderLimit: "Tilausrajasi",
@@ -258,7 +274,11 @@ const fi: typeof en = {
   allOnWeekday: (weekday) => `Kaikki ${weekday}na`,
   onlyPacks: (packs) => `Vain ${packs}`,
   anotherProduct: "Toinen tuote",
+  letAgentFindOnTime: "Anna agentin hoitaa",
+  latePrompt: (name, asked, day) =>
+    `${name} saapuu ${day}, mutta tarvitsen sen ${asked} mennessä. Etsi ajoissa saapuva tarjous. Lähetä minulle uusi tarjous hyväksyttäväksi.`,
   remove: (name) => `Poista ${name}`,
+  removeProduct: "Poista tämä tuote",
   showFewerProducts: "Näytä vähemmän tuotteita",
   showMoreProducts: (count) => `Näytä ${count} tuotetta lisää`,
   removed: (name) => `${name} poistettu`,

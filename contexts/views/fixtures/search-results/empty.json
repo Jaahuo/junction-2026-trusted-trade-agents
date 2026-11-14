@@ -1,0 +1,21 @@
+{
+  "candidates": [],
+  "constraints": {
+    "hard": [
+      {
+        "attribute": "lactose",
+        "is": "free_from"
+      }
+    ],
+    "soft": [
+      {
+        "attribute": "countryOfOrigin",
+        "prefer": "fi"
+      }
+    ]
+  },
+  "mandate": {
+    "id": "mnd_test_1",
+    "version": 1
+  }
+}

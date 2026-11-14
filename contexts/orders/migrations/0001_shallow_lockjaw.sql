@@ -1,0 +1,1 @@
+CREATE INDEX "orders_orders_lines_offer_ids" ON "orders_orders" USING gin ((("lines" #>> '{}')::jsonb) jsonb_path_ops);

@@ -361,6 +361,13 @@
     {
       "at": "2026-11-14T10:05:00+00:00",
       "actor": "server",
+      "event": "check_failed",
+      "reason": "NEW_PRODUCT",
+      "detail": "prod_test_off_test_17"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
       "event": "sent_to_approval"
     }
   ],

@@ -41,6 +41,8 @@ import {
 
 type Reason = { title: string; detail: string | null; tone: "warning" | "info" };
 
+type Handling = "split" | "later" | "fewer";
+
 /** One v17 to-do: where (a product or area, scrolled to on click), what happened, what to do. */
 type Todo = { where: string; target: string; reason: string; action: string };
 
@@ -127,6 +129,16 @@ const daysBetween = (from: string, to: string) =>
   Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000);
 const dayShift = (days: number) =>
   `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ${days > 0 ? "later" : "earlier"}`;
+/** The lines a check names for `reason` in the audit (`detail` is the product id). */
+const linesFor = (order: Order, reason: ReasonCode) => {
+  const ids = new Set(order.audit.filter((e) => e.reason === reason).map((e) => e.detail));
+  return order.lines.map((l) => l.claims).filter((c) => ids.has(c.productId));
+};
+/** The out-of-stock product a substitute replaces, when the order still has it as a line. */
+const originalOf = (order: Order, c: OfferClaims) =>
+  c.replaces === null
+    ? undefined
+    : order.lines.map((l) => l.claims).find((l) => l.productId === c.replaces);
 /** The element id of a product line, the target of its to-do. */
 const lineId = (c: OfferClaims) => `line-${c.offerId}`;
 /** Products shown before "Show N more products". */
@@ -137,17 +149,15 @@ const typed = (e: Event) => (e.target instanceof HTMLInputElement ? Number(e.tar
 
 /**
  * One order for a human decision. Framework-agnostic: set `order`, `busy` and `canAsk`, listen
- * for `tt-decide` (detail: DecideApprovalRequest), `tt-edit-and-order` (an edit to approve once
- * its new offer arrives) and `tt-ask-agent` (detail: the message for the agent). Restyle through the tokens in shared/styles.ts
- * or the `part` names.
+ * for `tt-decide` (detail: DecideApprovalRequest), `tt-ask-agent` (detail: the message for
+ * the agent, who then updates the order) and `tt-talk` (a message that starts a conversation). Restyle through the tokens in shared/styles.ts or the `part` names.
  */
 export class ApprovalCard extends LitElement {
   static override properties = {
     order: { attribute: false },
     busy: { type: Boolean },
     canAsk: { type: Boolean, attribute: "can-ask" },
-    asking: { state: true },
-    askChip: { state: true },
+    handling: { state: true },
     rejecting: { state: true },
     rejectReason: { state: true },
     afterReject: { state: true },
@@ -158,6 +168,7 @@ export class ApprovalCard extends LitElement {
     discarding: { state: true },
     choicesOpen: { state: true },
     picked: { state: true },
+    savedEdit: { state: true },
   };
 
   static override styles = [
@@ -381,14 +392,6 @@ export class ApprovalCard extends LitElement {
       .options .more-products {
         align-self: flex-start;
       }
-      /* Prototype P3: the ask panel on light purple. */
-      .ask {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-md);
-        padding: var(--spacing-lg);
-        background: var(--color-light-purple-aimo);
-      }
       .options .choice {
         border-bottom: 1px solid var(--color-border);
       }
@@ -483,14 +486,7 @@ export class ApprovalCard extends LitElement {
         align-items: center;
         gap: var(--spacing-md);
       }
-      .skeleton {
-        display: block;
-        height: 16px;
-        background: var(--color-bg-subtle);
-      }
-      .skeleton.short {
-        width: 70%;
-      }
+
       .details-links {
         display: flex;
         flex-wrap: wrap;
@@ -595,9 +591,8 @@ export class ApprovalCard extends LitElement {
   declare busy: boolean;
   /** True in a chat, where the agent help can message the agent. */
   declare canAsk: boolean;
-  /** The open "Ask the agent" panel: the line's offer id, "order" or "talk". */
-  declare private asking: string | null;
-  declare private askChip: string | null;
+  /** How to handle a shortfall (v16 options): split delivery, all later, or fewer. */
+  declare private handling: Handling;
   declare private rejecting: boolean;
   declare private rejectReason: (typeof REJECT_REASONS)[number] | null;
   declare private afterReject: (typeof AFTER_REJECT)[number]["next"];
@@ -610,14 +605,15 @@ export class ApprovalCard extends LitElement {
   declare private choicesOpen: boolean;
   /** The alternative's offer id picked under "Other choices"; null keeps the proposal. */
   declare private picked: string | null;
+  /** True from Save in edit mode until the new offer arrives. */
+  declare private savedEdit: boolean;
 
   constructor() {
     super();
     this.order = null;
     this.busy = false;
     this.canAsk = false;
-    this.asking = null;
-    this.askChip = null;
+    this.handling = "split";
     this.rejecting = false;
     this.rejectReason = null;
     this.afterReject = "alternatives";
@@ -628,6 +624,7 @@ export class ApprovalCard extends LitElement {
     this.discarding = false;
     this.choicesOpen = false;
     this.picked = null;
+    this.savedEdit = false;
   }
 
   /** A new order (or a new version of it) starts without edits or picks. */
@@ -635,12 +632,15 @@ export class ApprovalCard extends LitElement {
     if (changed.has("order")) {
       this.stopEditing();
       this.picked = null;
-      this.asking = null;
+      this.handling = "split";
+      this.savedEdit = false;
     }
   }
 
-  private decide(request: DecideApprovalRequest, type = "tt-decide") {
-    this.dispatchEvent(new CustomEvent(type, { detail: request, bubbles: true, composed: true }));
+  private decide(request: DecideApprovalRequest) {
+    this.dispatchEvent(
+      new CustomEvent("tt-decide", { detail: request, bubbles: true, composed: true }),
+    );
   }
 
   private reject(order: Order) {
@@ -658,7 +658,8 @@ export class ApprovalCard extends LitElement {
     if (order.status === "placed") return "Approved";
     if (order.status === "awaiting_payment") return "Approved · waiting for payment";
     if (order.status !== "pending_approval") return "Rejected";
-    if (this.editing) return this.busy ? "Getting a new offer" : "Editing products";
+    if (this.editing) return "Editing products";
+    if (this.busy && this.savedEdit) return "Getting a new offer";
     if (this.rejecting) return "Rejecting";
     return "Approval required";
   }
@@ -711,6 +712,12 @@ export class ApprovalCard extends LitElement {
 
   private reasonTodos(order: Order, lines: OfferClaims[]): Todo[] {
     return order.reasons.flatMap((r): Todo[] => {
+      const generic: Todo = {
+        where: reasonCopy(r, order, lines[0]).title,
+        target: "products",
+        reason: REASON_TEXT[r],
+        action: "Check the products",
+      };
       switch (r) {
         case "SPEND_OVER_LIMIT":
           return [
@@ -725,10 +732,10 @@ export class ApprovalCard extends LitElement {
           return lines
             .filter((c) => c.replaces !== null)
             .map((c) => ({
-              where: c.product.name,
+              where: originalOf(order, c)?.product.name ?? c.product.name,
               target: lineId(c),
               reason: `Out of stock${c.nextDeliveryDate === null ? "" : ` until ${day(c.nextDeliveryDate)}`}`,
-              action: "Check the replacement",
+              action: "Choose a replacement",
             }));
         case "PRICE_CHANGED":
           return order.requotes.map((q) => ({
@@ -746,6 +753,16 @@ export class ApprovalCard extends LitElement {
               action: "Check the new date",
             },
           ];
+        case "NEW_PRODUCT": {
+          const news = linesFor(order, "NEW_PRODUCT");
+          if (news.length === 0) return [generic];
+          return news.map((c) => ({
+            where: c.product.name,
+            target: lineId(c),
+            reason: "New product, not ordered before",
+            action: "Confirm it, or remove it with Edit products",
+          }));
+        }
         case "UNCONFIRMED_STOCK": {
           const c = lines.find((l) => l.shortfall !== null || l.stock === "unconfirmed");
           return [
@@ -761,14 +778,7 @@ export class ApprovalCard extends LitElement {
           ];
         }
         default:
-          return [
-            {
-              where: reasonCopy(r, order, lines[0]).title,
-              target: "products",
-              reason: REASON_TEXT[r],
-              action: "Check the products",
-            },
-          ];
+          return [generic];
       }
     });
   }
@@ -866,18 +876,19 @@ export class ApprovalCard extends LitElement {
         warning: true,
       };
     if (c.stock === "unconfirmed") return { text: "Stock not confirmed", warning: true };
+    if (linesFor(order, "NEW_PRODUCT").includes(c))
+      return { text: "New product · not ordered before", warning: false };
     return null;
   }
 
   /**
-   * v17 agent help: the ready prompt opens "Ask the agent" (prototype P3); a chip is sent on
-   * tap. Only in a chat (`canAsk`); `key` names the panel, `subject` what the message is about.
+   * v17 agent help: the ready prompt and each chip go straight to the chat as a message about
+   * `subject`. Only in a chat (`canAsk`).
    */
-  private agentHelp(key: string, subject: string, label: string, chips: string[]) {
+  private agentHelp(subject: string, label: string, prompt: string, chips: string[]) {
     if (!this.canAsk) return nothing;
-    if (this.asking === key) return this.askPanel(subject, chips);
     return html`<div class="agent-help" part="agent-help">
-      <button type="button" class="btn secondary" @click=${() => this.openAsk(key)}>
+      <button type="button" class="btn secondary" @click=${() => this.ask(subject, prompt)}>
         ${label}
       </button>
       <p class="label-small secondary">Or tell it what to do:</p>
@@ -892,78 +903,34 @@ export class ApprovalCard extends LitElement {
     </div>`;
   }
 
-  private openAsk(key: string) {
-    this.asking = key;
-    this.askChip = null;
-  }
-
-  private ask(subject: string, text: string) {
-    this.asking = null;
+  /** Sends a message to the agent; `tt-ask-agent` collapses the card while the agent works. */
+  private ask(subject: string, text: string, type = "tt-ask-agent") {
     this.dispatchEvent(
-      new CustomEvent("tt-ask-agent", {
-        detail: `About ${subject}: ${text}`,
-        bubbles: true,
-        composed: true,
-      }),
+      new CustomEvent(type, { detail: `About ${subject}: ${text}`, bubbles: true, composed: true }),
     );
-  }
-
-  /** Prototype P3 "Ask the agent about …": pick a suggestion, write a message, or both. */
-  private askPanel(subject: string, chips: string[]) {
-    const send = () => {
-      const field = this.renderRoot.querySelector<HTMLInputElement>("#ask-message");
-      const text = [this.askChip, field?.value.trim()].filter(Boolean).join(", ");
-      if (text !== "") this.ask(subject, text);
-    };
-    return html`<div class="ask" part="ask-agent">
-      <p>Ask the agent about ${subject}</p>
-      ${
-        chips.length === 0
-          ? nothing
-          : html`<div class="chips" role="group" aria-label="Suggestions">
-              ${chips.map(
-                (chip) =>
-                  html`<button
-                    type="button"
-                    class="chip"
-                    aria-pressed=${this.askChip === chip ? "true" : "false"}
-                    @click=${() => (this.askChip = this.askChip === chip ? null : chip)}
-                  >
-                    ${chip}
-                  </button>`,
-              )}
-            </div>`
-      }
-      <div>
-        <label class="field-label" for="ask-message">Message to the agent</label>
-        <input id="ask-message" class="field" placeholder="Try another brand, max €2.20 / l" />
-      </div>
-      <div class="actions">
-        <button class="btn secondary" @click=${send}>Send to agent</button>
-        <button class="btn ghost" @click=${() => (this.asking = null)}>Cancel</button>
-      </div>
-    </div>`;
   }
 
   /** The order-level agent help for the issue that applies to the whole order (v17). */
   private orderHelp(order: Order) {
     if (order.reasons.includes("SPEND_OVER_LIMIT"))
-      return this.agentHelp("order", "the order", "Let the agent reduce it", [
-        "Remove the least needed",
-        "Choose cheaper brands",
-        "Order less of each",
-      ]);
+      return this.agentHelp(
+        "the order",
+        "Let the agent reduce it",
+        "reduce it to within my order limit",
+        ["Remove the least needed", "Choose cheaper brands", "Order less of each"],
+      );
     if (order.reasons.some((r) => REQUOTE.has(r)))
-      return this.agentHelp("order", "the order", "Let the agent find a better offer", [
-        "Keep the earlier delivery",
-        "Find a cheaper one",
-        "Remove the changed product",
-      ]);
-    if (order.reasons.includes("NEW_PRODUCT"))
+      return this.agentHelp(
+        "the order",
+        "Let the agent find a better offer",
+        "find a better offer",
+        ["Keep the earlier delivery", "Find a cheaper one", "Remove the changed product"],
+      );
+    if (order.reasons.includes("NEW_PRODUCT") && linesFor(order, "NEW_PRODUCT").length === 0)
       return html`<p class="body-small">
           Confirm the order to include the new product, or remove it with Edit products.
         </p>
-        ${this.agentHelp("order", "the new product", "Let the agent find another", [
+        ${this.agentHelp("the new product", "Let the agent find another", "find another product", [
           "Use our usual product",
           "Remove it",
         ])}`;
@@ -975,63 +942,142 @@ export class ApprovalCard extends LitElement {
     if (c.replaces !== null)
       return html`<h4 class="section-title">Replace with</h4>
         ${this.choices(order, c, true)}
-        ${this.agentHelp(c.offerId, c.product.name, "Let the agent find another", [
+        ${this.agentHelp(c.product.name, "Let the agent find another", "find another substitute", [
           "Same brand only",
           "Cheapest option",
           ...(c.nextDeliveryDate === null ? [] : [`Wait until ${day(c.nextDeliveryDate)}`]),
         ])}`;
-    if (c.shortfall === null) return nothing;
+    if (c.shortfall === null)
+      return linesFor(order, "NEW_PRODUCT").includes(c)
+        ? this.agentHelp(c.product.name, "Let the agent find another", "find another product", [
+            "Use our usual product",
+            "Remove it",
+          ])
+        : nothing;
     const pack = c.product.perSalesUnit;
     const later = c.nextDeliveryDate;
     const packs = (q: number) => (pack === null ? amount(c.quantity) : `${number(q)} packs`);
     const missing = pack === null ? c.shortfall.value : Math.round(c.shortfall.value / pack.value);
+    const perPack = c.total.net / c.quantity.value;
+    const options: { value: Handling; label: string; facts: [string, string][]; price: string }[] =
+      later === null
+        ? []
+        : [
+            {
+              value: "split",
+              label: "Split delivery",
+              facts: [
+                [day(c.deliveryDate), packs(c.quantity.value)],
+                [day(later), packs(missing)],
+              ],
+              price: "No price change",
+            },
+            {
+              value: "later",
+              label: `All on ${day(later)}`,
+              facts: [[day(later), packs(c.quantity.value + missing)]],
+              price: "No price change",
+            },
+          ];
+    options.push({
+      value: "fewer",
+      label: "Order fewer",
+      facts: [[day(c.deliveryDate), `${packs(c.quantity.value)} only`]],
+      price: signed(-round(perPack * missing)),
+    });
+    const [first, ...rest] = options;
+    const open = this.choicesOpen;
+    const option = (o: (typeof options)[number]) =>
+      html`<label class="choice ${this.handling === o.value ? "selected" : ""}">
+        <input
+          type="radio"
+          name="handling"
+          .checked=${this.handling === o.value}
+          @change=${() => (this.handling = o.value)}
+        />
+        <span class="choice-body">
+          <span class="choice-top">
+            <span>${o.label}</span>
+            ${o === first ? html`<span class="recommended label-small">Recommended</span>` : nothing}
+            <span class="strong">${o.price}</span>
+          </span>
+          <dl class="option-facts body-small">
+            ${o.facts.map(
+              ([label, value]) =>
+                html`<div>
+                  <dt class="label-small secondary">${label}</dt>
+                  <dd>${value}</dd>
+                </div>`,
+            )}
+          </dl>
+        </span>
+      </label>`;
     return html`<h4 class="section-title">How to handle the missing ${amount(c.shortfall)}</h4>
-      ${
-        later === null
-          ? nothing
-          : html`<div class="option" part="option">
-              <span class="radio" aria-hidden="true"></span>
-              <div>
-                <p>Split delivery</p>
-                <dl class="option-facts body-small">
-                  <div>
-                    <dt class="label-small secondary">${day(c.deliveryDate)}</dt>
-                    <dd>${packs(c.quantity.value)}</dd>
-                  </div>
-                  <div>
-                    <dt class="label-small secondary">${day(later)}</dt>
-                    <dd>${packs(missing)}</dd>
-                  </div>
-                </dl>
-              </div>
-              <span class="recommended label-small">Recommended</span>
-            </div>`
-      }
-      ${this.choices(order, c, false)}
-      ${this.agentHelp(c.offerId, c.product.name, "Let the agent sort it out", [
-        ...(later === null ? [] : [`All on ${day(later)}`]),
-        `Only ${packs(c.quantity.value)}`,
-        "Another product",
-      ])}`;
+      <div class="options" role="radiogroup" aria-label="How to handle the missing amount">
+        ${first === undefined ? nothing : option(first)}
+        ${
+          rest.length === 0
+            ? nothing
+            : html`<button
+                type="button"
+                class="more-products"
+                aria-expanded=${open ? "true" : "false"}
+                @click=${() => (this.choicesOpen = !open)}
+              >
+                ${open ? "Hide other choices" : `Other choices (${rest.length})`}${icon(chevronDown)}
+              </button>`
+        }
+        ${open ? rest.map(option) : nothing}
+      </div>`;
+  }
+
+  /**
+   * The primary decision: approve, the picked alternative (`pick_alternative`), or a shortfall
+   * handled by an edit (all on the later date, or only what arrives now).
+   */
+  private approveRequest(order: Order): DecideApprovalRequest {
+    const proposalVersion = order.proposalVersion;
+    if (this.picked !== null)
+      return { decision: "pick_alternative", offerId: this.picked, proposalVersion };
+    const c = order.lines.map((l) => l.claims).find((l) => l.shortfall !== null);
+    if (c === undefined || c.shortfall === null || this.handling === "split")
+      return { decision: "approve", proposalVersion };
+    const pack = c.product.perSalesUnit;
+    const missing = pack === null ? c.shortfall.value : Math.round(c.shortfall.value / pack.value);
+    const later = this.handling === "later" && c.nextDeliveryDate !== null;
+    return {
+      decision: "edit",
+      proposalVersion,
+      changes: [
+        {
+          productId: c.productId,
+          quantity: { ...c.quantity, value: c.quantity.value + (later ? missing : 0) },
+          ...(later && c.nextDeliveryDate !== null ? { deliverBy: c.nextDeliveryDate } : {}),
+        },
+      ],
+    };
   }
 
   private productLine(order: Order, c: OfferClaims, flagged: boolean) {
     const note = this.lineNote(order, c);
-    const pack = c.product.perSalesUnit;
-    // A flagged substitute is shown as the recommended "Replace with" option instead.
+    // A flagged substitute heads its box with the product it replaces (when the order has it)
+    // and shows itself as the recommended "Replace with" option.
+    const head = flagged && c.replaces !== null ? originalOf(order, c) : c;
+    const pack = head?.product.perSalesUnit ?? null;
     const summary =
-      flagged && c.replaces !== null
+      head === undefined
         ? nothing
         : html`<p class="product-top">
-              <span class="product-name">${c.product.name}</span><span>${money(c.total.net)}</span>
+              <span class="product-name">${head.product.name}</span
+              ><span>${money(head.total.net)}</span>
             </p>
             <p class="product-amounts body-small">
-              <span>${amount(stdUnits(c))}</span>
+              <span>${amount(stdUnits(head))}</span>
               ${
                 pack === null
                   ? nothing
                   : html`<span class="secondary"
-                      >${number(c.quantity.value)} × ${amount(pack)}</span
+                      >${number(head.quantity.value)} × ${amount(pack)}</span
                     >`
               }
             </p>`;
@@ -1056,9 +1102,13 @@ export class ApprovalCard extends LitElement {
   private products(order: Order) {
     const pending = order.status === "pending_approval";
     const all = order.lines.map((l) => l.claims);
-    const isFlagged = (c: OfferClaims) => pending && (c.replaces !== null || c.shortfall !== null);
+    const news = linesFor(order, "NEW_PRODUCT");
+    const isFlagged = (c: OfferClaims) =>
+      pending && (c.replaces !== null || c.shortfall !== null || news.includes(c));
+    // A replaced product is shown at the top of its substitute's box, not as its own line.
+    const replaced = new Set(all.map((c) => (isFlagged(c) ? c.replaces : null)));
     const flagged = all.filter(isFlagged);
-    const ready = all.filter((c) => !isFlagged(c));
+    const ready = all.filter((c) => !isFlagged(c) && !replaced.has(c.productId));
     const visible = this.allProducts ? ready : ready.slice(0, SHOWN);
     const hidden = ready.length - SHOWN;
     return html`<section part="products" id="products" tabindex="-1">
@@ -1121,33 +1171,34 @@ export class ApprovalCard extends LitElement {
   /** The primary label, and while sending its busy form ("Confirming…", prototype P6). */
   private approveLabel(order: Order) {
     const confirm = order.reasons.includes("SUBSTITUTION") || order.reasons.includes("NEW_PRODUCT");
-    if (this.busy) return confirm ? "Confirming…" : "Approving…";
+    if (this.busy && !this.savedEdit) return confirm ? "Confirming…" : "Approving…";
     if (order.reasons.some((r) => REQUOTE.has(r))) return "Approve new price";
     return confirm ? "Confirm order" : "Approve order";
   }
 
   private pendingBody(order: Order) {
-    return html`${this.todoBox(order)} ${this.guidance(order)} ${this.whatChanged(order)}
-      ${this.orderHelp(order)} ${this.products(order)} ${this.orderedFor(order)}
-      ${this.openUntil(order)}
+    const gettingOffer =
+      this.busy && this.savedEdit
+        ? html`<p class="getting strong" role="status">
+            <span class="spinner"></span>Getting a new offer for your changes…
+          </p>`
+        : nothing;
+    return html`${gettingOffer} ${this.todoBox(order)} ${this.guidance(order)}
+      ${this.whatChanged(order)} ${this.orderHelp(order)} ${this.products(order)}
+      ${this.orderedFor(order)} ${this.openUntil(order)}
       <div class="actions" part="actions">
         <button
           part="button approve"
           class="btn primary"
           ?disabled=${this.busy}
           aria-busy=${this.busy ? "true" : "false"}
-          @click=${() =>
-            this.decide(
-              this.picked === null
-                ? { decision: "approve", proposalVersion: order.proposalVersion }
-                : {
-                    decision: "pick_alternative",
-                    offerId: this.picked,
-                    proposalVersion: order.proposalVersion,
-                  },
-            )}
+          @click=${() => this.decide(this.approveRequest(order))}
         >
-          ${this.busy ? html`<span class="spinner" role="status" aria-label="Sending"></span>` : nothing}
+          ${
+            this.busy && !this.savedEdit
+              ? html`<span class="spinner" role="status" aria-label="Sending"></span>`
+              : nothing
+          }
           ${this.approveLabel(order)}
         </button>
         <button
@@ -1160,18 +1211,16 @@ export class ApprovalCard extends LitElement {
         </button>
       </div>
       ${
-        this.asking === "talk"
-          ? this.askPanel("the order", [])
-          : this.canAsk
-            ? html`<button
-                type="button"
-                class="btn ghost talk"
-                part="button talk"
-                @click=${() => this.openAsk("talk")}
-              >
-                Talk to the agent
-              </button>`
-            : nothing
+        this.canAsk
+          ? html`<button
+              type="button"
+              class="btn ghost talk"
+              part="button talk"
+              @click=${() => this.ask("the order", "I have a question.", "tt-talk")}
+            >
+              Talk to the agent
+            </button>`
+          : nothing
       }`;
   }
 
@@ -1192,13 +1241,17 @@ export class ApprovalCard extends LitElement {
             ${open ? "Hide other choices" : `Other choices (${alternatives.length})`}${icon(chevronDown)}
           </button>`;
     return html`<div class="options" role="radiogroup" aria-label="Product for ${c.product.name}">
-      ${withProposal || open ? this.choice(c, c) : nothing} ${toggle}
-      ${open ? alternatives.map((a) => this.choice(c, a)) : nothing}
+      ${withProposal || open ? this.choice(c, c, originalOf(order, c)) : nothing} ${toggle}
+      ${open ? alternatives.map((a) => this.choice(c, a, originalOf(order, c))) : nothing}
     </div>`;
   }
 
-  /** One product to choose: the proposal (recommended) or an alternative with its difference. */
-  private choice(proposal: OfferClaims, c: OfferClaims) {
+  /**
+   * One product to choose: the proposal (recommended) or an alternative, with its difference to
+   * the replaced product (Figma), or else to the proposal.
+   */
+  private choice(proposal: OfferClaims, c: OfferClaims, original: OfferClaims | undefined) {
+    const reference = original ?? proposal;
     const proposed = c.offerId === proposal.offerId;
     const selected = this.picked === (proposed ? null : c.offerId);
     const std = stdUnits(c);
@@ -1213,12 +1266,10 @@ export class ApprovalCard extends LitElement {
       <span class="choice-body">
         <span class="choice-top">
           <span>${c.product.name}</span>
-          ${
-            proposed
-              ? html`<span class="recommended label-small">Recommended</span>`
-              : html`<span class="strong">${signed(c.total.net - proposal.total.net)}</span>`
-          }
-          ${proposed ? html`<span class="strong">${money(c.total.net)}</span>` : nothing}
+          ${proposed ? html`<span class="recommended label-small">Recommended</span>` : nothing}
+          <span class="strong"
+            >${c === reference ? money(c.total.net) : signed(c.total.net - reference.total.net)}</span
+          >
         </span>
         <dl class="option-facts body-small">
           <div>
@@ -1346,22 +1397,20 @@ export class ApprovalCard extends LitElement {
   }
 
   /**
-   * Prototype P5, A2 and A3: change amounts or remove products, then get a new offer through
-   * the `edit` decision. "Save and order" also approves the new offer.
+   * Prototype P5 and A2: change amounts or remove products. Save sends the `edit` decision and
+   * goes back to the order, which waits for the new offer.
    */
   private editBody(order: Order) {
-    if (this.busy)
-      return html`<p class="getting strong" role="status">
-          <span class="spinner"></span>Getting a new offer for your changes…
-        </p>
-        <span class="skeleton"></span><span class="skeleton short"></span>`;
     const lines = order.lines.map((l) => l.claims);
     const kept = lines.filter((c) => this.quantity(c) > 0);
     const removed = lines.filter((c) => this.quantity(c) === 0);
     const changes = this.changes(order);
     const canSave = changes.length > 0 && kept.length > 0;
-    const save = (type: string) =>
-      this.decide({ decision: "edit", proposalVersion: order.proposalVersion, changes }, type);
+    const save = () => {
+      this.decide({ decision: "edit", proposalVersion: order.proposalVersion, changes });
+      this.savedEdit = true;
+      this.stopEditing();
+    };
     return html`<section part="products">
         <h3 class="section-title">Products</h3>
         <ul class="product-list">
@@ -1382,29 +1431,12 @@ export class ApprovalCard extends LitElement {
         )}
       </section>
       ${this.orderedFor(order)}
-      <p class="body-small">
-        "Save and order" gets a new offer and orders it in one step. "Save only" lets you check the
-        new offer first.
-      </p>
       ${
         this.discarding
           ? this.discardBox(order)
           : html`<div class="actions">
-              <button
-                part="button save-and-order"
-                class="btn primary"
-                ?disabled=${!canSave}
-                @click=${() => save("tt-edit-and-order")}
-              >
-                Save and order
-              </button>
-              <button
-                part="button save"
-                class="btn secondary"
-                ?disabled=${!canSave}
-                @click=${() => save("tt-decide")}
-              >
-                Save only
+              <button part="button save" class="btn primary" ?disabled=${!canSave} @click=${save}>
+                Save
               </button>
               <button
                 class="btn ghost"

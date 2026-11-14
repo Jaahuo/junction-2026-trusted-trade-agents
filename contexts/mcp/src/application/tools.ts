@@ -107,6 +107,11 @@ const TOOLS: { [T in ToolName]: Tool<T> } = {
     call: (rest) => rest.mandate(),
     text: mandateSummary,
   },
+  show_mandate: {
+    input: TOOL_INPUT.show_mandate,
+    call: (rest) => rest.mandate(),
+    text: mandateSummary,
+  },
   draft_mandate: {
     input: TOOL_INPUT.draft_mandate,
     call: (rest, input) => rest.draft(input),

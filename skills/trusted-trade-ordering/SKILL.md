@@ -47,6 +47,8 @@ Only a human approves. You have no tool that decides an approval: `decide_approv
 
 Only a human registers limits. You draft them.
 
+- To read limits during ordering, call `get_mandate`. It opens no view. Call `show_mandate` only when the user asks to see the limits or settings. It opens the mandate settings view with the same limits.
+
 - To set or change the limits, or after `MANDATE_INVALID`, call `draft_mandate` with the terms the human gave: `limits`, `standingConstraints` and, if the human named one, `exp`. For a term the human did not name, keep the value of the current mandate. Without a current mandate, ask the human, or use `ask` for each policy.
 - Then ask the human to check the draft and press Register in the mandate view. The draft changes nothing.
 - Never say that the limits are registered or in force until `get_mandate` shows them.

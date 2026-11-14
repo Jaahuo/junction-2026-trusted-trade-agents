@@ -40,7 +40,7 @@ The code is a modular monolith of bounded contexts in `contexts/`.
 | OpenAI Codex    | Coding agents and the independent reviewer | Development, about 280 commits on `main` |
 | Vultr           | App server, chat host and CI runners       | Live demo and CI                         |
 | Tiger Data      | Managed PostgreSQL for the demo            | Live demo                                |
-| ElevenLabs      | Spoken replies in the voice chat           | Spike; not set up on the hosted demo     |
+| ElevenLabs      | Spoken replies in the voice chat           | Live demo                                |
 
 ### NVIDIA Nemotron 3.5 Super VL
 
@@ -104,4 +104,4 @@ The counts come from the local agent session logs.
 - **Result.** In an Open WebUI voice call, a spoken request called `search_products` on our MCP server and the search view rendered. ElevenLabs `eleven_multilingual_v2` read the reply with the premade voice "Sarah" ([measured results](host-support.md#measured-results)).
 - **Privacy.** Speech-to-text ran locally with faster-whisper, so no audio left the machine.
 - **Approval stays a tap.** The approval is always a person's tap on the card, never a spoken "approve".
-- **Hosted demo.** The hosted chat host has no TTS provider configured ([Open WebUI workspace](openwebui.md)).
+- **Hosted demo.** The hosted chat reads replies aloud with `eleven_multilingual_v2` and the voice "Sarah". Every deploy applies the setting, also to an existing chat data volume ([#330](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/330), [Open WebUI workspace](openwebui.md)).

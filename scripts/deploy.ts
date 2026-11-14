@@ -90,14 +90,15 @@ export const renderCaddyfile = (outputs: Outputs): string =>
   `${outputs.hostname} {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:${outputs.app_port}\n}\n`;
 
 const SSH = ["-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"];
-const RSYNC_EXCLUDES = [
-  ".git",
+// A leading slash anchors a pattern to the checkout root; a bare "infra" would also drop contexts/*/src/infra.
+export const RSYNC_EXCLUDES = [
   "node_modules",
   ".env*",
-  ".local",
-  "infra",
-  "report",
-  "apps/api/.production",
+  "/.git",
+  "/.local",
+  "/infra/",
+  "/report/",
+  "/apps/api/.production/",
   // The challenge data is not in Git (#38): it ships without --delete, so a CI push never removes it.
   "/data/",
 ];
@@ -168,7 +169,8 @@ const push = async (outputs: Outputs): Promise<void> => {
     await $`rsync -az -e ${remoteShell} data/ ${host}:${outputs.app_dir}/data/`;
   await $`ssh ${SSH} ${host} install -m 600 -o app /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs))}`;
-  await $`ssh ${SSH} ${host} ${`cd ${outputs.app_dir} && bun install --frozen-lockfile --ignore-scripts && chown -R app:app . && systemctl restart trusted-trade && systemctl reload caddy`}`;
+  // The Vultr Ubuntu image enables ufw with only SSH open; the Vultr firewall group alone does not reach Caddy.
+  await $`ssh ${SSH} ${host} ${`ufw allow 80/tcp && ufw allow 443/tcp && cd ${outputs.app_dir} && bun install --frozen-lockfile --ignore-scripts && chown -R app:app . && systemctl restart trusted-trade && systemctl reload caddy`}`;
   await waitForHealth(outputs.public_base_url);
 };
 

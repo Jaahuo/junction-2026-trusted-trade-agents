@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { $ } from "bun";
 import { expect, test } from "bun:test";
 import {
   deployEnv,
@@ -7,6 +11,7 @@ import {
   renderCaddyfile,
   renderEnvFile,
   resetEnv,
+  RSYNC_EXCLUDES,
 } from "./deploy.ts";
 
 const outputs: Outputs = {
@@ -117,4 +122,34 @@ test("a reset runs with the hosted keys and production mode against the local ch
   expect(env["DATABASE_URL"]).toBe(outputs.database_url);
   expect(env["APP_ROOT"]).toBe("/work/checkout");
   expect(env["PATH"]).toBe("/usr/bin");
+});
+
+test("rsync skips root-only folders but keeps context infra and nested data folders", async () => {
+  const root = await mkdtemp(join(tmpdir(), "deploy-rsync-"));
+  try {
+    const files = [
+      "infra/main.tf",
+      "data/products.json",
+      "report/x.txt",
+      ".env.deploy",
+      "node_modules/a/index.js",
+      "contexts/mandates/src/infra/buyer-key.ts",
+      "contexts/catalog/src/data/units.ts",
+      "contexts/mandates/node_modules/b/index.js",
+    ];
+    for (const file of files) {
+      await mkdir(dirname(join(root, "src", file)), { recursive: true });
+      await writeFile(join(root, "src", file), "x");
+    }
+    const excludes = RSYNC_EXCLUDES.map((pattern) => `--exclude=${pattern}`);
+    await $`rsync -a ${excludes} ${join(root, "src")}/ ${join(root, "out")}/`.quiet();
+    const copied = (await readdir(join(root, "out"), { recursive: true })).map(String);
+    expect(copied).toContain(join("contexts", "mandates", "src", "infra", "buyer-key.ts"));
+    expect(copied).toContain(join("contexts", "catalog", "src", "data", "units.ts"));
+    for (const skipped of ["infra", "data", "report", ".env.deploy", "node_modules"])
+      expect(copied).not.toContain(skipped);
+    expect(copied.some((file) => file.includes("node_modules"))).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

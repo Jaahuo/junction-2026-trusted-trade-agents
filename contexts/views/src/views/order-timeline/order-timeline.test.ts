@@ -174,3 +174,18 @@ test("empty orders still show the gross EUR total", async () => {
   const output = visible(renderOrderTimeline({ ...order, lines: [] }));
   expect(output).toContain(formatMoney(order.total.gross, "EUR", "gross"));
 });
+
+test("the order log shows the audit integrity per log and per entry (#74)", async () => {
+  const intact = visible(renderOrderTimeline(OrderSchema.parse(await fixture("log-intact"))));
+  expect(intact).toContain("Log intact. All 2 entries are signed and in order.");
+  const unverified = visible(
+    renderOrderTimeline(OrderSchema.parse(await fixture("log-unverified"))),
+  );
+  expect(unverified).toContain("Can’t check the log right now.");
+  const broken = visible(renderOrderTimeline(OrderSchema.parse(await fixture("log-broken"))));
+  expect(broken).toContain("1 entry was changed after it was written. Don’t rely on this log.");
+  expect(broken).toContain("This entry doesn’t match its signature.");
+  const plain = visible(renderOrderTimeline(OrderSchema.parse(await fixture("placed"))));
+  expect(plain).not.toContain("Log intact");
+  expect(plain).not.toContain("doesn’t match its signature");
+});

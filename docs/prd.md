@@ -406,13 +406,13 @@ The card shows the original request, the proposed order lines, the rules that fi
 | Reject and stop                      | The order is declined; the agent stops and tells the user                                           |
 | Reject, allow alternatives           | The order is declined; the agent may look for alternatives                                          |
 | Change quantity or delivery date     | A new signed offer is issued and every check runs again                                             |
-| Reduce to fit the limit              | The card lowers the amounts to fit the order limit; the approver checks them and confirms the edit  |
-| Pick a different offered alternative | Same as above, on the chosen offer                                                                  |
+| Reduce to fit the limit              | The card declines the order with alternatives allowed and asks the agent for a reduced replacement  |
+| Pick a different offered alternative | A new signed offer is issued and every check runs again on the chosen alternative                   |
 | Approve and remember                 | Pricing only: the approver registers a new mandate with the raised limit, signed by the demo server |
 
 An edit can never bypass a guardrail, because it always produces a new offer and a new check. Build approve and reject first.
 
-Decided: reducing an over-limit order is the approver's action on the card, not the agent's. "Reduce to fit the limit" fills the amount steppers with whole sales-unit amounts that keep the gross total within the limit and sends nothing; the approver confirms, which sends `edit` on the same pending order (`proposalVersion` + 1). The agent's conduct rule is unchanged: it never lowers a quantity to get around a limit, and it sends the user to the card instead.
+Decided: "Reduce to fit the limit" and the agent-help buttons and chips reject the pending order first, with `next: alternatives` and the human's request as the note. The declined order retains its lines and original request. The agent follows the human's requested changes and submits one fresh checked order under the unchanged mandate. The human's revision does not approve the replacement. Direct quantity and date edits on the card still obtain new signed offers and run every check.
 
 ### Views
 
@@ -438,7 +438,7 @@ One skill teaches any agent the flow. It is served through the MCP Skills extens
 - What to do on each result: tell the user and stop on pending approval, read the reason code on a rejection.
 - How to state quantities and units.
 - A reference file with the reason codes.
-- One rule of conduct: never reshape an order to get around a limit.
+- Conduct: preserve the user's request instead of changing it autonomously to avoid approval. Follow explicit human revisions as new checked requests; never split an order to evade a limit.
 
 The skill is guidance and the server is the control. Host support for Skills over MCP is still early, so the same file also lives in the repository and the tool descriptions must be enough on their own.
 

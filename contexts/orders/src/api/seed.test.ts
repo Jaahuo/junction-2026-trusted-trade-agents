@@ -84,12 +84,13 @@ test("with a scenario 3 substitute the seed adds two approvals of the pair and i
       await seedHistory(db, { path, warn: () => undefined });
       const pair = { replaces: "prod_test_partial", productId: "prod_test_substitute" };
       const approved = await postgresOrderStore(db).withCustomerLock(DEMO_ACCOUNT.customer, (tx) =>
-        tx.withPair(DEMO_ACCOUNT.customer, pair),
+        tx.approvedWithPair(DEMO_ACCOUNT.customer, pair),
       );
       expect(approved.map((order) => [order.status, order.decision?.action])).toEqual([
         ["placed", "approve"],
         ["placed", "approve"],
       ]);
+      expect(approved.every((order) => order.auditAnchor?.count === order.audit.length)).toBe(true);
       const substituteRows = (await db.select().from(history)).filter(
         (row) => row.productId === pair.productId,
       );

@@ -289,10 +289,12 @@ test("substitution rules show both directions, each with Remove", () => {
   expect(shown.match(/>\s*Remove\s*</g)).toHaveLength(2);
 });
 
-test("Remove registers the mandate again without that rule, keeping its expiry", async () => {
+test("Remove reads the mandate and registers it again without that rule, keeping its expiry", async () => {
   const { view, calls } = showing(withRules);
   await clickHandler(view.render(), 'class="btn secondary"')?.();
+  // The mandate is read again first, so a newer version is not rolled back.
   expect(calls).toEqual([
+    { tool: "get_mandate", args: {} },
     {
       tool: "register_mandate",
       args: {

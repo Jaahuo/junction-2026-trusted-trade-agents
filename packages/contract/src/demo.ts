@@ -22,7 +22,7 @@ export const DemoProductsSchema = z.strictObject({
   s3: ScenarioProductSchema.nullable(),
   late: z.strictObject({ productId: z.string() }).nullable(),
   /** The wholesaler's substitute for s3; the seed gives it two earlier approvals. */
-  s3Substitute: z.strictObject({ productId: z.string() }).nullable().optional(),
+  s3Substitute: z.strictObject({ productId: z.string() }).optional(),
   triedForS3: z.array(ScenarioProductSchema),
 });
 export type DemoProducts = z.infer<typeof DemoProductsSchema>;

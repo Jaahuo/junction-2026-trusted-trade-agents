@@ -3,6 +3,7 @@ import {
   type OfferClaims,
   type Order,
   type ReasonCode,
+  samePair,
   type SubstitutionRule,
 } from "@app/contract";
 import { brand } from "@app/ui/brand";
@@ -166,7 +167,12 @@ const ruleChoice = (order: Order): RuleChoice | null => {
   const claims = [...order.lines, ...order.alternatives].map((l) => l.claims);
   const offer = order.standingOffer;
   const substitute = isApproved(order)
-    ? claims.find((c) => c.productId === offer?.productId && c.replaces === offer.replaces)
+    ? claims.find(
+        (c) =>
+          offer !== undefined &&
+          c.replaces !== null &&
+          samePair(offer, { replaces: c.replaces, productId: c.productId }),
+      )
     : order.status === "declined"
       ? claims.find((c) => c.replaces !== null)
       : undefined;
@@ -267,7 +273,8 @@ const typed = (e: Event) => (e.target instanceof HTMLInputElement ? Number(e.tar
  * `orderLimit`, listen for `tt-decide` (detail: DecideApprovalRequest), `tt-confirm-changes`
  * (an edit to approve with its new quote), `tt-ask-agent` (detail: the message for the agent,
  * who then updates the order), `tt-talk` (a message that starts a conversation) and
- * `tt-remember` (detail: RuleChoice; set `remembered` once it is saved). Restyle
+ * `tt-remember` (detail: RuleChoice; set `remembered` once it is saved, and `rules` to hide pairs that
+ * already have one). Restyle
  * through the tokens in shared/styles.ts or the `part` names.
  */
 export class ApprovalCard extends LitElement {
@@ -287,6 +294,7 @@ export class ApprovalCard extends LitElement {
     rejecting: { state: true },
     confirming: { state: true },
     remembered: { type: Boolean },
+    rules: { attribute: false },
     ruleDismissed: { state: true },
   };
 
@@ -860,6 +868,8 @@ export class ApprovalCard extends LitElement {
   declare private confirming: "approve" | "reject" | null;
   /** True once the view has saved the rule offered on this decided order. */
   declare remembered: boolean;
+  /** The mandate's substitution rules, when the view read them: a pair with a rule is not offered. */
+  declare rules: SubstitutionRule[];
   /** "Keep asking" hides the offer. */
   declare private ruleDismissed: boolean;
 
@@ -880,6 +890,7 @@ export class ApprovalCard extends LitElement {
     this.rejecting = null;
     this.confirming = null;
     this.remembered = false;
+    this.rules = [];
     this.ruleDismissed = false;
   }
 
@@ -1625,11 +1636,7 @@ export class ApprovalCard extends LitElement {
         <span>${text.orderTotal} <span class="vat">${vat("net")}</span></span
         ><span class="value" aria-live="polite">${money(this.total(order, "net"))}</span>
       </p>
-      ${
-        this.error === null
-          ? nothing
-          : html`<p class="message danger" role="alert" part="decision-error">${this.error}</p>`
-      }
+      ${this.errorMessage()}
       ${this.confirming === null ? this.actions(order) : this.confirmation(order, confirm)}
       ${
         this.canAsk
@@ -1848,6 +1855,7 @@ export class ApprovalCard extends LitElement {
   private ruleOffer(order: Order) {
     const choice = ruleChoice(order);
     if (choice === null || this.ruleDismissed) return nothing;
+    if (!this.remembered && this.rules.some((rule) => samePair(rule, choice))) return nothing;
     const text = pick(CARD);
     const substitute = choice.productName ?? choice.productId;
     const original = choice.replacesName ?? null;
@@ -1864,45 +1872,48 @@ export class ApprovalCard extends LitElement {
       this.dispatchEvent(
         new CustomEvent("tt-remember", { detail: choice, bubbles: true, composed: true }),
       );
-    const failed =
-      this.error === null
-        ? nothing
-        : html`<p class="message danger" role="alert" part="decision-error">${this.error}</p>`;
-    if (choice.policy === "never")
-      return html`<div class="rule" part="rule">
-        <p class="body-small">✦ ${text.neverSuggest(substitute, original)}</p>
-        <div class="actions">
-          <button type="button" class="btn secondary" ?disabled=${this.busy} @click=${remember}>
-            ${text.dontSuggestAgain}
-          </button>
-        </div>
-        ${failed}
-      </div>`;
+    const auto = choice.policy === "auto";
     return html`<div class="rule" part="rule">
       <p class="body-small">
-        ✦ ${text.standingOffer(substitute, original, order.standingOffer?.timesApproved ?? 0)}
+        ✦
+        ${
+          auto
+            ? text.standingOffer(substitute, original, order.standingOffer?.timesApproved ?? 0)
+            : text.neverSuggest(substitute, original)
+        }
       </p>
       <div class="actions">
         <button
           type="button"
-          class="btn primary"
+          class="btn ${auto ? "primary" : "secondary"}"
           ?disabled=${this.busy}
           aria-busy=${this.busy ? "true" : "false"}
           @click=${remember}
         >
-          ${text.yesAutomatically}
+          ${auto ? text.yesAutomatically : text.dontSuggestAgain}
         </button>
-        <button
-          type="button"
-          class="btn ghost"
-          ?disabled=${this.busy}
-          @click=${() => (this.ruleDismissed = true)}
-        >
-          ${text.keepAsking}
-        </button>
+        ${
+          auto
+            ? html`<button
+                type="button"
+                class="btn ghost"
+                ?disabled=${this.busy}
+                @click=${() => (this.ruleDismissed = true)}
+              >
+                ${text.keepAsking}
+              </button>`
+            : nothing
+        }
       </div>
-      ${failed}
+      ${this.errorMessage()}
     </div>`;
+  }
+
+  /** Why the last decision or rule save failed; nothing when it did not. */
+  private errorMessage() {
+    return this.error === null
+      ? nothing
+      : html`<p class="message danger" role="alert" part="decision-error">${this.error}</p>`;
   }
 
   /**

@@ -766,7 +766,7 @@ export interface DemoProducts {
   s2: { productId: string; quantity: Quantity };
   s3: { productId: string; quantity: Quantity } | null /* null = no product found */;
   late: { productId: string } | null;
-  s3Substitute?: { productId: string } | null /* the wholesaler's substitute for s3 */;
+  s3Substitute?: { productId: string } /* the wholesaler's substitute for s3 */;
   triedForS3: { productId: string; quantity: Quantity }[];
 }
 ```

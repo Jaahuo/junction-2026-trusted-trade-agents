@@ -208,7 +208,7 @@
   "mandateId": "mnd_test_1",
   "mandateVersion": 1,
   "status": "pending_approval",
-  "reasons": ["UNCONFIRMED_STOCK"],
+  "reasons": ["AVAILABILITY_DIFFERS"],
   "proposalVersion": 1,
   "approvalUrl": "http://127.0.0.1:3000/approvals/ord_test_4475",
   "paymentTerms": "invoice",

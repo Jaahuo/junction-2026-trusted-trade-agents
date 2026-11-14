@@ -33,7 +33,7 @@ const inputs: { [K in RouteKey]: RouteInput<K> } = {
   account: {},
   openapi: {},
 };
-const implemented = new Set<RouteKey>(["search", "facts"]);
+const implemented = new Set<RouteKey>(["search", "facts", "openapi", "offers"]);
 
 // A context leaves this test when it adds migrations: its own route tests then cover its routes
 // against a real database. The remaining stub contexts never contact the database.
@@ -65,8 +65,9 @@ const toRequest = (route: (typeof ROUTES)[number], input: object): Request => {
   });
 };
 
-// Orders has migrations, so the app above leaves it out. Its decision route is still a stub that
-// never contacts the database, so the typed client cases mount the orders routes alone.
+// Orders has migrations, so the app above leaves it out. Its decision route answers the decisions
+// that are not built yet (edit, pick_alternative, approve_and_remember) with 501 before it reads
+// anything, so the typed client cases mount the orders routes alone, with no database.
 const ordersContext = (await discoverContexts()).find((context) => context.name === "orders");
 if (ordersContext === undefined) throw new Error("The orders context was not discovered.");
 const ordersApp = new Elysia({ prefix: "/api" }).use(ordersContext.api(db));
@@ -111,14 +112,16 @@ test("every POST route of a stub context answers 400 BAD_REQUEST with the envelo
   }
 });
 
-test("a typed Eden client calls the orders decision stub and gets the envelope typed as ErrorEnvelope", async () => {
+test("a typed Eden client calls a not-implemented orders decision and gets the envelope typed as ErrorEnvelope", async () => {
   const orders = treaty<OrdersApi>("http://localhost/api", {
     parseDate: false,
     fetcher: inProcessFetch,
   });
-  const { data, error } = await orders
-    .orders({ orderId: fixtures.order.orderId })
-    .decision.post(fixtures.decideApprovalRequest);
+  const { data, error } = await orders.orders({ orderId: fixtures.order.orderId }).decision.post({
+    proposalVersion: 1,
+    decision: "pick_alternative",
+    offerId: "off_test_2",
+  });
   expect(data).toBeNull();
   if (error?.status !== 501) throw new Error(`expected 501, got ${String(error?.status)}`);
   const envelope: ErrorEnvelope = error.value;

@@ -99,6 +99,29 @@ test("register revokes the previous mandate, gives version + 1 and a new mandate
     expect(await revoked.json()).toMatchObject({ status: "revoked" });
   }));
 
+for (const offset of [-1, 0]) {
+  test(`register rejects expiry ${offset === 0 ? "at" : "before"} now without changing the current mandate`, async () =>
+    withDatabase(async (db) => {
+      const { app, clock } = await mount(db);
+      clock.now = new Date("2026-11-14T10:00:00.500Z");
+      const now = Math.floor(clock.now.getTime() / 1000);
+      const first = await register(app, { ...request, exp: now + 100 });
+      const before = await db.$client`select count(*)::int as n from mandates_mandates`;
+
+      const response = await call(app, "POST", "", { ...request, exp: now + offset });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+      expect(await current(app)).toEqual(first);
+      expect(await db.$client`select count(*)::int as n from mandates_mandates`).toEqual(before);
+      expect(before).toEqual([{ n: 1 }]);
+
+      const next = await register(app, { ...request, exp: now + 1 });
+      expect(next.mandate.version).toBe(first.mandate.version + 1);
+      expect(next.mandate.exp).toBe(now + 1);
+      expect(await current(app)).toEqual(next);
+    }));
+}
+
 test("two parallel registers leave one active mandate", async () =>
   withDatabase(async (db) => {
     const { app } = await mount(db);
@@ -241,6 +264,27 @@ test("two registers with one operationId store one mandate and return it twice, 
     expect(await current(app)).toEqual(stored);
     const rows = await db.$client`select count(*)::int as n from mandates_mandates`;
     expect(rows).toEqual([{ n: 1 }]);
+  }));
+
+test("replaying an expired operationId returns its stored mandate without changing a newer mandate", async () =>
+  withDatabase(async (db) => {
+    const { app, clock } = await mount(db);
+    const now = Math.floor(clock.now.getTime() / 1000);
+    const body = { ...request, operationId: "op_expired_replay", exp: now + 10 };
+    const original = await register(app, body);
+    const newer = await register(app, { ...request, exp: now + 100 });
+    clock.now = new Date((now + 10) * 1000);
+    const before = await db.$client`select count(*)::int as n from mandates_mandates`;
+
+    const replay = await call(app, "POST", "", body);
+    expect(replay.status).toBe(200);
+    expect(StoredMandateSchema.parse(await replay.json())).toEqual({
+      ...original,
+      status: "revoked",
+    });
+    expect(await current(app)).toEqual(newer);
+    expect(await db.$client`select count(*)::int as n from mandates_mandates`).toEqual(before);
+    expect(before).toEqual([{ n: 2 }]);
   }));
 
 test("parallel registers with one operationId store one mandate", async () =>

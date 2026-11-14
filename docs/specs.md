@@ -301,7 +301,7 @@ export interface WholesalerCatalog {
 - Mapping from the mock's availability response (`ProductAvailability` with `closingTime`, `salesBlock` and `scheduleLines[]` of `availableAmount`, `availableDate`, `salesBlock`): `availableDate` = the first schedule line with an amount above 0 and no sales block; `amount` = that line's amount; `cutoffAt` = `closingTime`; `salesBlocked` = the product's or that line's block.
 - `nextDeliveryDate` = the first schedule line date later than `availableDate`. When the response has none, the adapter makes one further availability query with the requested date set to `availableDate` + 1 day, at most one per product per call, and takes its `availableDate`. A failed or empty further query gives `null`.
 - An amount of `999999` means `stock: "unconfirmed"`. Order submission is the order store itself (SPEC-010).
-- Live adapter choice: `WHOLESALER_LIVE=mock|fixture|json`; catalog choice: `WHOLESALER_CATALOG=file|json`. `json` is the second, portable adapter. Each context selects its adapters in one file, `src/api/adapters.ts`.
+- Live adapter choice for offers: `WHOLESALER_LIVE=mock`, with the wholesaler API key set. With any other value or no API key, `get_offers` returns HTTP 200 and omits every line with reason `NO_PRICE`. The omission detail states that no live price source is configured. No offer is signed, and offers never invent a price. Catalog choice: `WHOLESALER_CATALOG=file|json`; `json` is the second, portable catalog adapter. Each context selects its adapters in one file, `src/api/adapters.ts`.
 - Quotes are cached per customer, date and product until `validTo`. The cache serves offer issuance only: `validate` (at placement and at approval) always sends a fresh availability request and never reads availability from the cache.
 
 Failure paths: transport error or non-2xx upstream → `UPSTREAM_FAILED` (route answers 502).
@@ -403,7 +403,7 @@ export const verifyMandate: (jws: string, key: JsonWebKey) => Promise<Result<Man
 - Signature (simulated custody): the register handler signs the stored payload with `BUYER_SIGNING_JWK` and stores the JWS with it, in the same transaction. The stored JWS decodes to exactly the stored mandate. An externally signed JWS is out of scope.
 - The wholesaler uses the stored limits only to enforce them and returns them only to the customer's own principal.
 
-Failure paths: a body with `iss`, `agent`, `signedBy`, `mandateId`, `version` or `iat` → 400. No current mandate → 404. An expired mandate is not current.
+Failure paths: a body with `iss`, `agent`, `signedBy`, `mandateId`, `version` or `iat` → 400. A new registration with `exp` less than or equal to the server time in epoch seconds → 400 `BAD_REQUEST`; the current mandate does not change. The `operationId` replay rule takes precedence, even when the original mandate has expired. No current mandate → 404. An expired mandate is not current.
 
 ## SPEC-009 Rule checks and reason codes
 

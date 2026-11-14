@@ -1,4 +1,22 @@
-import { ROUTES, TOOL_OUTPUT, type ToolName, VIEWS } from "@app/contract";
+import {
+  DecideApprovalInputSchema,
+  type Order,
+  OrderSchema,
+  PendingListSchema,
+  ROUTES,
+  TOOL_OUTPUT,
+  type ToolName,
+  VIEWS,
+} from "@app/contract";
+import { HARNESS_MANDATE, harnessDecide } from "./harness-decide.ts";
+
+/** The orders in a loaded tool result: a pending list or one order. */
+const ordersIn = (raw: unknown): Order[] => {
+  const list = PendingListSchema.safeParse(raw);
+  if (list.success) return list.data.orders;
+  const one = OrderSchema.safeParse(raw);
+  return one.success ? [one.data] : [];
+};
 
 // The view loader (SPEC-013), free of the DOM so tests can inject a fake host or fetch.
 // A source delivers the tool result and calls action tools; the loader parses every
@@ -23,6 +41,8 @@ export type ViewState<T> =
 export type Source = {
   load: () => Promise<unknown>;
   call: (tool: ToolName, args: Record<string, unknown>) => Promise<unknown>;
+  /** Sends a message to the agent in the chat; absent outside a chat (plain mode). */
+  message?: (text: string) => Promise<void>;
 };
 
 /** The part of the MCP Apps bridge (`App` of ext-apps) a view uses. */
@@ -32,6 +52,8 @@ export type Host = {
     name: string;
     arguments: Record<string, unknown>;
   }) => Promise<{ isError?: boolean; structuredContent?: unknown }>;
+  /** Posts a user message to the chat; false when the host rejects it. */
+  sendMessage: (text: string) => Promise<boolean>;
 };
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -52,6 +74,9 @@ export function hostSource(host: Host): Source {
       const response = await host.callServerTool({ name, arguments: args });
       if (response.isError === true) throw new Error(`${name} failed.`);
       return response.structuredContent;
+    },
+    message: async (text) => {
+      if (!(await host.sendMessage(text))) throw new Error("The chat did not take the message.");
     },
   };
 }
@@ -114,16 +139,30 @@ export function plainSource(
 }
 
 /** Harness mode: the API injects `{ state: "loading" }` or `{ result }` into the built view. */
-export function fixtureSource(fixture: unknown): Source {
+export function fixtureSource(fixture: unknown, now = () => new Date().toISOString()): Source {
   const result =
     typeof fixture === "object" && fixture !== null && "result" in fixture
       ? Promise.resolve(fixture.result)
       : new Promise<never>(() => {});
+  // The orders as decided so far, so a second decision builds on the first.
+  const orders = new Map<string, Order>();
   return {
     load: () => result,
-    call: async (tool) => {
-      throw new Error(`The harness has no server to call ${tool}.`);
+    call: async (tool, args) => {
+      if (tool === "get_mandate") return HARNESS_MANDATE;
+      const input = DecideApprovalInputSchema.safeParse(args);
+      if (tool !== "decide_approval" || !input.success)
+        throw new Error(`The harness has no server to call ${tool}.`);
+      const order =
+        orders.get(input.data.orderId) ??
+        ordersIn(await result).find((o) => o.orderId === input.data.orderId);
+      if (order === undefined) throw new Error(`The harness has no order ${input.data.orderId}.`);
+      const updated = harnessDecide(order, input.data, now());
+      orders.set(updated.orderId, updated);
+      return updated;
     },
+    // The harness shows the chat states, so messages are accepted and dropped.
+    message: async () => {},
   };
 }
 

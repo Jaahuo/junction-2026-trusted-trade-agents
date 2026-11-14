@@ -1,0 +1,238 @@
+{
+  "orderId": "ord_test_4477",
+  "customer": "cust_invoice_01",
+  "agentId": "agent_demo",
+  "accountId": "acct_demo",
+  "offerIds": ["off_test_19", "off_test_11", "off_test_12"],
+  "lines": [
+    {
+      "offerId": "off_test_19",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_19",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_19",
+        "quantity": {
+          "value": 100,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 1428,
+          "gross": 1627.92
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test everyday semi-skimmed milk drink for kitchens 1 l lactose free",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 10,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_11",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_11",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_11",
+        "quantity": {
+          "value": 6,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 162,
+          "gross": 184.68
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test special wheat flour 20 kg",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 20,
+            "unit": "KGM"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_12",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_12",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_12",
+        "quantity": {
+          "value": 40,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 144,
+          "gross": 164.16
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test butter 500 g salted lactose free",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 0.5,
+            "unit": "KGM"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    }
+  ],
+  "alternatives": [],
+  "mandateId": "mnd_test_1",
+  "mandateVersion": 1,
+  "status": "pending_approval",
+  "reasons": ["SPEND_OVER_LIMIT"],
+  "proposalVersion": 1,
+  "approvalUrl": "http://127.0.0.1:3000/approvals/ord_test_4477",
+  "paymentTerms": "invoice",
+  "total": {
+    "net": 1734,
+    "gross": 1976.76
+  },
+  "originalRequest": "40 litres of lactose-free oat drink by Friday",
+  "decision": null,
+  "requotes": [],
+  "nextDeliveryDate": "2026-11-16",
+  "audit": [
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "agent",
+      "event": "order_requested"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "offer_verified"
+    },
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "server",
+      "event": "sent_to_approval"
+    }
+  ],
+  "createdAt": "2026-11-14T10:05:00+00:00"
+}

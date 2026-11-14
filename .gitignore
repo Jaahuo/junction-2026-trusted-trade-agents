@@ -8,3 +8,6 @@ report
 .env*
 !.env.example
 .local/
+infra/.terraform/
+infra/*.tfstate*
+infra/*.tfvars

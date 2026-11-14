@@ -1,5 +1,6 @@
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import { loadView, type EntryData, type Source, type ViewEntry, type ViewState } from "./bridge.ts";
+import { loadFonts } from "./fonts.ts";
 import { sourceFor } from "./source.ts";
 import { base } from "./styles.ts";
 
@@ -62,6 +63,7 @@ export abstract class ViewElement<E extends ViewEntry> extends LitElement {
 
 /** Registers a view element once; safe to call more than once. */
 export function defineView(tag: string, element: CustomElementConstructor) {
+  loadFonts();
   if (customElements.get(tag) === undefined) customElements.define(tag, element);
 }
 

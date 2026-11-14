@@ -10,6 +10,8 @@ import {
   StoredMandateSchema,
 } from "./mandate.ts";
 import {
+  AvailabilityRequestSchema,
+  AvailabilityResultSchema,
   IssuedOffersRequestSchema,
   IssuedOffersSchema,
   OffersRequestSchema,
@@ -165,6 +167,15 @@ export const ROUTES = [
     context: "offers",
     input: IssuedOffersRequestSchema,
     output: IssuedOffersSchema,
+  },
+  {
+    key: "availability",
+    tool: null,
+    method: "POST",
+    path: "/api/offers/availability",
+    context: "offers",
+    input: AvailabilityRequestSchema,
+    output: AvailabilityResultSchema,
   },
   {
     key: "validate",

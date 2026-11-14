@@ -1,4 +1,6 @@
 import {
+  AvailabilityRequestSchema,
+  AvailabilityResultSchema,
   ErrorEnvelopeSchema,
   IssuedOffersRequestSchema,
   IssuedOffersSchema,
@@ -11,6 +13,7 @@ import {
 import { principalOf } from "@app/contract/server";
 import { badRequestEnvelope, notImplemented } from "@app/server-kit";
 import { Elysia } from "elysia";
+import { deliverableBy } from "../application/availability.ts";
 import { getOffers } from "../application/get-offers.ts";
 import type { OffersDeps } from "../application/ports.ts";
 import { requote } from "../application/requote.ts";
@@ -66,6 +69,21 @@ export const createApi = (deps: OffersDeps) =>
       async ({ body, request }) => ({
         offers: deps.issued.find(await principalFrom(request), body.offerIds, deps.now()),
       }),
+    )
+    .post(
+      "/availability",
+      {
+        body: AvailabilityRequestSchema,
+        response: { 200: AvailabilityResultSchema, 502: ErrorEnvelopeSchema },
+      },
+      async ({ body, request, status }) => {
+        const result = await deliverableBy(deps, await principalFrom(request), body);
+        return result.ok
+          ? result.value
+          : status(502, {
+              error: { code: result.error, message: "live availability could not be read" },
+            });
+      },
     )
     // Typed stub of SPEC-003 until its issue builds it.
     .post(

@@ -1,6 +1,7 @@
 import type { OfferClaims } from "@app/contract";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
+import attention16 from "../../shared/icons/attention-16.svg?raw";
 import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 
 // Parts that the card and the view share: the petrol header, the card frame and
@@ -58,12 +59,25 @@ export const icon = (svg: string, label?: string) =>
     >${unsafeSVG(svg)}</span
   >`;
 
-/** The petrol header: eyebrow and logo, then a title row and optional facts. */
-export const brandHeader = (eyebrow: string, title?: TemplateResult, facts?: TemplateResult) =>
+/**
+ * The petrol header: logo with the eyebrow (or, v17, a yellow status pill), then a title row
+ * and optional facts.
+ */
+export const brandHeader = (
+  eyebrow: string,
+  title?: TemplateResult,
+  facts?: TemplateResult,
+  pill = false,
+) =>
   html`<header class="header" part="header">
-    <div class="eyebrow-row">
-      ${icon(logo, "Valio Aimo")}<span class="divider" aria-hidden="true"></span>
-      <p class="label-small eyebrow">${eyebrow}</p>
+    <div class="eyebrow-row ${pill ? "spread" : ""}">
+      ${icon(logo, "Valio Aimo")}
+      ${
+        pill
+          ? html`<span class="pill" part="status">${icon(attention16)}${eyebrow}</span>`
+          : html`<span class="divider" aria-hidden="true"></span>
+              <p class="label-small eyebrow">${eyebrow}</p>`
+      }
     </div>
     ${title ?? nothing} ${facts ?? nothing}
   </header>`;
@@ -113,6 +127,23 @@ export const cardStyles = css`
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
+  }
+  .eyebrow-row.spread {
+    gap: var(--spacing-lg);
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) var(--spacing-md) var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-full);
+    background: var(--color-yellow-aimo);
+    color: var(--color-text);
+    font-size: var(--font-size-2xs);
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
   }
   .divider {
     width: 1px;

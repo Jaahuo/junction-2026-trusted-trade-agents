@@ -266,7 +266,138 @@
       }
     }
   ],
-  "alternatives": [],
+  "alternatives": [
+    {
+      "offerId": "off_test_17",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_17",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_17",
+        "quantity": {
+          "value": 60,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 2.18,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 131,
+          "gross": 149.34
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": "prod_test_off_test_13",
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test cooking cream 15 % 1 l UHT lactose free",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    },
+    {
+      "offerId": "off_test_18",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_18",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_off_test_18",
+        "quantity": {
+          "value": 60,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 1.95,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 117,
+          "gross": 133.38
+        },
+        "deliveryDate": "2026-11-16",
+        "requestedDate": "2026-11-16",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": "prod_test_off_test_13",
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test cooking cream 10 % 1 l UHT lactose free",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    }
+  ],
   "mandateId": "mnd_test_1",
   "mandateVersion": 1,
   "status": "pending_approval",

@@ -65,6 +65,7 @@ export const base = css`
   }
   h2,
   h3,
+  h4,
   p,
   ul,
   dl,
@@ -73,7 +74,8 @@ export const base = css`
   }
   /* Headings take their size from the type classes, not the browser's 1.5em default. */
   h2,
-  h3 {
+  h3,
+  h4 {
     font-size: inherit;
     font-weight: inherit;
   }

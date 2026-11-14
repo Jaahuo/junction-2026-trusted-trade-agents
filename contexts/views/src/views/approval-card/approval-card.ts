@@ -5,7 +5,7 @@ import {
   REASON_TEXT,
   type ReasonCode,
 } from "@app/contract";
-import { css, html, LitElement, nothing } from "lit";
+import { css, html, LitElement, nothing, type PropertyValues } from "lit";
 import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
 import clock16 from "../../shared/icons/clock-16.svg?raw";
@@ -15,6 +15,7 @@ import bullet from "../../shared/icons/bullet.svg?raw";
 import info16Warning from "../../shared/icons/info-16-warning.svg?raw";
 import info16 from "../../shared/icons/info-16.svg?raw";
 import search from "../../shared/icons/search.svg?raw";
+import warning16 from "../../shared/icons/warning-16.svg?raw";
 import xCircle from "../../shared/icons/x-circle.svg?raw";
 import { base } from "../../shared/styles.ts";
 import {
@@ -28,14 +29,15 @@ import {
   number,
   rows,
   stdUnits,
+  unit,
   when,
 } from "./parts.ts";
 
 // Figma: Junction 2026 › Screens › "Approval request — v17 (reasons on to-dos)", with the
-// v11–v16 style. Every approval is an order of products, in one column at any width.
-// Fields the order does not carry (order limit,
-// kitchen, on behalf of) and per-product actions (replace, ask the agent, edit products)
-// are left out until the contract has them.
+// v11–v16 style and the prototype flows (choose another product, ask the agent, edit products,
+// reject). Every approval is an order of products, in one column at any width. Fields the
+// order does not carry (order limit, kitchen, on behalf of, the out-of-stock product's name and
+// the agent's reasons for a choice) are left out until the contract has them.
 
 type Reason = { title: string; detail: string | null; tone: "warning" | "info" };
 
@@ -129,21 +131,33 @@ const dayShift = (days: number) =>
 const lineId = (c: OfferClaims) => `line-${c.offerId}`;
 /** Products shown before "Show N more products". */
 const SHOWN = 3;
+const round = (value: number) => Math.round(value * 100) / 100;
+/** The number typed into a quantity field, or NaN. */
+const typed = (e: Event) => (e.target instanceof HTMLInputElement ? Number(e.target.value) : NaN);
 
 /**
- * One order for a human decision. Framework-agnostic: set `order` and `busy`, listen for
- * `tt-decide` (detail: DecideApprovalRequest). Restyle through the tokens in shared/styles.ts
+ * One order for a human decision. Framework-agnostic: set `order`, `busy` and `canAsk`, listen
+ * for `tt-decide` (detail: DecideApprovalRequest), `tt-edit-and-order` (an edit to approve once
+ * its new offer arrives) and `tt-ask-agent` (detail: the message for the agent). Restyle through the tokens in shared/styles.ts
  * or the `part` names.
  */
 export class ApprovalCard extends LitElement {
   static override properties = {
     order: { attribute: false },
     busy: { type: Boolean },
+    canAsk: { type: Boolean, attribute: "can-ask" },
+    asking: { state: true },
+    askChip: { state: true },
     rejecting: { state: true },
     rejectReason: { state: true },
     afterReject: { state: true },
     detailsOpen: { state: true },
     allProducts: { state: true },
+    editing: { state: true },
+    edits: { state: true },
+    discarding: { state: true },
+    choicesOpen: { state: true },
+    picked: { state: true },
   };
 
   static override styles = [
@@ -359,6 +373,124 @@ export class ApprovalCard extends LitElement {
       .talk {
         align-self: flex-start;
       }
+      .options {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .options .more-products {
+        align-self: flex-start;
+      }
+      /* Prototype P3: the ask panel on light purple. */
+      .ask {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-md);
+        padding: var(--spacing-lg);
+        background: var(--color-light-purple-aimo);
+      }
+      .options .choice {
+        border-bottom: 1px solid var(--color-border);
+      }
+      .choice-body {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+      }
+      .choice-top > :not(:first-child) {
+        white-space: nowrap;
+      }
+      .choice-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+      }
+      /* Prototype P5: − amount + stepper and Remove under each product. */
+      .edit-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+        padding-top: var(--spacing-sm);
+      }
+      .stepper {
+        display: flex;
+        border: 1px solid var(--color-border-strong);
+      }
+      .stepper button {
+        width: 40px;
+        border: 0;
+        background: var(--color-white);
+        color: var(--color-text-brand);
+        font: inherit;
+        font-size: var(--font-size-xl);
+        font-weight: 700;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .stepper button:disabled {
+        color: var(--color-border-strong);
+        cursor: not-allowed;
+      }
+      .stepper label {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-xs);
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-inline: 1px solid var(--color-border-strong);
+        font-size: var(--font-size-xs);
+      }
+      .stepper input {
+        width: 3.5rem;
+        padding: 0;
+        border: 0;
+        color: var(--color-text);
+        font: inherit;
+        font-size: var(--font-size-sm);
+        text-align: right;
+        -moz-appearance: textfield;
+      }
+      .stepper input::-webkit-inner-spin-button {
+        appearance: none;
+      }
+      .removed {
+        display: flex;
+        justify-content: space-between;
+        padding: var(--spacing-md) 0;
+      }
+      .discard {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+        padding: var(--spacing-lg);
+        background: var(--color-bg-warning);
+      }
+      .discard-title {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        color: var(--color-text-warning);
+      }
+      .btn.danger {
+        border-radius: var(--border-radius-md);
+        background: var(--color-text-danger);
+        color: var(--color-white);
+      }
+      .getting {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-md);
+      }
+      .skeleton {
+        display: block;
+        height: 16px;
+        background: var(--color-bg-subtle);
+      }
+      .skeleton.short {
+        width: 70%;
+      }
       .details-links {
         display: flex;
         flex-wrap: wrap;
@@ -461,27 +593,54 @@ export class ApprovalCard extends LitElement {
 
   declare order: Order | null;
   declare busy: boolean;
+  /** True in a chat, where the agent help can message the agent. */
+  declare canAsk: boolean;
+  /** The open "Ask the agent" panel: the line's offer id, "order" or "talk". */
+  declare private asking: string | null;
+  declare private askChip: string | null;
   declare private rejecting: boolean;
   declare private rejectReason: (typeof REJECT_REASONS)[number] | null;
   declare private afterReject: (typeof AFTER_REJECT)[number]["next"];
   declare private detailsOpen: boolean;
   declare private allProducts: boolean;
+  declare private editing: boolean;
+  /** Edited quantities in sales units by offer id; 0 means removed. */
+  declare private edits: Record<string, number>;
+  declare private discarding: boolean;
+  declare private choicesOpen: boolean;
+  /** The alternative's offer id picked under "Other choices"; null keeps the proposal. */
+  declare private picked: string | null;
 
   constructor() {
     super();
     this.order = null;
     this.busy = false;
+    this.canAsk = false;
+    this.asking = null;
+    this.askChip = null;
     this.rejecting = false;
     this.rejectReason = null;
     this.afterReject = "alternatives";
     this.detailsOpen = false;
     this.allProducts = false;
+    this.editing = false;
+    this.edits = {};
+    this.discarding = false;
+    this.choicesOpen = false;
+    this.picked = null;
   }
 
-  private decide(request: DecideApprovalRequest) {
-    this.dispatchEvent(
-      new CustomEvent("tt-decide", { detail: request, bubbles: true, composed: true }),
-    );
+  /** A new order (or a new version of it) starts without edits or picks. */
+  override willUpdate(changed: PropertyValues<this>) {
+    if (changed.has("order")) {
+      this.stopEditing();
+      this.picked = null;
+      this.asking = null;
+    }
+  }
+
+  private decide(request: DecideApprovalRequest, type = "tt-decide") {
+    this.dispatchEvent(new CustomEvent(type, { detail: request, bubbles: true, composed: true }));
   }
 
   private reject(order: Order) {
@@ -499,6 +658,7 @@ export class ApprovalCard extends LitElement {
     if (order.status === "placed") return "Approved";
     if (order.status === "awaiting_payment") return "Approved · waiting for payment";
     if (order.status !== "pending_approval") return "Rejected";
+    if (this.editing) return this.busy ? "Getting a new offer" : "Editing products";
     if (this.rejecting) return "Rejecting";
     return "Approval required";
   }
@@ -508,12 +668,12 @@ export class ApprovalCard extends LitElement {
     const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     const title = html`<div class="headline">
       <h2 class="name">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</h2>
-      <p>${money(order.total.net)}</p>
+      <p aria-live="polite">${money(this.editing ? this.editedTotal(order) : order.total.net)}</p>
     </div>`;
     const facts = html`<dl class="facts">
       ${fact("Order no.", order.orderId)} ${fact("Products", String(order.lines.length))}
     </dl>`;
-    const pill = order.status === "pending_approval" && !this.rejecting;
+    const pill = order.status === "pending_approval" && !this.rejecting && !this.editing;
     return brandHeader(this.eyebrow(order), title, facts, pill);
   }
 
@@ -535,6 +695,21 @@ export class ApprovalCard extends LitElement {
   /** v17 to-dos: one per thing the approver should look at, linked to where it is. */
   private todos(order: Order): Todo[] {
     const lines = order.lines.map((l) => l.claims);
+    // Prototype A4: after "Save only" the approver checks the new offer for their edit.
+    const edited: Todo[] = order.audit.some((e) => e.event === "edited")
+      ? [
+          {
+            where: "New offer",
+            target: "products",
+            reason: "Your changes made a new offer",
+            action: "Check the new offer",
+          },
+        ]
+      : [];
+    return [...edited, ...this.reasonTodos(order, lines)];
+  }
+
+  private reasonTodos(order: Order, lines: OfferClaims[]): Todo[] {
     return order.reasons.flatMap((r): Todo[] => {
       switch (r) {
         case "SPEND_OVER_LIMIT":
@@ -675,7 +850,7 @@ export class ApprovalCard extends LitElement {
   /** The note under a product that something applies to; a price change is a warning (v17). */
   private lineNote(order: Order, c: OfferClaims): { text: string; warning: boolean } | null {
     if (c.replaces !== null)
-      return { text: `Substitute proposed · replaces ${c.replaces}`, warning: false };
+      return { text: "Out of stock · a substitute is proposed", warning: false };
     const requote = order.requotes.find((r) => r.current.offerId === c.offerId);
     if (requote !== undefined)
       return {
@@ -692,15 +867,77 @@ export class ApprovalCard extends LitElement {
   }
 
   /**
-   * v17 agent help: a ready prompt button and option chips. Display only for now: sending
-   * the prompt to the chat (MCP Apps sendMessage) is not wired yet.
+   * v17 agent help: the ready prompt opens "Ask the agent" (prototype P3); a chip is sent on
+   * tap. Only in a chat (`canAsk`); `key` names the panel, `subject` what the message is about.
    */
-  private agentHelp(label: string, chips: string[]) {
+  private agentHelp(key: string, subject: string, label: string, chips: string[]) {
+    if (!this.canAsk) return nothing;
+    if (this.asking === key) return this.askPanel(subject, chips);
     return html`<div class="agent-help" part="agent-help">
-      <button type="button" class="btn secondary">${label}</button>
+      <button type="button" class="btn secondary" @click=${() => this.openAsk(key)}>
+        ${label}
+      </button>
       <p class="label-small secondary">Or tell it what to do:</p>
       <div class="chips">
-        ${chips.map((chip) => html`<button type="button" class="chip">${chip}</button>`)}
+        ${chips.map(
+          (chip) =>
+            html`<button type="button" class="chip" @click=${() => this.ask(subject, chip)}>
+              ${chip}
+            </button>`,
+        )}
+      </div>
+    </div>`;
+  }
+
+  private openAsk(key: string) {
+    this.asking = key;
+    this.askChip = null;
+  }
+
+  private ask(subject: string, text: string) {
+    this.asking = null;
+    this.dispatchEvent(
+      new CustomEvent("tt-ask-agent", {
+        detail: `About ${subject}: ${text}`,
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  /** Prototype P3 "Ask the agent about …": pick a suggestion, write a message, or both. */
+  private askPanel(subject: string, chips: string[]) {
+    const send = () => {
+      const field = this.renderRoot.querySelector<HTMLInputElement>("#ask-message");
+      const text = [this.askChip, field?.value.trim()].filter(Boolean).join(", ");
+      if (text !== "") this.ask(subject, text);
+    };
+    return html`<div class="ask" part="ask-agent">
+      <p>Ask the agent about ${subject}</p>
+      ${
+        chips.length === 0
+          ? nothing
+          : html`<div class="chips" role="group" aria-label="Suggestions">
+              ${chips.map(
+                (chip) =>
+                  html`<button
+                    type="button"
+                    class="chip"
+                    aria-pressed=${this.askChip === chip ? "true" : "false"}
+                    @click=${() => (this.askChip = this.askChip === chip ? null : chip)}
+                  >
+                    ${chip}
+                  </button>`,
+              )}
+            </div>`
+      }
+      <div>
+        <label class="field-label" for="ask-message">Message to the agent</label>
+        <input id="ask-message" class="field" placeholder="Try another brand, max €2.20 / l" />
+      </div>
+      <div class="actions">
+        <button class="btn secondary" @click=${send}>Send to agent</button>
+        <button class="btn ghost" @click=${() => (this.asking = null)}>Cancel</button>
       </div>
     </div>`;
   }
@@ -708,13 +945,13 @@ export class ApprovalCard extends LitElement {
   /** The order-level agent help for the issue that applies to the whole order (v17). */
   private orderHelp(order: Order) {
     if (order.reasons.includes("SPEND_OVER_LIMIT"))
-      return this.agentHelp("Let the agent reduce it", [
+      return this.agentHelp("order", "the order", "Let the agent reduce it", [
         "Remove the least needed",
         "Choose cheaper brands",
         "Order less of each",
       ]);
     if (order.reasons.some((r) => REQUOTE.has(r)))
-      return this.agentHelp("Let the agent find a better offer", [
+      return this.agentHelp("order", "the order", "Let the agent find a better offer", [
         "Keep the earlier delivery",
         "Find a cheaper one",
         "Remove the changed product",
@@ -723,26 +960,23 @@ export class ApprovalCard extends LitElement {
       return html`<p class="body-small">
           Confirm the order to include the new product, or remove it with Edit products.
         </p>
-        ${this.agentHelp("Let the agent find another", ["Use our usual product", "Remove it"])}`;
+        ${this.agentHelp("order", "the new product", "Let the agent find another", [
+          "Use our usual product",
+          "Remove it",
+        ])}`;
     return nothing;
   }
 
   /** The decision block of a flagged product: its choices and agent help (v17). */
   private lineDecision(order: Order, c: OfferClaims) {
-    const others = order.alternatives.length;
-    const otherChoices =
-      others === 0
-        ? nothing
-        : html`<button type="button" class="more-products">
-            Other choices (${others})${icon(chevronDown)}
-          </button>`;
     if (c.replaces !== null)
-      return html`${otherChoices}
-      ${this.agentHelp("Let the agent find another", [
-        "Same brand only",
-        "Cheapest option",
-        ...(c.nextDeliveryDate === null ? [] : [`Wait until ${day(c.nextDeliveryDate)}`]),
-      ])}`;
+      return html`<h4 class="section-title">Replace with</h4>
+        ${this.choices(order, c, true)}
+        ${this.agentHelp(c.offerId, c.product.name, "Let the agent find another", [
+          "Same brand only",
+          "Cheapest option",
+          ...(c.nextDeliveryDate === null ? [] : [`Wait until ${day(c.nextDeliveryDate)}`]),
+        ])}`;
     if (c.shortfall === null) return nothing;
     const pack = c.product.perSalesUnit;
     const later = c.nextDeliveryDate;
@@ -770,8 +1004,8 @@ export class ApprovalCard extends LitElement {
               <span class="recommended label-small">Recommended</span>
             </div>`
       }
-      ${otherChoices}
-      ${this.agentHelp("Let the agent sort it out", [
+      ${this.choices(order, c, false)}
+      ${this.agentHelp(c.offerId, c.product.name, "Let the agent sort it out", [
         ...(later === null ? [] : [`All on ${day(later)}`]),
         `Only ${packs(c.quantity.value)}`,
         "Another product",
@@ -781,22 +1015,29 @@ export class ApprovalCard extends LitElement {
   private productLine(order: Order, c: OfferClaims, flagged: boolean) {
     const note = this.lineNote(order, c);
     const pack = c.product.perSalesUnit;
+    // A flagged substitute is shown as the recommended "Replace with" option instead.
+    const summary =
+      flagged && c.replaces !== null
+        ? nothing
+        : html`<p class="product-top">
+              <span class="product-name">${c.product.name}</span><span>${money(c.total.net)}</span>
+            </p>
+            <p class="product-amounts body-small">
+              <span>${amount(stdUnits(c))}</span>
+              ${
+                pack === null
+                  ? nothing
+                  : html`<span class="secondary"
+                      >${number(c.quantity.value)} × ${amount(pack)}</span
+                    >`
+              }
+            </p>`;
     return html`<li
       class="product ${flagged ? "flagged" : ""}"
       id="line-${c.offerId}"
       tabindex="-1"
     >
-      <p class="product-top">
-        <span class="product-name">${c.product.name}</span><span>${money(c.total.net)}</span>
-      </p>
-      <p class="product-amounts body-small">
-        <span>${amount(stdUnits(c))}</span>
-        ${
-          pack === null
-            ? nothing
-            : html`<span class="secondary">${number(c.quantity.value)} × ${amount(pack)}</span>`
-        }
-      </p>
+      ${summary}
       ${
         note === null
           ? nothing
@@ -822,7 +1063,13 @@ export class ApprovalCard extends LitElement {
         <h3 class="section-title">Products</h3>
         ${
           pending
-            ? html`<button type="button" class="link-button" part="edit-products">
+            ? html`<button
+                type="button"
+                class="link-button"
+                part="edit-products"
+                ?disabled=${this.busy}
+                @click=${() => (this.editing = true)}
+              >
                 Edit products
               </button>`
             : nothing
@@ -886,7 +1133,16 @@ export class ApprovalCard extends LitElement {
           class="btn primary"
           ?disabled=${this.busy}
           aria-busy=${this.busy ? "true" : "false"}
-          @click=${() => this.decide({ decision: "approve", proposalVersion: order.proposalVersion })}
+          @click=${() =>
+            this.decide(
+              this.picked === null
+                ? { decision: "approve", proposalVersion: order.proposalVersion }
+                : {
+                    decision: "pick_alternative",
+                    offerId: this.picked,
+                    proposalVersion: order.proposalVersion,
+                  },
+            )}
         >
           ${this.busy ? html`<span class="spinner" role="status" aria-label="Sending"></span>` : nothing}
           ${this.approveLabel(order)}
@@ -900,7 +1156,261 @@ export class ApprovalCard extends LitElement {
           Reject
         </button>
       </div>
-      <button type="button" class="btn ghost talk" part="button talk">Talk to the agent</button>`;
+      ${
+        this.asking === "talk"
+          ? this.askPanel("the order", [])
+          : this.canAsk
+            ? html`<button
+                type="button"
+                class="btn ghost talk"
+                part="button talk"
+                @click=${() => this.openAsk("talk")}
+              >
+                Talk to the agent
+              </button>`
+            : nothing
+      }`;
+  }
+
+  /** "Other choices (N)": the order's alternatives, one of which can replace the proposal (P2). */
+  private choices(order: Order, c: OfferClaims, withProposal: boolean) {
+    const alternatives = order.alternatives.map((l) => l.claims);
+    if (alternatives.length === 0 && !withProposal) return nothing;
+    const open = this.choicesOpen;
+    const toggle =
+      alternatives.length === 0
+        ? nothing
+        : html`<button
+            type="button"
+            class="more-products"
+            aria-expanded=${open ? "true" : "false"}
+            @click=${() => (this.choicesOpen = !open)}
+          >
+            ${open ? "Hide other choices" : `Other choices (${alternatives.length})`}${icon(chevronDown)}
+          </button>`;
+    return html`<div class="options" role="radiogroup" aria-label="Product for ${c.product.name}">
+      ${withProposal || open ? this.choice(c, c) : nothing} ${toggle}
+      ${open ? alternatives.map((a) => this.choice(c, a)) : nothing}
+    </div>`;
+  }
+
+  /** One product to choose: the proposal (recommended) or an alternative with its difference. */
+  private choice(proposal: OfferClaims, c: OfferClaims) {
+    const proposed = c.offerId === proposal.offerId;
+    const selected = this.picked === (proposed ? null : c.offerId);
+    const std = stdUnits(c);
+    const pack = c.product.perSalesUnit;
+    return html`<label class="choice ${selected ? "selected" : ""}">
+      <input
+        type="radio"
+        name="product-choice"
+        .checked=${selected}
+        @change=${() => (this.picked = proposed ? null : c.offerId)}
+      />
+      <span class="choice-body">
+        <span class="choice-top">
+          <span>${c.product.name}</span>
+          ${
+            proposed
+              ? html`<span class="recommended label-small">Recommended</span>`
+              : html`<span class="strong">${signed(c.total.net - proposal.total.net)}</span>`
+          }
+          ${proposed ? html`<span class="strong">${money(c.total.net)}</span>` : nothing}
+        </span>
+        <dl class="option-facts body-small">
+          <div>
+            <dt class="label-small secondary">Pack</dt>
+            <dd>
+              ${pack === null ? amount(c.quantity) : `${number(c.quantity.value)} × ${amount(pack)}`}
+            </dd>
+          </div>
+          <div>
+            <dt class="label-small secondary">Price</dt>
+            <dd>${money(round(c.total.net / std.value))} / ${unit(std.unit)}</dd>
+          </div>
+        </dl>
+      </span>
+    </label>`;
+  }
+
+  /** A line's quantity in sales units after the edits; 0 when removed. */
+  private quantity(c: OfferClaims) {
+    return this.edits[c.offerId] ?? c.quantity.value;
+  }
+
+  private setQuantity(c: OfferClaims, value: number) {
+    if (Number.isFinite(value))
+      this.edits = { ...this.edits, [c.offerId]: Math.max(0, Math.round(value)) };
+  }
+
+  /** The order total at the edited quantities, in whole euros; the new offer sets the exact one. */
+  private editedTotal(order: Order) {
+    return Math.round(
+      order.lines.reduce(
+        (sum, { claims: c }) => sum + (c.total.net / c.quantity.value) * this.quantity(c),
+        0,
+      ),
+    );
+  }
+
+  /** The `edit` changes: a new quantity per changed line, 0 for a removed one. */
+  private changes(order: Order) {
+    return order.lines
+      .map((l) => l.claims)
+      .filter((c) => this.quantity(c) !== c.quantity.value)
+      .map((c) => ({
+        productId: c.productId,
+        quantity: { value: this.quantity(c), unit: c.quantity.unit },
+      }));
+  }
+
+  private stopEditing() {
+    this.editing = false;
+    this.edits = {};
+    this.discarding = false;
+  }
+
+  /** Prototype P5: one product with its amount stepper and Remove. */
+  private editLine(c: OfferClaims) {
+    const q = this.quantity(c);
+    const edited = { ...c, quantity: { ...c.quantity, value: q } };
+    const pack = c.product.perSalesUnit;
+    const name = c.product.name;
+    return html`<li class="product">
+      <p class="product-top">
+        <span class="product-name">${name}</span
+        ><span>${money(Math.round((c.total.net / c.quantity.value) * q))}</span>
+      </p>
+      <p class="product-amounts body-small">
+        <span>${amount(stdUnits(edited))}</span>
+        ${pack === null ? nothing : html`<span class="secondary">${number(q)} × ${amount(pack)}</span>`}
+      </p>
+      <div class="edit-row">
+        <div class="stepper">
+          <button
+            type="button"
+            aria-label="Less ${name}"
+            ?disabled=${q <= 1}
+            @click=${() => this.setQuantity(c, q - 1)}
+          >
+            −
+          </button>
+          <label
+            ><input
+              type="number"
+              min="1"
+              inputmode="numeric"
+              aria-label="${name}, ${unit(c.quantity.unit)}"
+              .value=${String(q)}
+              @change=${(e: Event) => this.setQuantity(c, Math.max(1, typed(e)))}
+            />${unit(c.quantity.unit)}</label
+          >
+          <button
+            type="button"
+            aria-label="More ${name}"
+            @click=${() => this.setQuantity(c, q + 1)}
+          >
+            +
+          </button>
+        </div>
+        <button type="button" class="link-button" @click=${() => this.setQuantity(c, 0)}>
+          Remove
+        </button>
+      </div>
+    </li>`;
+  }
+
+  /** Prototype A2x: Cancel with unsaved changes asks first, saying what goes back. */
+  private discardBox(order: Order) {
+    const back = order.lines
+      .map((l) => l.claims)
+      .filter((c) => this.quantity(c) !== c.quantity.value)
+      .map((c) =>
+        this.quantity(c) === 0
+          ? `${c.product.name} comes back`
+          : `${c.product.name} goes back to ${amount(c.quantity)}`,
+      );
+    return html`<div class="discard" role="alert">
+        <p class="discard-title">${icon(warning16)}Discard your changes?</p>
+        <p class="body-small">${back.join(", ")}.</p>
+      </div>
+      <div class="actions">
+        <button class="btn secondary" @click=${() => (this.discarding = false)}>
+          Keep editing
+        </button>
+        <button class="btn danger" @click=${() => this.stopEditing()}>Discard changes</button>
+      </div>`;
+  }
+
+  /**
+   * Prototype P5, A2 and A3: change amounts or remove products, then get a new offer through
+   * the `edit` decision. "Save and order" also approves the new offer.
+   */
+  private editBody(order: Order) {
+    if (this.busy)
+      return html`<p class="getting strong" role="status">
+          <span class="spinner"></span>Getting a new offer for your changes…
+        </p>
+        <span class="skeleton"></span><span class="skeleton short"></span>`;
+    const lines = order.lines.map((l) => l.claims);
+    const kept = lines.filter((c) => this.quantity(c) > 0);
+    const removed = lines.filter((c) => this.quantity(c) === 0);
+    const changes = this.changes(order);
+    const canSave = changes.length > 0 && kept.length > 0;
+    const save = (type: string) =>
+      this.decide({ decision: "edit", proposalVersion: order.proposalVersion, changes }, type);
+    return html`<section part="products">
+        <h3 class="section-title">Products</h3>
+        <ul class="product-list">
+          ${kept.map((c) => this.editLine(c))}
+        </ul>
+        ${removed.map(
+          (c) =>
+            html`<p class="removed body-small">
+              <span>${c.product.name} removed</span>
+              <button
+                type="button"
+                class="link-button"
+                @click=${() => this.setQuantity(c, c.quantity.value)}
+              >
+                Undo
+              </button>
+            </p>`,
+        )}
+      </section>
+      ${this.orderedFor(order)}
+      <p class="body-small">
+        "Save and order" gets a new offer and orders it in one step. "Save only" lets you check the
+        new offer first.
+      </p>
+      ${
+        this.discarding
+          ? this.discardBox(order)
+          : html`<div class="actions">
+              <button
+                part="button save-and-order"
+                class="btn primary"
+                ?disabled=${!canSave}
+                @click=${() => save("tt-edit-and-order")}
+              >
+                Save and order
+              </button>
+              <button
+                part="button save"
+                class="btn secondary"
+                ?disabled=${!canSave}
+                @click=${() => save("tt-decide")}
+              >
+                Save only
+              </button>
+              <button
+                class="btn ghost"
+                @click=${() => (changes.length === 0 ? this.stopEditing() : (this.discarding = true))}
+              >
+                Cancel
+              </button>
+            </div>`
+      }`;
   }
 
   private rejectBody(order: Order) {
@@ -1104,9 +1614,11 @@ export class ApprovalCard extends LitElement {
     const body =
       order.status !== "pending_approval"
         ? this.decidedBody(order)
-        : this.rejecting
-          ? this.rejectBody(order)
-          : this.pendingBody(order);
+        : this.editing
+          ? this.editBody(order)
+          : this.rejecting
+            ? this.rejectBody(order)
+            : this.pendingBody(order);
     return html`<article class="card" part="card">
       ${this.header(order)}
       <div class="body">${body}</div>

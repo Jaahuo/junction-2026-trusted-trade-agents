@@ -22,6 +22,13 @@
       "when": 1794668804737,
       "tag": "0002_ambiguous_hannibal_king",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794669016658,
+      "tag": "0003_outstanding_diamondback",
+      "breakpoints": true
     }
   ]
 }

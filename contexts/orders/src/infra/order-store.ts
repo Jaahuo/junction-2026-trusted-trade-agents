@@ -1,9 +1,9 @@
 import type { Db } from "@app/server-kit";
-import { appendAudit } from "@app/contract/server";
+import { appendAudit, verifyAuditChain } from "@app/contract/server";
 import { err, ok } from "@app/kernel";
 import { and, asc, eq, inArray, or, sql, sum } from "drizzle-orm";
 import type { OrderStore, OrderTx, StoredOrder } from "../application/ports.ts";
-import { history, orders, refusals } from "./schema.ts";
+import { history, orders, refusalAnchors, refusals } from "./schema.ts";
 
 type Row = typeof orders.$inferSelect;
 type Executor = Pick<Db, "select" | "insert" | "update">;
@@ -162,20 +162,35 @@ export const postgresOrderStore = (db: Db): OrderStore => ({
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`orders:${customer}`}, 0))`,
       );
+      const [anchor] = await tx
+        .select({ hash: refusalAnchors.hash, count: refusalAnchors.count })
+        .from(refusalAnchors)
+        .where(eq(refusalAnchors.customer, customer));
       const rows = await tx
         .select({ event: refusals.event })
         .from(refusals)
         .where(eq(refusals.customer, customer))
         .orderBy(asc(refusals.id));
-      const chained = await appendAudit(
-        `refusals:${customer}`,
-        rows.map((row) => row.event),
-        [event],
-      );
+      const scope = `refusals:${customer}`;
+      const events = rows.map((row) => row.event);
+      if (anchor) {
+        if (anchor.count !== events.length || !(await verifyAuditChain(scope, events, anchor)).ok)
+          return err("AUDIT_INVALID" as const);
+      } else if (events.length > 0) {
+        return err("AUDIT_INVALID" as const);
+      }
+      const chained = await appendAudit(scope, events, [event]);
       if (!chained.ok) return err("AUDIT_INVALID" as const);
       const appended = chained.value[chained.value.length - 1];
-      if (appended === undefined) return err("AUDIT_INVALID" as const);
+      if (appended?.hash === undefined) return err("AUDIT_INVALID" as const);
       await tx.insert(refusals).values({ customer, event: appended });
+      await tx
+        .insert(refusalAnchors)
+        .values({ customer, hash: appended.hash, count: chained.value.length })
+        .onConflictDoUpdate({
+          target: refusalAnchors.customer,
+          set: { hash: appended.hash, count: chained.value.length },
+        });
       return ok(undefined);
     });
   },

@@ -59,6 +59,12 @@ export const refusals = pgTable("orders_refusals", {
   event: jsonb().$type<AuditEvent>().notNull(),
 });
 
+export const refusalAnchors = pgTable("orders_refusal_anchors", {
+  customer: text().primaryKey(),
+  hash: text().notNull(),
+  count: integer().notNull(),
+});
+
 /** One row per placed line, plus demo seed rows (SPEC-010). Quantities in sales units. */
 export const history = pgTable("orders_history", {
   id: serial().primaryKey(),

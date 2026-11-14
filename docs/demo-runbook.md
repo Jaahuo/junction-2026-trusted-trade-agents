@@ -111,7 +111,9 @@ Resets preserve that import. Scripts read PostgreSQL, not the source directory.
    bun scripts/check-demo-data.ts --date <YYYY-MM-DD>
    ```
 
-   It ends with `S1 ok` and `S2 ok`.
+   It ends with `S1 sentence ok`, `S1 ok` and `S2 ok`.
+   `S1 sentence` checks that the scenario 1 chat sentence, "We need 20 litres of whole milk on Monday.", finds the S1 product first.
+   That product has seeded order history, so the chat order is placed without a sign-off.
    If a line says `not ok`, pick new products before you record.
 
 3. Prove both scenarios end to end:

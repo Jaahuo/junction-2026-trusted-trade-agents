@@ -100,7 +100,10 @@ describe("blockers", () => {
     expect(
       blockers(waiting, board([waiting], { prs: [{ number: 116, headRefName: "x", closes: [] }] })),
     ).toEqual(["depends on open #116"]);
-    expect(blockers(waiting, board([waiting]))).toEqual([]);
+    expect(blockers(waiting, board([waiting], { closed: new Set([116]) }))).toEqual([]);
+    expect(blockers(waiting, board([waiting]))).toEqual([
+      "depends on #116, which is neither closed nor merged",
+    ]);
   });
 
   test("blocking labels, person-only titles and missing acceptance block", () => {
@@ -188,6 +191,11 @@ describe("plan", () => {
 });
 
 describe("unreadable ownership", () => {
+  test("ownedPaths reads quoted and bare paths on one line", () => {
+    const mixed = "## Owns\n\nOwned paths: `contexts/offers/**`, scripts/backlog.ts\n";
+    expect(ownedPaths(mixed)).toEqual(["contexts/offers", "scripts/backlog.ts"]);
+  });
+
   test("ownedPaths reads comma-separated paths without backticks", () => {
     expect(
       ownedPaths("## Owns\n\nhosts/openwebui/**, scripts/openwebui.ts, DESIGN.md (one part).\n"),

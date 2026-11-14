@@ -38,7 +38,7 @@ export interface BacklogIssue {
 export interface Board {
   /** Every open issue. */
   open: BacklogIssue[];
-  /** Issue numbers that are closed. */
+  /** Issue numbers that are closed, and PR numbers that are merged: finished dependencies. */
   closed: ReadonlySet<number>;
   /** Open PRs: their number, head branch and the issues they close. */
   prs: { number: number; headRefName: string; closes: number[] }[];
@@ -104,8 +104,13 @@ export function ownedPaths(body: string): string[] | null {
     else if (!/^\s*[-*]\s/.test(line) && line.trim() !== "") owning = true;
     if (!owning) continue;
     const quoted = [...line.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? "");
-    // Without backticks, take the comma-separated words that look like paths.
-    const tokens = quoted.length > 0 ? quoted : line.split(/[,;]\s*|\s+/).filter(looksLikePath);
+    // Outside backticks, also take the words that look like paths.
+    const bare = line
+      .replace(/`[^`]*`/g, " ")
+      .replace(/\bexcept\s+[^,;]+/gi, " ")
+      .split(/[,;]\s*|\s+/)
+      .filter(looksLikePath);
+    const tokens = [...quoted, ...bare];
     for (const token of tokens) {
       const path = canonicalPath(token.replace(/^[-*:]+|[.,;:]+$/g, ""));
       if (path !== null) paths.push(path);
@@ -151,8 +156,11 @@ export function blockers(issue: BacklogIssue, board: Board): string[] {
   const openIssues = new Set(board.open.map((entry) => entry.number));
   for (const dependency of dependencies(issue.body)) {
     if (dependency === issue.number || board.closed.has(dependency)) continue;
-    if (openIssues.has(dependency) || openPrs.has(dependency))
-      reasons.push(`depends on open #${dependency}`);
+    reasons.push(
+      openIssues.has(dependency) || openPrs.has(dependency)
+        ? `depends on open #${dependency}`
+        : `depends on #${dependency}, which is neither closed nor merged`,
+    );
   }
   const paths = ownedPaths(issue.body);
   if (paths === null) reasons.push("no owned paths");
@@ -240,7 +248,7 @@ async function linkedProject(repo: { owner: { login: string }; name: string }): 
 
 async function loadBoard(): Promise<Board> {
   const project = await linkedProject(await repository());
-  const [issues, states, prs, heads] = await Promise.all([
+  const [issues, states, merged, prs, heads] = await Promise.all([
     ghJson(
       decodeBacklogIssues,
       "issue",
@@ -258,6 +266,17 @@ async function loadBoard(): Promise<Board> {
       "list",
       "--state",
       "closed",
+      "--limit",
+      "2000",
+      "--json",
+      "number,state",
+    ),
+    ghJson(
+      decodeIssueStates,
+      "pr",
+      "list",
+      "--state",
+      "merged",
       "--limit",
       "2000",
       "--json",
@@ -287,7 +306,8 @@ async function loadBoard(): Promise<Board> {
     assignees,
     status: projects.find((item) => item.title === project)?.status ?? null,
   }));
-  return { open, closed: new Set(states.map((entry) => entry.number)), prs, claimed };
+  const closed = new Set([...states, ...merged].map((entry) => entry.number));
+  return { open, closed, prs, claimed };
 }
 
 const numberArg = (value: string | undefined): number => {
@@ -461,9 +481,8 @@ export function loopClaim(comments: readonly { body: string; createdAt: string }
 export const isStale = (claimedAt: number, now: number, pushed: boolean) =>
   !pushed && now - claimedAt >= STALE_MS;
 
-async function stale(args: string[]) {
-  const expire = args.includes("--expire");
-  const [repo, board] = await Promise.all([repository(), loadBoard()]);
+async function stale() {
+  const board = await loadBoard();
   await command("git", "fetch", "origin", "main");
   const now = Date.now();
   let found = 0;
@@ -479,8 +498,9 @@ async function stale(args: string[]) {
     );
     const claimed = loopClaim(comments);
     if (claimed === null) continue;
-    const ref = `refs/heads/task/${issue.number}`;
-    const head = (await command("git", "ls-remote", "origin", ref)).split(/\s/)[0];
+    const head = (
+      await command("git", "ls-remote", "origin", `refs/heads/task/${issue.number}`)
+    ).split(/\s/)[0];
     if (!head) continue;
     await command("git", "fetch", "origin", head);
     const pushed =
@@ -489,24 +509,8 @@ async function stale(args: string[]) {
     found++;
     const minutes = Math.round((now - claimed.at) / 60_000);
     console.log(
-      `#${issue.number} claimed for @${claimed.login} ${minutes} min ago, nothing pushed`,
+      `#${issue.number} claimed for @${claimed.login} ${minutes} min ago, nothing pushed. If that agent is gone, @${claimed.login} runs: bun scripts/backlog.ts release ${issue.number} --reason "agent stopped"`,
     );
-    if (!expire) continue;
-    if (!(await dropClaim(issue.number, head))) {
-      console.log(`  task/${issue.number} moved; left as is.`);
-      continue;
-    }
-    await run("gh", "issue", "edit", String(issue.number), "--remove-assignee", claimed.login);
-    await projectStatus(repo, issue.number, "Todo", true);
-    await run(
-      "gh",
-      "issue",
-      "comment",
-      String(issue.number),
-      "--body",
-      `Backlog loop: the claim for @${claimed.login} expired after ${minutes} minutes with nothing pushed. The issue is free again.`,
-    );
-    console.log("  expired");
   }
   if (found === 0) console.log("No stale loop claims.");
 }
@@ -519,7 +523,7 @@ if (import.meta.main) {
   bun scripts/backlog.ts next [--all] [--json]
   bun scripts/backlog.ts claim <issue> [--agent <label>]
   bun scripts/backlog.ts release <issue> --reason <text> [--blocked]
-  bun scripts/backlog.ts stale [--expire]
+  bun scripts/backlog.ts stale
 
 next lists the open issues an agent can finish start to end now, in pick order:
 unassigned, Todo or off the board, no remote task/<n> branch, no open PR, no
@@ -534,13 +538,13 @@ release gives back your claim with no pushed work: it deletes the remote branch
 only while it holds no new commits, unassigns you, moves the issue to Todo and
 comments the reason. --blocked also labels it blocked, so no agent picks it until a
 person removes the label.
-stale lists loop claims older than 90 minutes whose branch holds no pushed commit;
---expire frees them: deletes the branch with a lease, unassigns, sets Todo, comments.`);
+stale lists loop claims older than 90 minutes whose branch holds no pushed commit,
+for a person to release; it changes nothing, so a slow live agent is never cut off.`);
     process.exit(0);
   }
   if (action === "next") await next(args);
   else if (action === "claim") await claim(numberArg(args[1]), args);
   else if (action === "release") await release(numberArg(args[1]), args);
-  else if (action === "stale") await stale(args);
+  else if (action === "stale") await stale();
   else fail("Unknown backlog command; see --help.");
 }

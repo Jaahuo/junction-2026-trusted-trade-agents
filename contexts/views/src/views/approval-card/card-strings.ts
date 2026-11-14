@@ -56,13 +56,13 @@ const en = {
   letAgentReduce: "Let the agent reduce it",
   reducePrompt: (orderId: string) =>
     `Get order ${orderId} under my order limit. Keep the products we need most. Send me a new offer to approve.`,
-  reduceChips: ["Remove the least needed", "Choose cheaper brands", "Order less of each"],
+  reduceChips: ["Drop the items I need least", "Switch to cheaper brands", "Lower every quantity"],
   letAgentFind: "Let the agent find another",
   findPrompt: (name: string, outOfStock: string) =>
     `${name} is ${outOfStock}. Find the best replacement. Send me a new offer to approve.`,
-  sameBrand: "Same brand only",
-  cheapest: "Cheapest option",
-  waitUntil: (day: string) => `Wait until ${day}`,
+  sameBrand: "Find one from the same brand",
+  cheapest: "Pick the cheapest match",
+  waitUntil: (day: string) => `Deliver it ${day} instead`,
   packs: (count: string) => `${count} packs`,
   splitDelivery: "Split delivery",
   allOn: (day: string) => `All on ${day}`,
@@ -104,9 +104,6 @@ const en = {
   /** `when()` starts today's times with this word; mid-sentence it is lower case. */
   todayStart: "Today",
   todayMid: "today",
-  deliveryOn: (day: string) => `Delivery ${day}. `,
-  sentTitle: (brand: string) => `Order sent to ${brand}`,
-  sentText: (delivery: string) => `${delivery}Confirmation also on the approval page.`,
   waitingTitle: "Approved. Waiting for payment",
   waitingText: "The order is sent to the wholesaler when the payment is confirmed.",
   alternativesTitle: "Rejected. The agent looks for a better option",
@@ -119,7 +116,6 @@ const en = {
   delivery: "Delivery",
   total: "Total",
   confirmedBy: "Confirmed by",
-  confirmedAt: "Confirmed at",
   yourNote: "Your note",
   changeUntil: (until: string) =>
     `You can still change or cancel it until ${until} on the approval page.`,
@@ -135,6 +131,28 @@ const en = {
   verified: (brand: string) => `Verified by ${brand}`,
   notVerified: "Not verified",
   viewFullLog: "View full log",
+  purpose: "Purpose",
+  checkAllergenRule: (allergen: string) => `Check it suits your ${allergen} rule`,
+  orderSent: "Order sent",
+  exclVat: (total: string) => `${total} excl. VAT`,
+  youAt: (time: string) => `You, ${time}`,
+  viewOrderLog: "View order log",
+  signedOffer: (brand: string) => `Signed offer from ${brand}`,
+  signedOfferText: (until: string) => `Signature checked. Prices are fixed until ${until}.`,
+  offerExpired: "Offer expired",
+  offerExpiredText: "Prices may have changed. Ask the agent for a new offer before you approve.",
+  offerMismatch: "Signature doesn’t match",
+  offerMismatchText: (brand: string) =>
+    `This offer may have been changed after ${brand} signed it. Don’t approve it.`,
+  receiptSigned: (brand: string) => `Signed confirmation from ${brand}`,
+  receiptSignedText: (brand: string, orderId: string, at: string | null) =>
+    `${brand} signed order ${orderId}${at === null ? "" : ` at ${at}`}. It matches the offer you approved.`,
+  receiptPending: "Confirmation not signed yet",
+  receiptPendingText: (brand: string) =>
+    `${brand} has received the order but hasn’t signed the confirmation yet. This updates when the signature arrives.`,
+  receiptMismatch: "Confirmation doesn’t match your order",
+  receiptMismatchText: (brand: string) =>
+    `${brand}’s confirmation differs from the offer you approved. Contact ${brand} before the delivery.`,
 };
 
 const FI_REASON: Record<ReasonCode, string> = {
@@ -214,16 +232,16 @@ const fi: typeof en = {
   reducePrompt: (orderId) =>
     `Pienennä tilaus ${orderId} tilausrajani alle. Pidä tärkeimmät tuotteet. Lähetä minulle uusi tarjous hyväksyttäväksi.`,
   reduceChips: [
-    "Poista vähiten tarvittavat",
-    "Valitse edullisemmat merkit",
-    "Tilaa kaikkea vähemmän",
+    "Poista vähiten tarvitut tuotteet",
+    "Vaihda edullisempiin merkkeihin",
+    "Pienennä kaikkia määriä",
   ],
   letAgentFind: "Anna agentin etsiä toinen",
   findPrompt: (name, outOfStock) =>
     `${name} on ${outOfStock}. Etsi paras korvaava tuote. Lähetä minulle uusi tarjous hyväksyttäväksi.`,
-  sameBrand: "Vain sama merkki",
-  cheapest: "Edullisin vaihtoehto",
-  waitUntil: (day) => `Odota ${day} asti`,
+  sameBrand: "Etsi saman merkin tuote",
+  cheapest: "Valitse edullisin vastaava",
+  waitUntil: (day) => `Toimita vasta ${day}`,
   packs: (count) => `${count} pakkausta`,
   splitDelivery: "Jaettu toimitus",
   allOn: (day) => `Kaikki ${day}`,
@@ -265,9 +283,6 @@ const fi: typeof en = {
   you: "Sinä",
   todayStart: "Tänään",
   todayMid: "tänään",
-  deliveryOn: (day) => `Toimitus ${day}. `,
-  sentTitle: (brand) => `Tilaus lähetetty toimittajalle ${brand}`,
-  sentText: (delivery) => `${delivery}Vahvistus näkyy myös hyväksyntäsivulla.`,
   waitingTitle: "Hyväksytty. Odottaa maksua",
   waitingText: "Tilaus lähtee tukkuun, kun maksu on vahvistettu.",
   alternativesTitle: "Hylätty. Agentti etsii paremman vaihtoehdon",
@@ -280,7 +295,6 @@ const fi: typeof en = {
   delivery: "Toimitus",
   total: "Yhteensä",
   confirmedBy: "Vahvistaja",
-  confirmedAt: "Vahvistettu",
   yourNote: "Muistiinpanosi",
   changeUntil: (until) => `Voit vielä muuttaa tai perua tilauksen hyväksyntäsivulla ${until} asti.`,
   fewerDetails: "Vähemmän tietoja",
@@ -295,6 +309,28 @@ const fi: typeof en = {
   verified: (brand) => `Vahvistanut ${brand}`,
   notVerified: "Ei vahvistettu",
   viewFullLog: "Näytä koko loki",
+  purpose: "Tarkoitus",
+  checkAllergenRule: (allergen) => `Tarkista, että se sopii sääntöösi (${allergen})`,
+  orderSent: "Tilaus lähetetty",
+  exclVat: (total) => `${total} (alv 0 %)`,
+  youAt: (time) => `Sinä, ${time}`,
+  viewOrderLog: "Näytä tilausloki",
+  signedOffer: (brand) => `Allekirjoitettu tarjous: ${brand}`,
+  signedOfferText: (until) => `Allekirjoitus tarkistettu. Hinnat ovat kiinteät ${until} asti.`,
+  offerExpired: "Tarjous vanheni",
+  offerExpiredText: "Hinnat ovat voineet muuttua. Pyydä agentilta uusi tarjous ennen hyväksyntää.",
+  offerMismatch: "Allekirjoitus ei täsmää",
+  offerMismatchText: (brand) =>
+    `Tarjousta on voitu muuttaa allekirjoituksen jälkeen (${brand}). Älä hyväksy sitä.`,
+  receiptSigned: (brand) => `Allekirjoitettu vahvistus: ${brand}`,
+  receiptSignedText: (brand, orderId, at) =>
+    `${brand} allekirjoitti tilauksen ${orderId}${at === null ? "" : ` klo ${at}`}. Se vastaa hyväksymääsi tarjousta.`,
+  receiptPending: "Vahvistusta ei ole vielä allekirjoitettu",
+  receiptPendingText: (brand) =>
+    `${brand} on vastaanottanut tilauksen, mutta ei ole vielä allekirjoittanut vahvistusta. Tieto päivittyy, kun allekirjoitus saapuu.`,
+  receiptMismatch: "Vahvistus ei vastaa tilaustasi",
+  receiptMismatchText: (brand) =>
+    `Vahvistus poikkeaa hyväksymästäsi tarjouksesta. Ota yhteyttä toimittajaan (${brand}) ennen toimitusta.`,
 };
 
 export const CARD = { en, fi };

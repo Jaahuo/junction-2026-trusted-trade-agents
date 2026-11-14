@@ -503,11 +503,20 @@ export interface AuditEvent {
   hash?: string; // lowercase SHA-256 hex
   previousHash?: string | null; // null at genesis
   productId?: string; // the product a check applies to, for a reason about one product
+  integrityOk?: boolean; // false when the entry no longer matches its signature
+}
+export interface LineAllergen {
+  allergen: string; // "egg", "sesame"
+  type: "free_from" | "contains" | "may_contain";
+  status: "default" | "warning" | "error"; // relation to the buyer's hard rules, computed by the server
+  rule?: string; // the buyer's rule it meets or breaks, "no egg"
 }
 export interface OrderLine {
   offerId: string;
   token: string;
   claims: OfferClaims;
+  rationale?: string; // one sentence from the agent on why it picked this product
+  allergens?: LineAllergen[];
 }
 export interface Requote {
   at: string;
@@ -545,6 +554,10 @@ export interface Order {
   createdAt: string;
   receipt?: string;
   auditAnchor?: { hash: string; count: number };
+  purpose?: string; // what the order is for, written by the agent from the buyer's request
+  offerSignature?: { state: "verified" | "expired" | "invalid"; validUntil: string };
+  receiptSignature?: { state: "verified" | "pending" | "invalid"; signedAt: string | null };
+  auditIntegrity?: "intact" | "unverified" | "broken";
 }
 export interface PendingList {
   orders: Order[];
@@ -562,6 +575,7 @@ export interface PrecheckRequest {
 
 - `place_order` takes signed offer tokens only. `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
 - Idempotency: unique (customer, idempotencyKey). See SPEC-009 R2.
+- Trust and rationale fields (optional; the views hide each part when it is absent): `purpose` and line `rationale` come from the agent; line `allergens` with their `status` are computed by the server from the buyer's hard rules; `offerSignature` and `receiptSignature` report the wholesaler's signature checks; `auditIntegrity` and `integrityOk` report the audit signature or hash-chain check, per log and per entry. An `invalid` offer signature or an `error` allergen must be refused at approval by the server; the views only report them.
 - `approvalUrl` is computed when the order is read: `${publicBaseUrl()}/approvals/<orderId>` while pending, else null. It is not stored. It points to the approval page (SPEC-013), the one plain page with the approval actions.
 - Order history: a table owned by the orders context, with rows `{ productId, quantity /* sales units */, placedAt }`. A placed order adds one row per line. The demo seed adds rows directly; they are not orders and use no credit. `QUANTITY_UNUSUAL` compares sales units with the median of that product's rows; `NEW_PRODUCT` means the product has no row.
 - Placement operation `commitPlacement(orderId)`: every move to `placed` goes through it, from `place_order` and from approval. In one transaction with a per-customer lock: re-validate the offers (SPEC-006 `validate`, with its live-amount rule; until that route exists, skipped); invoice: remaining credit = principal's `creditLimit` − gross of placed invoice orders, total above it → `rejected CREDIT_LIMIT`; pay-on-order: a `PaymentPort` step, `awaiting_payment`, then simulated authorization that fails above `paymentFailAbove` → `rejected PAYMENT_FAILED`, else `payment_authorized`; then `placed`. Each step writes its audit event in the same transaction.

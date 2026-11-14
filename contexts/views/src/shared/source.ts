@@ -4,10 +4,6 @@ import { fixtureSource, hostSource, plainSource, type Source, type ViewName } fr
 
 export type { Source } from "./bridge.ts";
 
-/** The server's public base URL, which the API writes into each view it serves. */
-const baseUrl = () =>
-  document.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ?? location.origin;
-
 /** Host mode: the MCP Apps bridge (SPEC-013). */
 function bridgeSource(view: ViewName): Source {
   const app = new App({ name: `trusted-trade-${view}`, version: "1.0.0" });
@@ -16,15 +12,27 @@ function bridgeSource(view: ViewName): Source {
     onToolResult: (listener) => {
       app.ontoolresult = (params) => listener(params.structuredContent);
     },
+    onToolInput: (listener) => {
+      app.ontoolinput = (params) => listener(params.arguments ?? {});
+    },
     callServerTool: async (request) => {
       await ready;
       const result = await app.callServerTool(request);
-      return { isError: result.isError === true, structuredContent: result.structuredContent };
+      const text = result.content.find((item) => item.type === "text")?.text;
+      return {
+        isError: result.isError === true,
+        structuredContent: result.structuredContent,
+        ...(text === undefined ? {} : { text }),
+      };
     },
     sendMessage: async (text) => {
       await ready;
       const result = await app.sendMessage({ role: "user", content: [{ type: "text", text }] });
       return result.isError !== true;
+    },
+    updateModelContext: async (text) => {
+      await ready;
+      await app.updateModelContext({ content: [{ type: "text", text }] });
     },
   });
   const ready = app.connect();
@@ -41,14 +49,16 @@ export function sourceFor(view: ViewName): Source {
   if (window.parent === window) {
     const entry = VIEWS.find((candidate) => candidate.view === view);
     const query = new URLSearchParams(location.search);
+    // A page opened in the browser calls the API on its own origin (the API, or the web app's
+    // proxy), which stays right even when PUBLIC_BASE_URL points elsewhere.
     const source = plainSource(view, {
       fetch: (url, init) => fetch(url, init),
-      baseUrl: baseUrl(),
+      baseUrl: location.origin,
       query,
     });
     if (
       entry?.plainLoad != null &&
-      (entry.plainQuery === null || query.get(entry.plainQuery)?.trim())
+      (entry.plainQuery === null || query.get(entry.plainQuery)?.trim() || entry.plainList !== null)
     )
       return source;
     return Object.assign(source, { standaloneFallback: true });

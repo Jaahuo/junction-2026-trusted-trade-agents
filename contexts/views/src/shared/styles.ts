@@ -111,6 +111,37 @@ export const base = css`
     border-radius: var(--radius-full);
     animation: spin 0.8s linear infinite;
   }
+  /* Loading: a silver sheen edged with soft pink sweeps over lilac, no spinners. Always
+     aria-hidden.
+     The sweep is fixed to the viewport and repeats, so every shimmer moves in step and the
+     loop never jumps. A shimmer on a petrol header sets --shimmer-base to translucent white. */
+  .shimmer {
+    --shimmer-base: var(--color-lilac-aimo);
+    --shimmer-sweep: var(--color-silver);
+    --shimmer-edge: color-mix(in srgb, var(--color-pink-soft) 80%, transparent);
+    background-color: var(--shimmer-base);
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      transparent 15%,
+      var(--shimmer-edge) 35%,
+      var(--shimmer-sweep) 50%,
+      var(--shimmer-edge) 65%,
+      transparent 85%,
+      transparent 100%
+    );
+    background-size: 200vw 100%;
+    background-repeat: repeat;
+    background-attachment: fixed;
+    animation: shimmer 4s linear infinite;
+    will-change: background-position;
+  }
+  /* A shimmer bar along the bottom of a header or strip while something loads. */
+  .load-bar {
+    --shimmer-base: var(--color-lilac-aimo-strong);
+    display: block;
+    height: 6px;
+  }
   .empty {
     padding: var(--spacing-2xl) var(--spacing-xl);
     border: var(--border-width-default) dashed var(--color-border-strong);
@@ -121,9 +152,19 @@ export const base = css`
     color: var(--color-link);
     font-weight: 600;
   }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
+  /* Exactly one gradient width per loop, so the end matches the start. */
+  @keyframes shimmer {
+    from {
+      background-position: 0 0;
     }
+    to {
+      background-position: 200vw 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer {
+      animation: none;
+    }
+  }
   }
 `;

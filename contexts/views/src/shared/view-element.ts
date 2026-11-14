@@ -37,9 +37,10 @@ export abstract class ViewElement<E extends ViewEntry> extends LitElement {
   override render() {
     const state = this.state;
     if (state.kind === "loading")
-      return html`<p class="secondary body-small" part="loading">
-        <span class="spinner" role="status" aria-label="Loading"></span> Loading…
-      </p>`;
+      return html`<div part="loading">
+        <p class="secondary body-small" role="status">Loading…</p>
+        <span class="shimmer load-bar" aria-hidden="true"></span>
+      </div>`;
     if (state.kind === "empty")
       return html`<div class="empty" part="empty">
         <p class="strong">Nothing to show</p>
@@ -70,6 +71,9 @@ export function defineView(tag: string, element: CustomElementConstructor) {
 /** Connects a view element to its source and adds it to the page. */
 export function mountView(element: ViewElement<ViewEntry>) {
   element.source = sourceFor(element.entry.view);
+  // Opened as its own page rather than in a chat frame: view.css centres it at card width.
+  if (window.parent === window && document.querySelector("#tt-harness") === null)
+    document.documentElement.classList.add("page");
   const root = document.querySelector("#root");
   if ("standaloneFallback" in element.source) {
     const message = document.createElement("p");

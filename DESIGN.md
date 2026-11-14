@@ -25,6 +25,10 @@ The lavender surface is an intentional part of the Aimo skin, not a separate the
 | `--color-button-text`          | `#003747`   | Primary button text.              |
 | `--color-light-purple-aimo`    | `#eee8f5`   | Lavender skin surface.            |
 | `--color-bg-attention`         | `#fff3b0`   | Attention pill background.        |
+| `--color-lilac-aimo`           | `#e2daf5`   | Loading shimmer base.             |
+| `--color-lilac-aimo-strong`    | `#d9d2f5`   | Loading bar shimmer base.         |
+| `--color-pink-soft`            | `#efd4f2`   | Loading shimmer sweep edge.       |
+| `--color-silver`               | `#e9e6f2`   | Loading shimmer sweep.            |
 | `--color-text`                 | `#23282d`   | Main text.                        |
 | `--color-text-secondary`       | `#555759`   | Secondary text.                   |
 | `--color-text-on-brand`        | `#ffffff`   | Text on brand fills.              |

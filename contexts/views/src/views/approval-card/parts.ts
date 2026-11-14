@@ -7,13 +7,30 @@ import attention16 from "../../shared/icons/attention-16.svg?raw";
 // Parts that the card and the view share: the petrol header, the card frame and
 // the formatters. Figma: Junction 2026 › Screens › "Approval request — v8".
 
+/** Units in words, including the Valio Aimo sales units of real offers (KI, SK, PAK …). */
 const UNIT: Record<string, string> = {
   LTR: "l",
   KGM: "kg",
+  KG: "kg",
   GRM: "g",
   CT: "packs",
   PCE: "pcs",
   ST: "pcs",
+  KI: "cases",
+  CS: "cases",
+  PAK: "packs",
+  BAG: "bags",
+  RAS: "boxes",
+  PRK: "tubs",
+  BOT: "bottles",
+  SK: "sacks",
+  KLE: "packages",
+  KRT: "cartons",
+  KAN: "canisters",
+  PAL: "pallets",
+  NIP: "bundles",
+  DSP: "displays",
+  DZ: "dozen",
 };
 /** "packs", "kg": the short name of a unit code. */
 export const unit = (code: string) => UNIT[code] ?? code;

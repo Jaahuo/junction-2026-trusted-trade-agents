@@ -500,6 +500,7 @@ export interface AuditEvent {
   rule?: string;
   reason?: ReasonCode;
   detail?: string;
+  productId?: string; // the product a check applies to, for a reason about one product
 }
 export interface OrderLine {
   offerId: string;
@@ -619,7 +620,7 @@ PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 - `ALL /mcp`: stateless streamable HTTP, a new server and transport per request, JSON responses. No authentication in the first build (SPEC-002).
 - Every tool of SPEC-003 is registered with `inputSchema` = `TOOL_INPUT[tool]` and `outputSchema` = `TOOL_OUTPUT[tool]`. The result has `content` (a text summary) and `structuredContent` (the REST 2xx body). Text of a pending order includes its `approvalUrl`. A REST error, or input that `TOOL_INPUT[tool]` refuses (`BAD_REQUEST`), → `isError: true` and no `structuredContent`; the text has the error code, the message and the envelope as JSON. Reason: an MCP SDK client validates any `structuredContent` against `outputSchema`, also when `isError` is set. So every result with `structuredContent` parses with `TOOL_OUTPUT[tool]`. Hosts without Apps complete the flow from text, structured content and the approval page.
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
-- Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
+- Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
 - Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
 
 ## SPEC-013 Views
@@ -643,8 +644,9 @@ export const VIEWS = [
     view: "approval-card",
     uri: "ui://trusted-trade/approval-card",
     tools: ["place_order", "list_pending_approvals"],
-    plainQuery: null,
-    plainLoad: null,
+    plainQuery: "order",
+    plainLoad: "status",
+    plainList: "pending",
     actions: ["decide_approval"],
   },
   {
@@ -653,6 +655,7 @@ export const VIEWS = [
     tools: ["get_offers"],
     plainQuery: null,
     plainLoad: null,
+    plainList: null,
     actions: [],
   },
   {
@@ -661,6 +664,7 @@ export const VIEWS = [
     tools: ["get_order_status"],
     plainQuery: "order",
     plainLoad: "status",
+    plainList: null,
     actions: [],
   },
   {
@@ -669,6 +673,7 @@ export const VIEWS = [
     tools: ["search_products"],
     plainQuery: null,
     plainLoad: null,
+    plainList: null,
     actions: [],
   },
   {
@@ -677,6 +682,7 @@ export const VIEWS = [
     tools: ["get_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
+    plainList: null,
     actions: ["register_mandate", "revoke_mandate"],
   },
 ] as const; // priority order
@@ -684,11 +690,11 @@ export const VIEWS = [
 
 - The `structuredContent` of a tool is the only input of its view. A view parses it with `TOOL_OUTPUT`; a failed parse, or a result with `isError: true` and no `structuredContent` (SPEC-012), shows the error state.
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
-- Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. The approval card has no plain mode; its plain counterpart is the approval page.
+- Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. Without the query, a view with a `plainList` route loads that list instead (`/views/approval-card` lists the open orders). The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
 - The approval card shows a link to `approvalUrl` in every pending state.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
 - Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
-- The approval page is the screen `/approvals/<orderId>` of the orders context: one plain page with the approval actions, for unattended runs and hosts without Apps. The Apps approval card is the in-chat view; both call the same decision route (SPEC-011).
+- The approval page is the screen `/approvals` of the orders context, for unattended runs and hosts without Apps. It forwards to the approval card's plain page: the list of open orders (`/views/approval-card`), or one order with `?order=<id>` (the `approvalUrl`). The card calls the same decision route in the chat and on its page (SPEC-011).
 
 ## SPEC-014 Discovery and OpenAPI
 

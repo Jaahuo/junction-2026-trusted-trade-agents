@@ -1,7 +1,7 @@
 import type {
   AuditEvent,
   Mandate,
-  OfferClaims,
+  OfferVerification,
   OffersResult,
   Order,
   RequoteRequest,
@@ -20,13 +20,8 @@ export type StoredOrder = Omit<Order, "approvalUrl"> & {
   };
 };
 
-type VerifiedOffer = Result<
-  OfferClaims,
-  { code: "OFFER_INVALID" } | { code: "OFFER_EXPIRED"; claims: OfferClaims }
->;
-
 /** Verifies an offer token's signature, alg, typ and kid; an expired offer comes back with its claims. */
-export type OfferVerifier = (token: string, now: Date) => Promise<VerifiedOffer>;
+export type OfferVerifier = (token: string, now: Date) => Promise<OfferVerification>;
 
 export interface IssuedOfferPort {
   /**

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SearchResultSchema } from "@app/contract";
+import { type HardConstraint, SearchResultSchema } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import { Elysia } from "elysia";
 import {
@@ -66,7 +66,7 @@ const deps = (overrides: Partial<CatalogDeps> = {}): CatalogDeps => ({
 
 const searchBody = {
   terms: ["milk"],
-  hard: [] as { attribute: "lactose"; is: "free_from" }[],
+  hard: [] as HardConstraint[],
   soft: [] as { attribute: string; prefer: string }[],
   quantity: { value: 1000, unit: "LTR" },
   deliverBy: "2026-11-16",
@@ -469,15 +469,43 @@ describe("POST /catalog/search", () => {
     expect(await source.current()).toEqual(err("UPSTREAM_FAILED"));
   });
 
-  test("an unsupported hard constraint gives 400 naming the attribute", async () => {
-    const { status, body } = await post(createApi(deps()), "/search", {
-      ...searchBody,
-      hard: [{ attribute: "gluten", is: "free_from" }],
-    });
-    expect({ status, body }).toMatchObject({
-      status: 400,
-      body: { error: { code: "BAD_REQUEST" } },
-    });
+  test("an unknown allergen code gives 400 naming the attribute", async () => {
+    for (const attribute of ["unicorn", "AE"]) {
+      const { status, body } = await post(createApi(deps()), "/search", {
+        ...searchBody,
+        hard: [{ attribute, is: "free_from" }],
+      });
+      expect({ status, body }).toMatchObject({
+        status: 400,
+        body: {
+          error: {
+            code: "BAD_REQUEST",
+            message: expect.stringContaining(
+              `unsupported hard constraint attribute "${attribute}"`,
+            ),
+          },
+        },
+      });
+    }
+  });
+
+  test("an allergen CONTAINS or MAY_CONTAIN is excluded, FREE_FROM is confirmed, no data is unknown", async () => {
+    const eggs = [
+      product({ productId: "egg-free", claims: new Set(["FREE_FROM:AE"]) }),
+      product({ productId: "egg", claims: new Set(["CONTAINS:AE"]) }),
+      product({ productId: "egg-traces", claims: new Set(["MAY_CONTAIN:AE"]) }),
+      product({ productId: "egg-no-data", claims: new Set() }),
+    ];
+    const { status, body } = await post(
+      createApi(deps({ catalog: async () => ok(createCatalog(eggs)) })),
+      "/search",
+      { ...searchBody, hard: [{ attribute: "egg", is: "free_from" }] },
+    );
+    expect(status).toBe(200);
+    expect(SearchResultSchema.parse(body).candidates.map((c) => [c.productId, c.match])).toEqual([
+      ["egg-free", { egg: "confirmed" }],
+      ["egg-no-data", { egg: "unknown" }],
+    ]);
   });
 });
 

@@ -179,7 +179,16 @@ describe("hard constraints (SPEC-003, SPEC-004)", () => {
     expect(SearchRequestSchema.safeParse(request).success).toBe(true);
     for (const hard of [
       [{ attribute: "gluten", is: "free_from" }],
+      [{ attribute: "vegan", is: "yes" }],
+    ]) {
+      expect(SearchRequestSchema.safeParse({ ...request, hard }).success).toBe(true);
+    }
+    for (const hard of [
+      [{ attribute: "unicorn", is: "free_from" }],
+      [{ attribute: "Gluten", is: "free_from" }],
+      [{ attribute: "AW", is: "free_from" }],
       [{ attribute: "lactose", is: "low" }],
+      [{ attribute: "vegan", is: "free_from" }],
     ]) {
       expect(SearchRequestSchema.safeParse({ ...request, hard }).success).toBe(false);
     }

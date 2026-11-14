@@ -89,7 +89,7 @@ One service sits in front of a wholesaler's existing systems and adds the order 
 | Buyer limits                | The wholesaler uses them only for enforcement                                                                                                                   | Decided  |
 | Approval                    | Human only, on the approval card or the approval page; no decision tool is visible to the model                                                                 | Decided  |
 | Views                       | All five, in priority order: approval card, offer comparison, order timeline, search results, mandate settings                                                  | Decided  |
-| Hard constraints            | Every GS1 allergen code and free-from claim in the product data. `MAY_CONTAIN` counts as contradicted.                                                          | Proposed |
+| Hard constraints            | Every GS1 allergen code and free-from claim in the product data, and vegan. `MAY_CONTAIN` counts as contradicted.                                               | Proposed |
 | Agent rationale             | The agent may send a `purpose` and a `rationale` per line. The server stores them and shows them on the card and in the audit record. It never parses them.     | Proposed |
 | Trust chain                 | The views and an independent script verify offer signatures against the published keys. A placed order gets a signed receipt. The audit record is hash-chained. | Proposed |
 | Attack demo                 | A chat jailbreak and a rogue-agent script show the guardrails holding. The demo shows only attacks that the first build stops.                                  | Proposed |
@@ -150,7 +150,7 @@ The exact shapes are in [specs](specs.md); the examples below are illustrative.
 
 ### Search request
 
-The host agent fills these fields from the user's sentence. A hard constraint that a product contradicts excludes the product, and one with missing data sends the order to approval. Soft constraints only affect ranking. Standing constraints from the mandate are added by the server. The first build supports one hard constraint attribute, lactose-free, and refuses a request with any other hard constraint.
+The host agent fills these fields from the user's sentence. A hard constraint that a product contradicts excludes the product, and one with missing data sends the order to approval. Soft constraints only affect ranking. Standing constraints from the mandate are added by the server. Hard constraints are the GS1 allergens and free-from claims in the product data, such as gluten-free or egg-free, and vegan. A request with any other hard constraint is refused.
 
 ```json
 {

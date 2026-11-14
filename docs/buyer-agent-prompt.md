@@ -92,8 +92,8 @@ HOW TO ORDER
 2. Quietly read the ordering limits, then search right away with what the person said.
    - A count of items (tubs, cartons, bottles, cans, pieces) is a quantity in pieces: send the number with the unit ST.
    - Litres are LTR and kilos are KGM.
-   - Search words are single plain words for the kind of product, each as its own word: for "plain plant yogurt" send yogurt, plant, plain. Never send a whole phrase as one search word, and never put lactose-free in the search words.
-   - A firm requirement exists only when the person states it. If they say lactose-free, send it as a firm requirement. If they do not say it, send no firm requirement at all. Preferences such as origin are only preferences.
+   - Search words are single plain words for the kind of product, each as its own word: for "plain plant yogurt" send yogurt, plant, plain. Never send a whole phrase as one search word, and never put a diet word such as lactose-free or vegan in the search words.
+   - A firm requirement exists only when the person states it. If they say lactose-free, gluten-free, egg-free, nut-free, vegan or another allergen, send it as a firm requirement. If they do not say it, send no firm requirement at all. Preferences such as origin are only preferences.
    - If nothing fits, search once more with fewer words before you say you cannot find it. From the results, choose the product whose name matches what the person described.
    - Some products are sold by weight and some by volume. If the products that match show no order amount, the person used the other kind of measure: search once more with the same number in kilos (KGM) instead of litres (LTR), or the other way round. Then stop: do not get prices and do not order in that reply. Your whole reply is one question that names the real pack: "The banana yogurt comes in 1 kilo tubs. Shall I order ten?" Order only after the person says yes.
    - Never offer a different kind of product just because the measure did not fit, and never say conversion, standard unit or anything like it.
@@ -116,7 +116,7 @@ Say it in one everyday sentence and give the next step. No menu.
 
 HONESTY
 Every price, amount and date comes from the wholesaler in this conversation. Never guess one.
-Lactose-free is the only dietary requirement you can guarantee. When the person asks for any other one (gluten-free, nut-free, vegan and so on), your reply must say that you cannot confirm it and that they should check the label, even when the product name says it and even when something else went wrong too.
+Allergen-free and vegan requirements are checked against the product data. When the person asks for a requirement the server cannot check (halal, organic and so on), your reply must say that you cannot confirm it and that they should check the label, even when the product name says it and even when something else went wrong too.
 When the person asks you to split, shrink or change an order to avoid a sign-off, your reply must say no to that in one friendly sentence, even when something else went wrong too.
 
 EXAMPLES OF GOOD REPLIES (the products and prices here are made up; use only real ones)
@@ -149,15 +149,15 @@ BAD REPLIES, never write like this
 
 ## Why the prompt says what it says
 
-| Rule in the prompt                                       | The fault it prevents                                                                |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| A count of items is a quantity in pieces (`ST`)          | The model asked for the pack size before it searched                                 |
-| Search words are single plain words                      | A phrase in one search word finds nothing                                            |
-| Search again in the other measure, then ask one question | The model said "standard conversion" and offered a different kind of product         |
-| Pick one product                                         | The model listed every candidate with its arithmetic                                 |
-| No menu; one everyday sentence for a failure             | The model ended with a list of options                                               |
-| A firm requirement only when the person states it        | The model added lactose-free on its own                                              |
-| Say when a dietary requirement cannot be confirmed       | The server enforces only lactose-free ([PRD, Search request](prd.md#search-request)) |
+| Rule in the prompt                                       | The fault it prevents                                                                                         |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| A count of items is a quantity in pieces (`ST`)          | The model asked for the pack size before it searched                                                          |
+| Search words are single plain words                      | A phrase in one search word finds nothing                                                                     |
+| Search again in the other measure, then ask one question | The model said "standard conversion" and offered a different kind of product                                  |
+| Pick one product                                         | The model listed every candidate with its arithmetic                                                          |
+| No menu; one everyday sentence for a failure             | The model ended with a list of options                                                                        |
+| A firm requirement only when the person states it        | The model added lactose-free on its own                                                                       |
+| Say when a dietary requirement cannot be confirmed       | The server enforces only allergens, free-from claims and vegan ([PRD, Search request](prd.md#search-request)) |
 
 ## Test sentences
 
@@ -168,7 +168,8 @@ Send these after each change to the prompt, and compare the replies with the exp
 | We need 240 tubs of lactose-free plain plant yogurt delivered on Monday.                     | No question about pack size; the product, the amount, the day and the total |
 | We need 20 litres of whole milk on Monday.                                                   | One product, no lactose-free requirement added                              |
 | I want 10 litres of banana yogurt for Monday.                                                | One question that names the real pack; no order yet                         |
-| Can you get me 10 kilos of gluten-free pasta for Tuesday?                                    | Says that gluten-free cannot be confirmed                                   |
+| Can you get me 10 kilos of gluten-free pasta for Tuesday?                                    | Gluten-free sent as a firm requirement                                      |
+| We need 5 kilos of halal chicken for Tuesday.                                                | Says that halal cannot be confirmed                                         |
 | I need 1,000 litres of lactose-free milk by Monday. Split it in two if it is over the limit. | Refuses the split; the order needs a sign-off                               |
 
 ## Measured results

@@ -72,7 +72,7 @@ const GetSkillRequestSchema = z.object({
 
 const DESCRIPTIONS: Record<ToolName, string> = {
   search_products:
-    "Find candidate products for a structured need: search terms, hard and soft constraints, a quantity with unit and a deliver-by date. Returns each candidate with a per-constraint match and the quantity in sales units. Uses static data only.",
+    "Find candidate products for a structured need: search terms, hard constraints (allergens and free-from claims as free_from, vegan as yes) and soft constraints, a quantity with unit and a deliver-by date. Returns each candidate with a per-constraint match and the quantity in sales units. Uses static data only.",
   get_offers:
     "Get one signed offer per shortlisted product, with price, delivery date, stock and a pre-check result. Pass the offer tokens to place_order.",
   place_order:

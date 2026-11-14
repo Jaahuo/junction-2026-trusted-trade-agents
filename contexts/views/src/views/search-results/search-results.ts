@@ -30,14 +30,18 @@ const country = (code: string) => {
 const attributeName = (attribute: string) =>
   attribute === "countryOfOrigin" ? pick(RESULTS).countryOfOrigin : words(attribute);
 
-// Every hard constraint is "free_from" (SPEC-004). Any attribute, so new allergens (#71) need no change.
+// Every hard constraint but vegan is "free_from" (SPEC-004).
 type Results = Omit<ViewData<"search-results">, "constraints"> & {
   constraints: Omit<ViewData<"search-results">["constraints"], "hard"> & {
     hard: { attribute: string }[];
   };
 };
-const required = (attribute: string) =>
-  attribute === "lactose" ? pick(RESULTS).lactoseFree : pick(RESULTS).free(words(attribute));
+/** The label of a hard constraint: "Lactose free", "Gluten free", "Vegan". */
+export const required = (attribute: string) => {
+  if (attribute === "lactose") return pick(RESULTS).lactoseFree;
+  if (attribute === "vegan") return pick(RESULTS).vegan;
+  return pick(RESULTS).free(words(attribute));
+};
 const preferred = (attribute: string, prefer: string) =>
   `${attributeName(attribute)}: ${attribute === "countryOfOrigin" ? country(prefer) : words(prefer)}`;
 const decode = (value: string) => {

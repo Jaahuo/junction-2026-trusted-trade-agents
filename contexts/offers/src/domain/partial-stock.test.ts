@@ -238,6 +238,141 @@ describe("partial stock quantities", () => {
       },
     });
   });
+  test("scaled physical amounts cross decimal lots and large lot counts", () => {
+    const scale = 100n;
+    const noConversion = product({ perSalesUnit: null });
+    for (const lotTicks of [1n, 10n, 125n]) {
+      const lot = Number(lotTicks) / Number(scale);
+      const target = product({ allowedLotSize: lot, perSalesUnit: null });
+      for (const count of [11191318n, 600000000000n]) {
+        const exactTicks = count * lotTicks;
+        const exact = Number(exactTicks) / Number(scale);
+        const next = Number(exactTicks + lotTicks) / Number(scale);
+        expect(floorToLot(exact, lot)).toBe(exact);
+        expect(stockCovers(exact, exact, lot)).toBe(true);
+        expect(stockCovers(exact, next, lot)).toBe(false);
+        expect(quantityForShortfall({ value: exact, unit: "CASE" }, noConversion, target)).toEqual({
+          value: exact,
+          unit: "CASE",
+        });
+        // A half lot is represented in thousandths, independently of lot division.
+        const between = Number(exactTicks * 10n + lotTicks * 5n) / 1000;
+        expect(floorToLot(between, lot)).toBe(exact);
+        expect(stockCovers(between, next, lot)).toBe(false);
+        expect(
+          quantityForShortfall({ value: between, unit: "CASE" }, noConversion, target),
+        ).toEqual({
+          value: next,
+          unit: "CASE",
+        });
+      }
+    }
+    expect(floorToLot(111913.18, 0.01)).toBe(111913.18);
+    expect(stockCovers(111913.18, 111913.18, 0.01)).toBe(true);
+    expect(
+      planOriginalQuantity({ value: 111913.18, unit: "CASE" }, product({ allowedLotSize: 0.01 }), {
+        stock: "confirmed",
+        amount: 111913.18,
+      }),
+    ).toEqual({
+      ok: true,
+      value: { quantity: { value: 111913.18, unit: "CASE" }, shortfall: null },
+    });
+  });
+
+  test("near-MAX_SAFE lot counts either retain known scaled boundaries or fail closed", () => {
+    const count = 9007199254740000n;
+    const noConversion = product({ perSalesUnit: null });
+    for (const lotTicks of [1n, 10n, 125n]) {
+      const lot = Number(lotTicks) / 100;
+      const exact = Number(count * lotTicks) / 100;
+      const next = Number((count + 1n) * lotTicks) / 100;
+      const target = product({ allowedLotSize: lot, perSalesUnit: null });
+      const floor = floorToLot(exact, lot);
+      if (floor !== null) expect(floor).toBe(exact);
+      const ceiling = quantityForShortfall({ value: exact, unit: "CASE" }, noConversion, target);
+      if (ceiling !== null) expect(ceiling.value).toBe(exact);
+      const between = Number(count * lotTicks * 10n + lotTicks * 5n) / 1000;
+      if (exact < between && between < next) {
+        const partialFloor = floorToLot(between, lot);
+        if (partialFloor !== null) expect(partialFloor).toBe(exact);
+        const partialCeiling = quantityForShortfall(
+          { value: between, unit: "CASE" },
+          noConversion,
+          target,
+        );
+        if (partialCeiling !== null) expect(partialCeiling.value).toBe(next);
+      }
+    }
+  });
+
+  test("precision exhaustion never returns an invalid or insufficient lot quantity", () => {
+    const noConversion = product({ perSalesUnit: null });
+    // These integer amounts are exactly representable, even near MAX_SAFE_INTEGER.
+    for (const lotTicks of [1n, 10n, 125n]) {
+      const lot = Number(lotTicks) / 100;
+      const target = product({ allowedLotSize: lot, perSalesUnit: null });
+      for (const amount of [9007199254740983, 9007199254740987]) {
+        const floored = floorToLot(amount, lot);
+        if (floored !== null) {
+          expect(Number.isInteger(floored)).toBe(true);
+          expect(floored).toBeLessThanOrEqual(amount);
+          expect((BigInt(floored) * 100n) % lotTicks).toBe(0n);
+        }
+        const covered = quantityForShortfall({ value: amount, unit: "CASE" }, noConversion, target);
+        if (covered !== null) {
+          expect(Number.isInteger(covered.value)).toBe(true);
+          expect(covered.value).toBeGreaterThanOrEqual(amount);
+          expect((BigInt(covered.value) * 100n) % lotTicks).toBe(0n);
+        }
+      }
+    }
+    const unsafe = quantityForShortfall(
+      { value: 9007199254740983, unit: "CASE" },
+      noConversion,
+      product({ allowedLotSize: 1.25, perSalesUnit: null }),
+    );
+    expect(unsafe?.value).not.toBe(9007199254740982);
+    expect(floorToLot(-1, 0.1)).toBeNull();
+    expect(floorToLot(1e21, 1)).toBeNull();
+    expect(floorToLot(1, 1e-20)).toBeNull();
+    expect(stockCovers(-1, 1, 0.1)).toBe(false);
+    expect(
+      quantityForShortfall({ value: -1, unit: "CASE" }, noConversion, noConversion),
+    ).toBeNull();
+    expect(
+      quantityForShortfall({ value: 1e21, unit: "CASE" }, noConversion, noConversion),
+    ).toBeNull();
+    expect(
+      quantityForShortfall(
+        { value: 1, unit: "CASE" },
+        noConversion,
+        product({ allowedLotSize: 1e-20, perSalesUnit: null }),
+      ),
+    ).toBeNull();
+  });
+
+  test("large fractional conversion uses known scaled physical amounts", () => {
+    const source = product();
+    for (const lotTicks of [1n, 10n, 125n]) {
+      const lot = Number(lotTicks) / 100;
+      const target = product({
+        salesUnit: "PACK",
+        allowedLotSize: lot,
+        perSalesUnit: { value: 0.25, unit: "LTR" },
+      });
+      for (const count of [11191318n, 600000000000n]) {
+        const quantityTicks = count * lotTicks;
+        const expected = Number(quantityTicks) / 100;
+        const shortfall = Number(quantityTicks * 25n) / 10000;
+        expect(quantityForShortfall({ value: shortfall, unit: "LTR" }, source, target)).toEqual({
+          value: expected,
+          unit: "PACK",
+        });
+      }
+    }
+  });
+
   test("composes decimal stock planning and substitution against integer lot arithmetic", () => {
     const original = product({ allowedLotSize: 0.1, perSalesUnit: { value: 1, unit: "LTR" } });
     const substitute = product({ perSalesUnit: { value: 0.1, unit: "LTR" } });

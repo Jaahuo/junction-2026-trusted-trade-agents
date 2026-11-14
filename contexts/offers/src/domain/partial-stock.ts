@@ -9,41 +9,24 @@ import type {
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import { checkQuantity } from "./offer-rules.ts";
+import { lotCount, lotProduct } from "./lot-arithmetic.ts";
 
 const safe = (value: number): boolean =>
   Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
 const positive = (value: number): boolean => safe(value) && value > 0;
 
-// Cap noise correction so large counts cannot erase a fractional lot.
-function normalizeLots(lots: number): number {
-  const nearest = Math.round(lots);
-  const tolerance = Math.min(1e-9, 4 * Number.EPSILON * Math.max(1, lots));
-  return (nearest > 0 || lots === 0) && Math.abs(lots - nearest) <= tolerance ? nearest : lots;
-}
-
 export function stockCovers(available: number, required: number, lotSize: number): boolean {
   if (!safe(available) || available < 0 || !safe(required) || required < 0 || !positive(lotSize))
     return false;
-  const availableLots = available / lotSize;
-  const requiredLots = required / lotSize;
-  if (!safe(availableLots) || !safe(requiredLots)) return false;
-  const availableCount = Math.floor(normalizeLots(availableLots));
-  const requiredCount = Math.ceil(normalizeLots(requiredLots));
-  return (
-    Number.isSafeInteger(availableCount) &&
-    Number.isSafeInteger(requiredCount) &&
-    availableCount >= requiredCount
-  );
+  const availableCount = lotCount(available, [lotSize], "floor");
+  const requiredCount = lotCount(required, [lotSize], "ceil");
+  return availableCount !== null && requiredCount !== null && availableCount >= requiredCount;
 }
 
 export function floorToLot(amount: number, lotSize: number): number | null {
   if (!safe(amount) || amount < 0 || !positive(lotSize)) return null;
-  const lots = amount / lotSize;
-  if (!safe(lots)) return null;
-  const count = Math.floor(normalizeLots(lots));
-  if (!Number.isSafeInteger(count)) return null;
-  const result = count * lotSize;
-  return safe(result) ? result : null;
+  const count = lotCount(amount, [lotSize], "floor");
+  return count === null ? null : lotProduct(count, [lotSize]);
 }
 
 export function planOriginalQuantity(
@@ -56,27 +39,28 @@ export function planOriginalQuantity(
 > {
   if (checkQuantity(requested, product) !== null || !safe(requested.value))
     return err("INVALID_QUANTITY");
-  const requestedCount = normalizeLots(requested.value / product.allowedLotSize);
-  if (!Number.isSafeInteger(requestedCount) || requestedCount < 1) return err("INVALID_QUANTITY");
+  if (!positive(product.allowedLotSize)) return err("INVALID_QUANTITY");
+  const requestedCount = lotCount(requested.value, [product.allowedLotSize], "whole");
+  if (requestedCount === null || requestedCount < 1n) return err("INVALID_QUANTITY");
   if (stock.stock !== "confirmed") return ok({ quantity: requested, shortfall: null });
   if (!safe(stock.amount) || stock.amount < 0) return err("INVALID_QUANTITY");
-  const availableLots = stock.amount / product.allowedLotSize;
-  if (!safe(availableLots)) return err("INVALID_QUANTITY");
-  const availableCount = Math.floor(normalizeLots(availableLots));
-  if (!Number.isSafeInteger(availableCount)) return err("INVALID_QUANTITY");
-  if (availableCount <= 0) return err("INSUFFICIENT_STOCK");
+  const availableCount = lotCount(stock.amount, [product.allowedLotSize], "floor");
+  if (availableCount === null) return err("INVALID_QUANTITY");
+  if (availableCount <= 0n) return err("INSUFFICIENT_STOCK");
   if (availableCount >= requestedCount) return ok({ quantity: requested, shortfall: null });
-  const available = availableCount * product.allowedLotSize;
-  const missing = (requestedCount - availableCount) * product.allowedLotSize;
-  if (!safe(available)) return err("INVALID_QUANTITY");
+  const available = lotProduct(availableCount, [product.allowedLotSize]);
+  if (available === null) return err("INVALID_QUANTITY");
   const conversion = product.perSalesUnit;
   if (
     conversion !== null &&
     (!positive(conversion.value) || (conversion.unit !== "LTR" && conversion.unit !== "KGM"))
   )
     return err("INVALID_QUANTITY");
-  const value = missing * (conversion?.value ?? 1);
-  if (!positive(value)) return err("INVALID_QUANTITY");
+  const value = lotProduct(requestedCount - availableCount, [
+    product.allowedLotSize,
+    conversion?.value ?? 1,
+  ]);
+  if (value === null || !positive(value)) return err("INVALID_QUANTITY");
   return ok({
     quantity: { value: available, unit: requested.unit },
     shortfall: { value, unit: conversion?.unit ?? requested.unit },
@@ -89,11 +73,10 @@ export function quantityForShortfall(
   substitute: ProductFacts,
 ): Quantity | null {
   if (!positive(shortfall.value) || !positive(substitute.allowedLotSize)) return null;
-  let units: number;
+  let conversion = 1;
   if (original.perSalesUnit === null) {
     if (shortfall.unit !== original.salesUnit || substitute.salesUnit !== original.salesUnit)
       return null;
-    units = shortfall.value;
   } else {
     const source = original.perSalesUnit;
     const target = substitute.perSalesUnit;
@@ -106,14 +89,12 @@ export function quantityForShortfall(
       !positive(target.value)
     )
       return null;
-    units = shortfall.value / target.value;
+    conversion = target.value;
   }
-  const lots = units / substitute.allowedLotSize;
-  if (!positive(units) || !positive(lots)) return null;
-  const count = Math.ceil(normalizeLots(lots));
-  if (!Number.isSafeInteger(count)) return null;
-  const value = count * substitute.allowedLotSize;
-  if (!positive(value)) return null;
+  const count = lotCount(shortfall.value, [conversion, substitute.allowedLotSize], "ceil");
+  if (count === null) return null;
+  const value = lotProduct(count, [substitute.allowedLotSize]);
+  if (value === null || !positive(value)) return null;
   return { value, unit: substitute.salesUnit };
 }
 

@@ -329,6 +329,54 @@ describe("getOffers", () => {
     }
   });
 
+  test("large decimal lot requests distinguish full stock from a one-lot shortfall", async () => {
+    const sub = "prod_test_large_decimal_sub";
+    for (const lotTicks of [1n, 10n, 125n]) {
+      const lot = Number(lotTicks) / 100;
+      for (const count of [11191318n, 600000000000n]) {
+        const requested = Number(count * lotTicks) / 100;
+        const available = Number((count - 1n) * lotTicks) / 100;
+        for (const full of [true, false]) {
+          const setup = fakeOffersDeps({
+            products: [
+              fakeProduct(OAT, {
+                allowedLotSize: lot,
+                perSalesUnit: { value: 0.25, unit: "LTR" },
+                substitutes: [sub],
+              }),
+              fakeProduct(sub, {
+                allowedLotSize: lot,
+                perSalesUnit: { value: 0.25, unit: "LTR" },
+              }),
+            ],
+            live: {
+              ...quoted(OAT, { amount: full ? requested : available, stock: "confirmed" }),
+              ...quoted(sub, { amount: lot, stock: "confirmed" }),
+            },
+          });
+          const result = valueOf(
+            await getOffers(setup.deps, principal, request({ lines: [line(OAT, requested)] })),
+          );
+          const original = result.offers.find((offer) => offer.claims.productId === OAT);
+          const substitutes = result.offers.filter((offer) => offer.claims.replaces === OAT);
+          expect(original?.claims.quantity.value).toBe(full ? requested : available);
+          if (full) {
+            expect(original?.claims.shortfall).toBeNull();
+            expect(substitutes).toHaveLength(0);
+            expect(setup.signer.signed.map((entry) => entry.claims.productId)).toEqual([OAT]);
+          } else {
+            expect(original?.claims.shortfall?.value).toBeCloseTo(
+              Number(lotTicks * 25n) / 10000,
+              6,
+            );
+            expect(substitutes).toHaveLength(1);
+            expect(substitutes[0]?.claims.quantity).toEqual({ value: lot, unit: "CT" });
+          }
+        }
+      }
+    }
+  });
+
   test("shared substitutes are looked up once but ranked and signed for each requested occurrence", async () => {
     const sub = "prod_test_sub";
     const perSalesUnit = { value: 1, unit: "LTR" };

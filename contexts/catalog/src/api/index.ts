@@ -22,6 +22,8 @@ const envelope = <C extends ErrorCode>(code: C, message: string) => ({ error: { 
 const MESSAGES: Record<SearchError, string> = {
   EMPTY_TERMS: "terms: give at least one non-empty search term.",
   INVALID_QUANTITY: `quantity.value: must be above 0 and at most ${MAX_QUANTITY}.`,
+  UNSUPPORTED_SOFT_ATTRIBUTE:
+    "soft.attribute: supported attributes are countryOfOrigin and category.",
   UPSTREAM_FAILED: "The current mandate could not be read.",
   CATALOG_UNAVAILABLE: "The product index could not be loaded.",
 };
@@ -39,7 +41,9 @@ export const createApi = (deps: CatalogDeps = catalogAdapters()) =>
         const result = await searchProducts(deps, body);
         if (result.ok) return result.value;
         const message = MESSAGES[result.error];
-        return result.error === "EMPTY_TERMS" || result.error === "INVALID_QUANTITY"
+        return result.error === "EMPTY_TERMS" ||
+          result.error === "INVALID_QUANTITY" ||
+          result.error === "UNSUPPORTED_SOFT_ATTRIBUTE"
           ? status(400, envelope("BAD_REQUEST", message))
           : status(502, envelope("UPSTREAM_FAILED", message));
       },

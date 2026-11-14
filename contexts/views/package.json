@@ -12,6 +12,8 @@
     "@ctx/mandates": "workspace:*",
     "@ctx/orders": "workspace:*",
     "@elysia/eden": "catalog:",
+    "@fontsource/barlow-condensed": "catalog:",
+    "@fontsource/nunito": "catalog:",
     "@modelcontextprotocol/ext-apps": "catalog:",
     "elysia": "catalog:",
     "lit": "catalog:",

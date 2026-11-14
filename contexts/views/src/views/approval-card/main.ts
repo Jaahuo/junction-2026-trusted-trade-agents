@@ -1,6 +1,6 @@
 import "../view.css";
 import { mountView } from "../../shared/view-element.ts";
-import { defineApprovalCard } from "./approval-card.ts";
+import { defineApprovalView } from "./approval-view.ts";
 
-defineApprovalCard();
-mountView(document.createElement("tt-approval-card"));
+defineApprovalView();
+mountView(document.createElement("tt-approval-view"));

@@ -9,7 +9,11 @@ const tokens = css`
     --color-text-brand: #005670;
     --color-heading: #005670;
     --color-link: #005670;
-    --color-button: #007fb0;
+    --color-border-brand: #005670;
+    --color-button: #c0e021;
+    --color-button-text: #003747;
+    --color-light-purple-aimo: #eee8f5;
+    --color-yellow-aimo: #fddb32;
     --color-text: #23282d;
     --color-text-secondary: #555759;
     --color-text-on-brand: #ffffff;
@@ -40,7 +44,9 @@ const tokens = css`
     --border-radius-lg: 10px;
     --radius-full: 999px;
     --shadow-sm: 0 1px 3px 0 rgb(15 23 41 / 0.1), 0 1px 2px 0 rgb(15 23 41 / 0.06);
-    --font-family: Inter, system-ui, sans-serif;
+    /* The fonts are embedded by shared/view-element.ts (@fontsource, latin subset). */
+    --font-family-sans: Nunito, system-ui, sans-serif;
+    --font-family-condensed: "Barlow Condensed", "Arial Narrow", sans-serif;
   }
 `;
 
@@ -50,7 +56,7 @@ export const base = css`
   :host {
     display: block;
     color: var(--color-text);
-    font-family: var(--font-family);
+    font-family: var(--font-family-sans);
     font-size: var(--font-size-sm);
     line-height: 1.28;
   }
@@ -59,11 +65,19 @@ export const base = css`
   }
   h2,
   h3,
+  h4,
   p,
   ul,
   dl,
   dd {
     margin: 0;
+  }
+  /* Headings take their size from the type classes, not the browser's 1.5em default. */
+  h2,
+  h3,
+  h4 {
+    font-size: inherit;
+    font-weight: inherit;
   }
   .label-small {
     font-size: var(--font-size-2xs);
@@ -81,20 +95,23 @@ export const base = css`
   .secondary {
     color: var(--color-text-secondary);
   }
+  /* Label/Button: Barlow Condensed bold, 18/24, uppercase. */
   .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: var(--spacing-sm);
-    min-height: 2.25rem;
-    padding: var(--spacing-sm) var(--spacing-lg);
-    border: 1px solid transparent;
+    min-height: 2.75rem;
+    padding: var(--spacing-md) var(--spacing-xl);
+    border: 2px solid transparent;
     border-radius: var(--border-radius-md);
     background: none;
-    font: inherit;
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    line-height: 1.25;
+    font-family: var(--font-family-condensed);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 24px;
+    letter-spacing: 0.36px;
+    text-transform: uppercase;
     white-space: nowrap;
     cursor: pointer;
   }
@@ -102,21 +119,26 @@ export const base = css`
   .chip:focus-visible,
   .field:focus-visible,
   .toggle:focus-visible {
-    outline: 3px solid color-mix(in srgb, var(--color-button) 45%, transparent);
+    outline: 3px solid color-mix(in srgb, var(--color-border-brand) 45%, transparent);
     outline-offset: 2px;
   }
+  /* Outranks the variant colours; the card keeps a busy primary button lime. */
+  .btn:is(.primary, .secondary, .ghost):disabled,
   .btn:disabled {
+    border-color: transparent;
+    background: var(--color-bg-subtle);
+    color: var(--color-border-strong);
     cursor: not-allowed;
-    opacity: 0.5;
   }
   .btn.primary {
+    border-radius: 0;
     background: var(--color-button);
-    color: var(--color-text-on-brand);
+    color: var(--color-button-text);
   }
   .btn.secondary {
-    border-color: var(--color-border-strong);
+    border-color: var(--color-border-brand);
     background: var(--color-white);
-    color: var(--color-text);
+    color: var(--color-text-brand);
   }
   .btn.ghost {
     color: var(--color-text-brand);

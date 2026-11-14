@@ -25,7 +25,7 @@ describe("quantity conversion", () => {
     });
     const fine = { salesUnit: "ST", allowedLotSize: 0.01, perSalesUnit: { value: 3, unit: "LTR" } };
     expect(toOrderQuantity({ value: 1000, unit: "LTR" }, fine).orderQuantity).toEqual({
-      value: 333.34,
+      value: 334,
       unit: "ST",
     });
     const exact = {
@@ -58,7 +58,11 @@ describe("quantity conversion", () => {
         { value: 1000, unit: "LTR" },
         { salesUnit: "KI", allowedLotSize: 1, perSalesUnit: null },
       ),
-    ).toEqual({ orderQuantity: null, equals: null });
+    ).toEqual({
+      orderQuantity: null,
+      equals: null,
+      quantityReason: "Sales unit conversion is unavailable.",
+    });
   });
 
   test("a requested unit of another dimension gives null", () => {
@@ -66,6 +70,7 @@ describe("quantity conversion", () => {
     expect(toOrderQuantity({ value: 1000, unit: "LTR" }, product)).toEqual({
       orderQuantity: null,
       equals: null,
+      quantityReason: "Requested unit is incompatible with the sales unit.",
     });
   });
 
@@ -93,7 +98,7 @@ describe("quantity conversion", () => {
     });
     const noisy = { salesUnit: "ST", allowedLotSize: 0.1, perSalesUnit: { value: 1, unit: "LTR" } };
     expect(toOrderQuantity({ value: 0.3, unit: "LTR" }, noisy).orderQuantity).toEqual({
-      value: 0.3,
+      value: 1,
       unit: "ST",
     });
   });
@@ -116,6 +121,94 @@ describe("quantity conversion", () => {
     expect(toOrderQuantity({ value: 1e303, unit: "LTR" }, tiny)).toEqual({
       orderQuantity: null,
       equals: null,
+      quantityReason: "Quantity conversion exceeds supported precision.",
     });
+  });
+
+  test("count lots use the smallest compatible whole sales-unit step", () => {
+    const cases: [number, number, number][] = [
+      [0.01, 2.1, 3],
+      [0.4, 3, 4],
+      [1.5, 4, 6],
+      [2.5, 6, 10],
+    ];
+    for (const [lot, requested, expected] of cases) {
+      const product = {
+        salesUnit: "ST",
+        allowedLotSize: lot,
+        perSalesUnit: { value: 1, unit: "LTR" },
+      };
+      expect(toOrderQuantity({ value: requested, unit: "LTR" }, product).orderQuantity).toEqual({
+        value: expected,
+        unit: "ST",
+      });
+    }
+    for (const salesUnit of [
+      "BAG",
+      "BOT",
+      "CS",
+      "DSP",
+      "DZ",
+      "KAN",
+      "KI",
+      "KLE",
+      "KRT",
+      "NIP",
+      "PAK",
+      "PAL",
+      "PRK",
+      "RAS",
+      "SK",
+      "ST",
+      "H87",
+      "PCE",
+      "EA",
+      "PK",
+    ]) {
+      expect(
+        toOrderQuantity(
+          { value: 1.2, unit: salesUnit },
+          {
+            salesUnit,
+            allowedLotSize: 0.01,
+            perSalesUnit: { value: 1, unit: "LTR" },
+          },
+        ).orderQuantity,
+      ).toEqual({ value: 2, unit: salesUnit });
+    }
+  });
+
+  test("weight lots retain fractions and precise boundaries do not underfill", () => {
+    const product = {
+      salesUnit: "KGM",
+      allowedLotSize: 0.01,
+      perSalesUnit: { value: 1, unit: "KGM" },
+    };
+    expect(toOrderQuantity({ value: 1.234, unit: "KGM" }, product).orderQuantity).toEqual({
+      value: 1.24,
+      unit: "KGM",
+    });
+    const count = { salesUnit: "ST", allowedLotSize: 1, perSalesUnit: { value: 1, unit: "LTR" } };
+    expect(toOrderQuantity({ value: 1000000.000001, unit: "LTR" }, count).orderQuantity).toEqual({
+      value: 1000001,
+      unit: "ST",
+    });
+  });
+
+  test("invalid and unrepresentable conversions return a reason", () => {
+    const product = { salesUnit: "ST", allowedLotSize: 1, perSalesUnit: { value: 1, unit: "LTR" } };
+    for (const value of [0, -1, Infinity, NaN, Number.MAX_VALUE]) {
+      const result = toOrderQuantity({ value, unit: "LTR" }, product);
+      expect(result.orderQuantity).toBeNull();
+      expect(result.equals).toBeNull();
+      expect(result.quantityReason).toBeTruthy();
+    }
+    expect(perSalesUnit({ value: Infinity, unit: "LTR" }, 1)).toBeNull();
+    expect(perSalesUnit({ value: Number.MAX_VALUE, unit: "LTR" }, 2)).toBeNull();
+    expect(perSalesUnit({ value: 1, unit: "LTR" }, Infinity)).toBeNull();
+    expect(
+      toOrderQuantity({ value: 1, unit: "LTR" }, { ...product, allowedLotSize: 0 }).quantityReason,
+    ).toBeTruthy();
+    expect(toOrderQuantity({ value: 1, unit: "LTR" }, product).quantityReason).toBeUndefined();
   });
 });

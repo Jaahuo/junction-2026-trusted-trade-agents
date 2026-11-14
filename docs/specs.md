@@ -205,6 +205,7 @@ export interface SearchCandidate {
   match: Record<string, MatchState>;
   orderQuantity: Quantity | null;
   equals: Quantity | null;
+  quantityReason?: string;
   deliveryReliability: number | null;
   co2PerKg: number | null;
   substitutes: string[];
@@ -243,8 +244,10 @@ export const ALLERGEN_ATTRIBUTES = ["lactose"] as const; // hard constraint attr
 - Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the values in `HARD_CONSTRAINT_VALUES`. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
 - Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
-- A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, then soft matches, then reliability.
-- Quantity: consumer-unit volume × units per sales unit gives `perSalesUnit`; `GRM` converts to `KGM`; the order quantity rounds up to a multiple of `allowedLotSize`. No volume → `orderQuantity` and `equals` are null.
+- Search matches Unicode words after case and hyphen normalization. The whole words `maito` and `milk` are equivalent; no other translation aliases apply. Every word of a term must match one name in one language. Terms are alternatives. Compound words do not match their substrings. A negated occurrence, such as `milk-free` or `free from milk`, does not match `milk`; `lactose-free milk` does.
+- A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, soft matches, name relevance, successful quantity conversion, matched terms, reliability, then product id. A head noun ranks above a modifier; milk chocolate and milk powder rank below milk.
+- Supported search soft attributes are `countryOfOrigin` and `category`, compared case-insensitively. An unsupported request or merged standing soft attribute gives 400. Each matched preference adds a `confirmed` entry to candidate `match`, with key `soft:<attribute>:<encoded-preference>`; the preference is lowercase and URI-component encoded. These entries do not affect hard filtering or hard-confirmation counts. Facts and offer product matches remain hard-only.
+- Quantity uses structured sales-unit volume or consumer-unit volume times consumer units per sales unit. `GRM` converts to `KGM`. Count sales units round up to a whole number compatible with `allowedLotSize`; weight sales units retain fractional lots. No supported conversion gives null `orderQuantity` and `equals`, with a `quantityReason` explanation. Successful conversions omit `quantityReason`.
 - The index loads once per process; parallel first requests share one load.
 
 Data meaning:
@@ -253,7 +256,7 @@ Data meaning:
 - `co2PerKg`: the estimated average kg CO2-eq per kg for the product's group, not a measurement of the product; `null` when absent.
 - Nutrition and allergen data are often missing for fresh produce. A missing value is `unknown`, never "free from".
 
-Failure paths: empty `terms` → 400. An unsupported hard constraint attribute or value → 400 (SPEC-003).
+Failure paths: empty `terms` → 400. An unsupported hard constraint attribute or value → 400 (SPEC-003). An unsupported search soft attribute, including a standing preference, → 400.
 
 Verification: a request with an unsupported hard constraint attribute gets 400 on search, offers and mandate registration.
 
@@ -427,15 +430,19 @@ export type Evaluate = (input: { claims: OfferClaims[]; mandate: Mandate | null;
 
 `NOT_AUTHENTICATED` is not produced in the first build. `OFFER_INVALID` is a refusal (400), never a stored reason; it stays in the list because the PRD names it.
 
-Precedence for `place_order` (one list; the first matching step R1-R6 ends the request):
+Precedence for `place_order` (one list; the first matching step R1-R7 ends the request):
 
 - R1. The body fails its schema, or holds 0 or more than 20 tokens → `400 BAD_REQUEST`. No record.
 - R2. The idempotency key is known: same tokens → `200` with the stored order; other tokens → `409 CONFLICT`.
-- R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token → `400 OFFER_INVALID`.
+- R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
 - R4. Tokens differ in `customer` or `paymentTerms`, or the customer is not the principal's → `400 BAD_REQUEST`.
 - R5. A current mandate exists and a token's `agentId`, `mandateId` or `mandateVersion` differs from it → `409 STALE_OFFER` ("request new offers").
 - R6. `validate` reports a live amount below the summed quantity of a product → `409 STALE_OFFER` (live-amount rule, SPEC-006).
-- R3-R6 store no order and write one audit record `order_refused` with no order id and the code in `detail`.
+- R7. After validation and the transactional idempotency-key recheck, a selected offer ID already belongs to an order for this customer → `400 OFFER_INVALID`. This check runs under the customer's placement lock, before placement side effects.
+- A selected offer ID is permanently consumed by an order in any status, including `rejected` and `declined`. Existing stored orders also consume their selected offer IDs; no backfill is required.
+- Alternatives alone do not consume offer IDs. A previously consumed offer ID can appear as an alternative.
+- Future edit and requote operations must retain consumed IDs if they change the selected lines.
+- R3-R7 store no order and write one audit record `order_refused` with no order id and the code in `detail`.
 
 Quantities: the quantities of lines for the same product are summed. Every quantity rule (`QUANTITY_UNUSUAL`, `UNCONFIRMED_STOCK`) and every limit applies to the sum per product and to the whole order.
 
@@ -448,7 +455,7 @@ Then the order is stored with every reason collected:
 5. Result: any reject reason → `rejected`; else any approval reason → `pending_approval`; else `commitPlacement` (SPEC-010), which checks credit.
 
 - Invariant: an order with any hard-constraint match that is not `confirmed` is never placed automatically, except an `unknown` match under `allergenData.ifNoData: auto`.
-- Steps 1-5 are `evaluate`, a pure function. `precheck` runs R1, R3-R5 (same errors, but no `order_refused` record) and `evaluate`, and returns the decision and reasons. It never calls `commitPlacement`, writes nothing and does not check credit. Only `place_order` and approval call `commitPlacement`.
+- Steps 1-5 are `evaluate`, a pure function. `precheck` runs R1, R3-R5 (same errors, but no `order_refused` record) and `evaluate`, and returns the decision and reasons. It does not check historical offer consumption, so its result is advisory. It never calls `commitPlacement`, writes nothing and does not check credit. Only `place_order` and approval call `commitPlacement`.
 
 Verification: one rule test per reason; a test that all reasons are listed; one test per R step; a test that `precheck` leaves orders, credit and audit unchanged; a test that an offer whose hard-constraint match is `unknown` is never placed automatically unless the mandate allows it (`allergenData.ifNoData: auto`).
 
@@ -556,6 +563,27 @@ export interface PrecheckRequest {
 Failure paths: `validate` unreachable → 502 `UPSTREAM_FAILED`; on `place_order` no order is stored, on approval the order stays pending.
 
 Verification: parallel tests: 10 calls with one idempotency key; two orders that together exceed credit, on both entry paths (approve vs approve, approve vs automatic).
+
+### Peppol/UBL status mapping
+
+This table is a conceptual mapping, not an implemented integration. A [Peppol Order Response](https://docs.peppol.eu/poacc/upgrade-3/profiles/28-ordering/) is a seller's response to a buyer's order. The internal status instead records this application's approval and placement process. It does not establish that a seller received or responded to an order.
+
+The codes below are from the [Peppol subset of UN/CEFACT 4343 for UBL Order Response](https://docs.peppol.eu/poacc/upgrade-3/2025-Q4/codelist/UNCL4343-T76/). A code applies only when the corresponding seller response exists; an internal status alone cannot produce one.
+
+| Internal status or decision          | Potential Peppol response                                                       | Boundary                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `pending_approval`                   | No response inferred. `AB` means message acknowledgement, not acceptance.       | Internal approval does not prove seller receipt.                                                |
+| `awaiting_payment`                   | No response inferred. `AB` is possible only if the seller acknowledged receipt. | Waiting for payment is not seller acceptance.                                                   |
+| `placed`                             | `AP` only if the seller accepts the order.                                      | Internal placement does not prove seller acceptance.                                            |
+| `rejected`                           | `RE` only if the seller rejects the order.                                      | An internal rule, credit, or payment rejection is not a seller response.                        |
+| `declined` with `next: stop`         | No response inferred; `RE` requires seller rejection.                           | The approver rejected the proposal and chose to stop.                                           |
+| `declined` with `next: alternatives` | No response inferred; `RE` requires seller rejection.                           | The approver rejected the proposal and allowed alternatives; this is not a seller substitution. |
+
+`CA` means conditional acceptance. Peppol requires order lines for `CA`; see the [response code rules](https://docs.peppol.eu/poacc/upgrade-3/2025-Q4/syntax/OrderResponse/cbc-OrderResponseCode/). A seller substitution can use [`cac:SellerSubstitutedLineItem`](https://docs.peppol.eu/poacc/upgrade-3/2025-Q4/syntax/OrderResponse/cac-OrderLine/cac-SellerSubstitutedLineItem/). This application does not implement conditional seller responses or line response statuses. Its alternative offers do not represent a seller's substituted line.
+
+The [status and line schemas](../packages/contract/src/orders.ts#L6-L11) define the internal states and [order lines](../packages/contract/src/orders.ts#L40-L45). [Order creation](../contexts/orders/src/application/orders.ts#L167-L203) records alternatives and initial status. [Placement](../contexts/orders/src/application/commit-placement.ts#L1-L84) can reject or place an order. [Approval decisions](../contexts/orders/src/application/approvals.ts#L95-L123) record `stop` or `alternatives` on a decline; only approve and reject are implemented.
+
+The application has no UBL XML serializer or Peppol transport, and does not implement participant location numbers or certified Peppol interoperability. This mapping does not claim conformance or network connectivity.
 
 ## SPEC-011 Approval decisions and re-quote
 

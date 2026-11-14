@@ -90,6 +90,8 @@ const checkTokens = async (
   if (!alternativeLines.ok) return alternativeLines;
 
   const claims = [...lines.value, ...alternativeLines.value].map((line) => line.claims);
+  if (new Set(claims.map((claim) => claim.offerId)).size !== claims.length)
+    return err(refusal("OFFER_INVALID", "The request repeats an offer ID."));
   if (claims.some((claim) => claim.customer !== principal.customer))
     return err(refusal("BAD_REQUEST", "An offer was issued to another customer."));
   if (new Set(lines.value.map((line) => line.claims.paymentTerms)).size > 1)
@@ -270,10 +272,17 @@ export const placeOrder = async (
   const { evaluation } = evaluated;
   const order = buildOrder(principal, request, checked.value, evaluated, now);
 
-  return deps.store.withCustomerLock(principal.customer, async (tx: OrderTx) => {
+  const result = await deps.store.withCustomerLock(principal.customer, async (tx: OrderTx) => {
     // A parallel request with the same key may have stored its order while this one was checked.
     const stored = await tx.findByKey(principal.customer, request.idempotencyKey);
     if (stored !== null) return replayOrConflict(stored, request);
+    if (
+      await tx.hasUsedOffers(
+        principal.customer,
+        checked.value.lines.map((line) => line.offerId),
+      )
+    )
+      return err(refusal("OFFER_INVALID", "An offer has already been used in an order."));
     const final =
       evaluation.decision === "auto"
         ? await commitPlacement({
@@ -287,6 +296,9 @@ export const placeOrder = async (
     await tx.insert(final);
     return ok({ order: final, created: true });
   });
+  if (!result.ok && result.error.code === "OFFER_INVALID")
+    return refuse(deps.store, principal, result.error, now);
+  return result;
 };
 
 export const findOrder = (

@@ -6,7 +6,7 @@ import type {
   WholesalerCatalog,
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
-import { parseTerms } from "../domain/catalog.ts";
+import { isSupportedSoftAttribute, parseTerms } from "../domain/catalog.ts";
 import { type Constraints, mergeConstraints } from "../domain/match.ts";
 import { isValidQuantity } from "../domain/quantity.ts";
 
@@ -34,6 +34,7 @@ export interface CatalogDeps {
 export type SearchError =
   | "EMPTY_TERMS"
   | "INVALID_QUANTITY"
+  | "UNSUPPORTED_SOFT_ATTRIBUTE"
   | "UPSTREAM_FAILED"
   | "CATALOG_UNAVAILABLE";
 
@@ -56,12 +57,16 @@ export const searchProducts = async (
 ): Promise<Result<SearchResult, SearchError>> => {
   if (!parseTerms(request.terms).ok) return err("EMPTY_TERMS");
   if (!isValidQuantity(request.quantity)) return err("INVALID_QUANTITY");
+  if (request.soft.some(({ attribute }) => !isSupportedSoftAttribute(attribute)))
+    return err("UNSUPPORTED_SOFT_ATTRIBUTE");
   const mandate = await deps.mandates.current();
   if (!mandate.ok) return mandate;
   const constraints = mergeConstraints(
     { hard: request.hard, soft: request.soft },
     mandate.value?.standingConstraints ?? null,
   );
+  if (constraints.soft.some(({ attribute }) => !isSupportedSoftAttribute(attribute)))
+    return err("UNSUPPORTED_SOFT_ATTRIBUTE");
   const catalog = await deps.catalog();
   if (!catalog.ok) return catalog;
   return ok({

@@ -116,6 +116,21 @@ export function availabilityOmitReason(
   return null;
 }
 
+/**
+ * True when the product can arrive on or before the requested date and its order cut-off has not
+ * passed. Stock is not checked: a product with partial stock still gets an offer with a shortfall.
+ */
+export function isDeliverableBy(
+  availability: AvailabilityQuote | undefined,
+  deliverBy: string,
+  now: Date,
+): boolean {
+  if (availability === undefined || availabilityOmitReason(availability, 0) !== null) return false;
+  if (availability.cutoffAt !== null && new Date(availability.cutoffAt) <= now) return false;
+  // Both are YYYY-MM-DD, so string order is date order.
+  return availability.availableDate !== null && availability.availableDate <= deliverBy;
+}
+
 export function batchIds(ids: readonly string[], max = 1000): string[][] {
   if (!Number.isInteger(max) || max < 1) throw new RangeError("max must be a positive integer");
   const unique = [...new Set(ids)];

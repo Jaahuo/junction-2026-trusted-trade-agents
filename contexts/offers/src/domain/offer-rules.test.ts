@@ -6,6 +6,7 @@ import {
   checkQuantity,
   contradictedAttribute,
   expiredOmitReason,
+  isDeliverableBy,
   lineTotal,
   mergeConstraints,
   priceCacheExpiry,
@@ -101,6 +102,35 @@ describe("quantity", () => {
     expect(
       checkQuantity({ value: 0.3, unit: "KGM" }, { salesUnit: "KGM", allowedLotSize: 0.1 }),
     ).toBeNull();
+  });
+});
+
+const cutoffDeliverable = (cutoffAt: string) =>
+  isDeliverableBy(availability({ cutoffAt }), "2026-11-15", now);
+
+describe("isDeliverableBy", () => {
+  test("a delivery date on or before the requested date is deliverable, a later one is not", () => {
+    expect(isDeliverableBy(availability(), "2026-11-15", now)).toBe(true);
+    expect(isDeliverableBy(availability(), "2026-11-18", now)).toBe(true);
+    expect(isDeliverableBy(availability({ availableDate: "2026-11-16" }), "2026-11-15", now)).toBe(
+      false,
+    );
+  });
+
+  test("no quote, no delivery date and a sales block are not deliverable", () => {
+    expect(isDeliverableBy(undefined, "2026-11-15", now)).toBe(false);
+    expect(isDeliverableBy(availability({ availableDate: null }), "2026-11-15", now)).toBe(false);
+    expect(isDeliverableBy(availability({ salesBlocked: true }), "2026-11-15", now)).toBe(false);
+  });
+
+  test("a cut-off at or before now is not deliverable, a later one is", () => {
+    expect(cutoffDeliverable("2026-11-14T10:00:00Z")).toBe(false);
+    expect(cutoffDeliverable("2026-11-14T09:59:59Z")).toBe(false);
+    expect(cutoffDeliverable("2026-11-14T10:00:01Z")).toBe(true);
+  });
+
+  test("stock below any quantity stays deliverable: partial stock still gets an offer", () => {
+    expect(isDeliverableBy(availability({ amount: 0 }), "2026-11-15", now)).toBe(true);
   });
 });
 

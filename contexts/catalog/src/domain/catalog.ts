@@ -32,7 +32,7 @@ export interface CatalogProduct {
   substitutes: readonly string[];
 }
 
-const MAX_CANDIDATES = 20;
+export const MAX_CANDIDATES = 20;
 
 /** Unicode words are matched within one name, not as substrings of compounds. */
 const wordsOf = (text: string): string[] =>
@@ -159,7 +159,7 @@ const facts = (product: CatalogProduct, match: Record<string, MatchState>): Prod
   substitutes: [...product.substitutes],
 });
 
-/** A catalog over the slim index. `searchCatalog` expects the merged constraints and returns at most 20 candidates. */
+/** A catalog over the slim index. `searchCatalog` expects the merged constraints and returns at most `limit` candidates, 20 by default. */
 export const createCatalog = (products: readonly CatalogProduct[]): WholesalerCatalog => {
   const byId = new Map(products.map((product) => [product.productId, product]));
   const indexed = products.map((product) => ({
@@ -167,7 +167,7 @@ export const createCatalog = (products: readonly CatalogProduct[]): WholesalerCa
     lines: product.searchText.split(/\r?\n/).map(wordsOf),
   }));
   return {
-    searchCatalog: (request: SearchRequest): SearchCandidate[] => {
+    searchCatalog: (request: SearchRequest, limit = MAX_CANDIDATES): SearchCandidate[] => {
       const terms = parseTerms(request.terms);
       if (!terms.ok) return [];
       const ranked: Ranked[] = [];
@@ -192,7 +192,7 @@ export const createCatalog = (products: readonly CatalogProduct[]): WholesalerCa
       }
       return ranked
         .toSorted(byRank)
-        .slice(0, MAX_CANDIDATES)
+        .slice(0, limit)
         .map(({ product, match, quantity }) => {
           const candidate: SearchCandidate = {
             productId: product.productId,

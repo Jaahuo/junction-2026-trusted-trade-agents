@@ -45,6 +45,7 @@ export interface ChatHost {
   readonly maxTokens?: string | undefined;
   readonly recipePermission?: string | undefined;
   readonly mcpKey?: string | undefined;
+  readonly elevenLabsKey?: string | undefined;
 }
 
 /** Map the public host interface to the Python provisioner's environment. */
@@ -61,6 +62,7 @@ export function provisionEnv(host: ChatHost): Record<string, string> {
     OPENWEBUI_MAX_TOKENS: host.maxTokens || "16384",
     VALIO_AIMO_RECIPE_PERMISSION: host.recipePermission || "False",
     MCP_AGENT_KEY: host.mcpKey || "",
+    ELEVENLABS_API_KEY: host.elevenLabsKey || "",
   };
 }
 
@@ -76,6 +78,7 @@ export function localHost(env: Record<string, string>, mcpUrl: string): ChatHost
     maxTokens: env["OPENWEBUI_MAX_TOKENS"],
     recipePermission: env["VALIO_AIMO_RECIPE_PERMISSION"],
     mcpKey: env["MCP_AGENT_KEY"],
+    elevenLabsKey: env["ELEVENLABS_API_KEY"],
   };
 }
 

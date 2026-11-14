@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 
 from provision_mcp import configure as configure_mcp
+from provision_speech import configure as configure_speech
 
 BASE = os.environ.get("WEBUI_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 FILES = Path(os.environ.get("COMPANION_FILES", Path(__file__).resolve().parents[1]))
@@ -22,13 +23,13 @@ def system_prompt(persona):
     return references + "\n\n" + (FILES / "agent" / f"{persona}.md").read_text() + "\n\n" + (FILES / "agent" / "purchasing.md").read_text()
 
 
-def request(path, payload=None, token=None, *, allow_missing=False):
+def request(path, payload=None, token=None, *, allow_missing=False, timeout=60):
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = None if payload is None else json.dumps(payload).encode()
     try:
-        with urllib.request.urlopen(urllib.request.Request(BASE + path, data=body, headers=headers), timeout=60) as response:
+        with urllib.request.urlopen(urllib.request.Request(BASE + path, data=body, headers=headers), timeout=timeout) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
         if allow_missing and error.code == 404:
@@ -70,6 +71,7 @@ def main():
         "ENABLE_TAGS_GENERATION": False,
     })
     request("/api/v1/tasks/config/update", tasks, token)
+    configure_speech(request, token)
 
     request("/api/v1/retrieval/config/update", {"web": {
         "ENABLE_WEB_SEARCH": True,

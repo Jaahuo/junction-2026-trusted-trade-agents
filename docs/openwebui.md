@@ -16,6 +16,7 @@ Inference sends chat content to Verda and can incur charges.
 2. Set `WEBUI_SECRET_KEY`, `WEBUI_ADMIN_PASSWORD` and `OPENAI_API_KEY`.
    Generate the first two with `openssl rand -hex 32` and `openssl rand -base64 24`.
    Keep this file private and ignored by Git.
+   To read replies aloud, also set `ELEVENLABS_API_KEY`; see [Voice](#voice).
 3. Start this worktree's API with `bun run dev`.
 4. Run `bun scripts/openwebui.ts up`. It builds the custom chat image from the repository root with `hosts/openwebui/Dockerfile`.
 5. Open the printed loopback URL. Sign in with the operator credentials from the file.
@@ -79,7 +80,20 @@ Recipe arithmetic is deterministic and has no purchasing or network access.
 Valio Aimo recipe fetching stays off unless `VALIO_AIMO_RECIPE_PERMISSION=True` confirms usage permission.
 A permission refusal must not be bypassed through public web tools.
 Web content is untrusted reference material. Do not send private kitchen details to search engines.
-Speech provider configuration remains optional; no paid TTS service is enabled by the port.
+
+## Voice
+
+Speech to text stays local with Whisper. Microphone audio does not leave the host.
+Text to speech uses ElevenLabs only when `ELEVENLABS_API_KEY` is set.
+Then provisioning selects the model `eleven_multilingual_v2` and the premade voice Sarah (`EXAVITQu4vr4xnSDxMaL`).
+Free ElevenLabs plans cannot use voice-library voices through the API, so the voice is a premade one.
+ElevenLabs receives the reply text and can incur charges.
+
+Open WebUI keeps audio settings in its database, and an environment variable does not change an existing volume.
+For that reason, each provisioning run writes the text-to-speech settings through the admin API.
+It writes nothing when the stored settings already match.
+Without the key, provisioning does not change the audio settings.
+A removed key does not clear a stored ElevenLabs setting. Change it in Admin Settings > Audio.
 
 ## Differences
 
@@ -92,7 +106,7 @@ Speech provider configuration remains optional; no paid TTS service is enabled b
 | Recipe arithmetic | None                     | Bound only when recipe fetching is permitted | Always available                             |
 | Recipe fetching   | None                     | Permission-gated                             | Permission-gated; off by default             |
 | Local login       | Off                      | On                                           | On; existing default account migration       |
-| Buyer voice       | Optional                 | Disabled by permissions                      | Available; provider setup remains separate   |
+| Buyer voice       | Optional                 | Disabled by permissions                      | Available; ElevenLabs with its key           |
 | Deployment        | Local and hosted         | Local Compose                                | Local Compose and hosted chat image          |
 
 The port includes the workspace's two local commits through `b834c18`.

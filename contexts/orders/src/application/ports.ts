@@ -47,8 +47,9 @@ export interface OrderTx {
   hasUsedOffers(customer: string, offerIds: readonly string[]): Promise<boolean>;
   insert(order: StoredOrder): Promise<void>;
   /**
-   * Writes a decided order over the pending one it was read as. False when the stored order is no
-   * longer pending at `proposalVersion`, so only one decision wins.
+   * Writes the next state of a pending order (a decision, or the approver's next proposal) over the
+   * one read at `proposalVersion`. False when the stored order is no longer pending at
+   * `proposalVersion`, so only one write wins.
    */
   decide(order: StoredOrder, proposalVersion: number): Promise<boolean>;
   /** Gross total of the customer's placed invoice orders, EUR. */

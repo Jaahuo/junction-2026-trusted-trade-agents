@@ -314,5 +314,5 @@ export const findOrder = (
   orderId: string,
 ): Promise<StoredOrder | null> => store.find(principal.customer, orderId);
 
-/** The token checks, the rule checks and their audit, for the approver's edits (SPEC-011). */
-export { auditOf, checkTokens, evaluateChecked };
+// Shared with approvals: edit and pick_alternative run these checks again (SPEC-011).
+export { auditOf, checkTokens, evaluateChecked, type Evaluated };

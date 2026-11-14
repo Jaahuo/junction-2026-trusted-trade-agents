@@ -15,7 +15,7 @@ import {
 import { err, ok, type Result } from "@app/kernel";
 import { grossTotal, netTotal } from "../domain/evaluate.ts";
 import { commitPlacement } from "./commit-placement.ts";
-import { auditOf, checkTokens, evaluateChecked, type OrderDeps } from "./orders.ts";
+import { auditOf, checkTokens, type Evaluated, evaluateChecked, type OrderDeps } from "./orders.ts";
 import type { OrderTx, RequotePort, StoredOrder } from "./ports.ts";
 
 type DecisionErrorCode = Extract<
@@ -42,9 +42,16 @@ export interface DecisionError {
 const failure = (code: DecisionErrorCode, message: string): Result<never, DecisionError> =>
   err({ code, message });
 
-/** Thrown inside the placement transaction when the guarded write finds the order changed, so
- * everything written before it (history rows, the payment step) rolls back. */
-class ChangedMeanwhile extends Error {}
+/**
+ * Thrown inside the placement transaction when the guarded write finds the order changed, so the
+ * rows written before it (history, audit) roll back. A payment authorization already made at the
+ * payment provider is not undone by the rollback.
+ */
+class ChangedMeanwhile extends Error {
+  constructor(readonly orderId: string) {
+    super("The order changed under the customer's lock.");
+  }
+}
 
 /** Runs `work` under the customer's lock; a ChangedMeanwhile rolls it back and answers 409. */
 const underLock = async (
@@ -55,17 +62,21 @@ const underLock = async (
   try {
     return await deps.store.withCustomerLock(customer, work);
   } catch (error) {
-    if (error instanceof ChangedMeanwhile) return changed();
-    throw error;
+    if (!(error instanceof ChangedMeanwhile)) throw error;
+    // Every writer of a pending order holds this lock, so another writer changed it without it.
+    console.error("A pending order changed under the customer's lock.", {
+      orderId: error.orderId,
+    });
+    return changed();
   }
 };
 
-/** The guarded write: when the order is no longer pending at `proposalVersion`, roll back. */
-const write = async (tx: OrderTx, order: StoredOrder, proposalVersion: number) => {
-  if (!(await tx.decide(order, proposalVersion))) throw new ChangedMeanwhile();
+/** The guarded write or a rollback: when the order is no longer pending at `proposalVersion`. */
+const guardedWrite = async (tx: OrderTx, order: StoredOrder, proposalVersion: number) => {
+  if (!(await tx.decide(order, proposalVersion))) throw new ChangedMeanwhile(order.orderId);
 };
 
-/** A fault on the server's side (offers, signing keys), logged with the order it hit. */
+/** A fault on the offers side, logged with the order it hit. */
 const upstream = (orderId: string, message: string, detail: object = {}) => {
   console.error(message, { orderId, ...detail });
   return failure("UPSTREAM_FAILED", "The offers could not be re-quoted.");
@@ -158,9 +169,10 @@ const reject = (
 
 type Revision = Extract<DecideApprovalRequest, { decision: "edit" | "pick_alternative" }>;
 type Changes = Extract<Revision, { decision: "edit" }>["changes"];
-type Evaluated = Awaited<ReturnType<typeof evaluateChecked>>;
-
-/** One line of a proposed revision: the line it takes the place of (null when added), and its token. */
+/**
+ * One line of a proposed revision and its token: `previous` is the line it takes the place of, the
+ * line itself when it is kept, or null when it is added.
+ */
 interface Proposed {
   previous: OrderLine | null;
   token: string;
@@ -179,49 +191,44 @@ const changed = (): Result<never, DecisionError> =>
   failure("CONFLICT", "The order was decided or changed; reload it.");
 
 /**
- * What an omitted line of a re-quote means. `refused`: the change asks for something the product
- * cannot be offered at. `unavailable`: the product cannot be supplied as asked now. `fault`: every
- * product comes back NO_PRICE when offers has no live price source.
+ * A refusal that comes from the approver's change: the product cannot be offered at that amount or
+ * against a hard constraint. Every other omit reason (no stock, sales blocked, no price or delivery
+ * date, a product the catalog dropped) means the line cannot be supplied as it stands now. Offers
+ * answers 502 itself when it has no live price source, so NO_PRICE here is about the product.
  */
-const OMIT_OUTCOME: Record<OmitReason, "refused" | "unavailable" | "fault"> = {
-  INVALID_QUANTITY: "refused",
-  CONSTRAINT_CONTRADICTED: "refused",
-  UNKNOWN_PRODUCT: "refused",
-  SALES_BLOCKED: "unavailable",
-  INSUFFICIENT_STOCK: "unavailable",
-  NO_DELIVERY_DATE: "unavailable",
-  NO_PRICE: "fault",
-};
+const REFUSES_CHANGE: ReadonlySet<OmitReason> = new Set([
+  "INVALID_QUANTITY",
+  "CONSTRAINT_CONTRADICTED",
+]);
 
-/** The answer for a line the re-quote did not offer again, by the reason offers gave. */
+/**
+ * The answer for a line the re-quote did not offer again: 400 when the approver's change on that
+ * product is what offers refused, otherwise 409 with the reason, so the approver changes or rejects.
+ * A line offers neither offered nor omitted is a fault on the offers side.
+ */
 const notOffered = (
   order: StoredOrder,
   line: OrderLine,
   omitted: OffersResult["omitted"],
   changes: Changes,
 ): Result<never, DecisionError> => {
-  const { productId, product } = line.claims;
+  const { productId, product, replaces } = line.claims;
   const entry = omitted.find((candidate) => candidate.productId === productId);
   if (entry === undefined)
     return upstream(order.orderId, "The re-quote neither offered nor omitted a line.", {
       productId,
     });
-  const outcome = OMIT_OUTCOME[entry.reason];
-  if (outcome === "refused" && changes.some((change) => change.productId === productId))
+  if (REFUSES_CHANGE.has(entry.reason) && changes.some((change) => change.productId === productId))
     return failure(
       "BAD_REQUEST",
       `${product.name} cannot be offered with that change: ${entry.detail}.`,
     );
-  if (outcome === "unavailable")
-    return failure(
-      "CONFLICT",
-      `${product.name} cannot be offered again: ${entry.detail}. Change it or reject the order.`,
-    );
-  return upstream(order.orderId, "The re-quote omitted a line it should have offered.", {
-    productId,
-    reason: entry.reason,
-    detail: entry.detail,
-  });
+  // A substitute cannot be edited into stock; the approver's way out is a new set of offers.
+  const advice =
+    replaces === null
+      ? "Change it or reject the order."
+      : "Reject the order and ask the agent for new offers.";
+  return failure("CONFLICT", `${product.name} cannot be offered again: ${entry.detail}. ${advice}`);
 };
 
 /** The approver's changes, refused before offers is asked when they cannot apply to this order. */
@@ -284,14 +291,9 @@ const edited = async (
       return upstream(order.orderId, "The re-quote returned an offer this order already used.", {
         offerId: offer.claims.offerId,
       });
-    const asked = changes.find((change) => change.productId === line.claims.productId)?.quantity;
-    if (
-      asked !== undefined &&
-      offer.claims.shortfall === null &&
-      asked.unit === offer.claims.quantity.unit &&
-      asked.value !== offer.claims.quantity.value
-    )
-      return upstream(order.orderId, "The re-quote did not apply the changed amount.", {
+    const notApplied = unapplied(line, offer.claims, changes);
+    if (notApplied !== null)
+      return upstream(order.orderId, `The re-quote did not apply ${notApplied}.`, {
         productId: line.claims.productId,
       });
     fresh.splice(index, 1);
@@ -302,6 +304,19 @@ const edited = async (
       count: fresh.length,
     });
   return ok(proposed);
+};
+
+/**
+ * What the re-quote of `line` failed to apply, or null: its amount (the changed one, or the line's
+ * own when unchanged; a shortfall may lower it) and its requested date.
+ */
+const unapplied = (line: OrderLine, fresh: OfferClaims, changes: Changes): string | null => {
+  const change = changes.find((entry) => entry.productId === line.claims.productId);
+  const asked = change?.quantity ?? line.claims.quantity;
+  if (fresh.quantity.unit !== asked.unit) return "the unit of the amount";
+  if (fresh.shortfall === null && fresh.quantity.value !== asked.value) return "the amount";
+  const date = change?.deliverBy ?? line.claims.requestedDate;
+  return fresh.requestedDate === date ? null : "the requested date";
 };
 
 /**
@@ -340,23 +355,34 @@ const pairsOf = (proposed: Proposed[], lines: OrderLine[]): Pair[] => {
   });
 };
 
-const cents = (value: number): number => Math.round(value * 100);
-const unitGross = (claims: OfferClaims): number =>
-  claims.unitPrice.net * (1 + claims.unitPrice.vatRate / 100);
+/** Net price of one sales unit, deposits included, at full precision. */
+const unitCost = (claims: OfferClaims): number =>
+  claims.unitPrice.net + claims.deposits / claims.quantity.value;
 
-/** The products whose re-quoted unit price is higher than the one the approver saw. */
+const samePack = (previous: OfferClaims, current: OfferClaims): boolean => {
+  const before = previous.product.perSalesUnit;
+  const after = current.product.perSalesUnit;
+  return before === null || after === null
+    ? before === after
+    : before.value === after.value && before.unit === after.unit;
+};
+
+/**
+ * The products whose re-quoted price is above the one the approver saw: a higher net unit price
+ * with deposits, or a different pack size, which changes what one unit buys.
+ */
 const pricedUp = (pairs: Pair[]): string[] =>
   pairs.flatMap(({ previous, current }) =>
     previous !== null &&
-    previous.claims.productId === current.claims.productId &&
-    cents(unitGross(current.claims)) > cents(unitGross(previous.claims))
+    (unitCost(current.claims) > unitCost(previous.claims) ||
+      !samePack(previous.claims, current.claims))
       ? [current.claims.productId]
       : [],
   );
 
 /**
- * A higher price than the approver saw adds PRICE_CHANGED (SPEC-011), so the order waits for them
- * instead of being placed at a price nobody approved.
+ * A higher price than the approver saw adds PRICE_CHANGED, as SPEC-011 does for a re-quote at
+ * approval, so the order waits for them instead of being placed at a price nobody approved.
  */
 const withPriceChanged = ({ evaluation, byProduct }: Evaluated, products: string[]): Evaluated => {
   if (products.length === 0) return { evaluation, byProduct };
@@ -364,8 +390,10 @@ const withPriceChanged = ({ evaluation, byProduct }: Evaluated, products: string
     ? evaluation.reasons
     : [...evaluation.reasons, "PRICE_CHANGED"];
   const marked = new Map(byProduct);
-  for (const productId of products)
-    marked.set(productId, [...(marked.get(productId) ?? []), "PRICE_CHANGED"]);
+  for (const productId of products) {
+    const current = marked.get(productId) ?? [];
+    if (!current.includes("PRICE_CHANGED")) marked.set(productId, [...current, "PRICE_CHANGED"]);
+  }
   return {
     evaluation: {
       decision: evaluation.decision === "rejected" ? "rejected" : "needs_approval",
@@ -389,7 +417,7 @@ const change = (previous: OfferClaims, current: OfferClaims): string => {
       ? ""
       : `, delivery ${previous.deliveryDate} → ${current.deliveryDate}`;
   const price =
-    cents(previous.unitPrice.net) === cents(current.unitPrice.net)
+    previous.unitPrice.net === current.unitPrice.net
       ? ""
       : `, unit price ${previous.unitPrice.net} → ${current.unitPrice.net} EUR net`;
   return `${name}: ${amount}${date}${price}`;
@@ -406,12 +434,12 @@ const revision = (input: {
   request: Revision;
   pairs: Pair[];
   lines: OrderLine[];
-  alternatives: OrderLine[];
+  alternatives: Kept;
   mandate: Mandate | null;
   evaluated: Evaluated;
   now: Date;
 }): StoredOrder => {
-  const { principal, order, request, pairs, lines, alternatives, mandate, evaluated, now } = input;
+  const { principal, order, request, pairs, lines, mandate, evaluated, now } = input;
   const { evaluation, byProduct } = evaluated;
   const at = now.toISOString();
   const requotes: Requote[] = pairs.flatMap(({ previous, current }) =>
@@ -427,6 +455,18 @@ const revision = (input: {
           : change(previous.claims, current.claims),
     }),
   );
+  const { kept, dropped } = input.alternatives;
+  const drops: AuditEvent[] =
+    dropped === 0
+      ? []
+      : [
+          {
+            at,
+            actor: "server",
+            event: "edited",
+            detail: `${dropped} alternative${dropped === 1 ? "" : "s"} dropped: expired or made under another mandate`,
+          },
+        ];
   const checks = auditOf(evaluation, byProduct, at).filter(
     (event) => event.event !== "order_requested",
   );
@@ -435,10 +475,11 @@ const revision = (input: {
     ...order,
     offerIds: lines.map((line) => line.offerId),
     lines,
-    alternatives,
+    alternatives: kept,
     mandateId: mandate?.mandateId ?? null,
     mandateVersion: mandate?.version ?? null,
-    // With no reason left the order goes through commitPlacement: placed, or rejected on credit.
+    // `auto` is stored as pending here; revise then sends it through commitPlacement, which places
+    // it or rejects it on credit or payment.
     status: evaluation.decision === "rejected" ? "rejected" : "pending_approval",
     reasons: evaluation.reasons,
     proposalVersion: order.proposalVersion + 1,
@@ -448,28 +489,30 @@ const revision = (input: {
         ? null
         : { action: request.decision, next: null, note: null, by: principal.accountId, at },
     requotes: [...order.requotes, ...requotes],
-    audit: [...order.audit, ...edits, ...checks],
+    audit: [...order.audit, ...edits, ...drops, ...checks],
   };
 };
 
-/** Alternatives made under another mandate cannot be picked any more, so they are dropped. */
-const underCurrentMandate = (
-  order: StoredOrder,
-  alternatives: OrderLine[],
-  mandate: Mandate | null,
-): OrderLine[] => {
-  if (mandate === null) return alternatives;
+interface Kept {
+  kept: OrderLine[];
+  dropped: number;
+}
+
+/** Alternatives that expired or were made under another mandate cannot be picked, so they go. */
+const pickable = (alternatives: OrderLine[], mandate: Mandate | null, now: Date): Kept => {
   const kept = alternatives.filter(
     (line) =>
-      line.claims.mandateId === mandate.mandateId && line.claims.mandateVersion === mandate.version,
+      !isExpired([line], now) &&
+      (mandate === null ||
+        (line.claims.mandateId === mandate.mandateId &&
+          line.claims.mandateVersion === mandate.version)),
   );
-  if (kept.length !== alternatives.length)
-    console.log("Alternatives made under another mandate were dropped.", {
-      orderId: order.orderId,
-      dropped: alternatives.length - kept.length,
-    });
-  return kept;
+  return { kept, dropped: alternatives.length - kept.length };
 };
+
+/** The account's payment terms changed since the offers were made, so none of them can be placed. */
+const termsChanged = (principal: Principal, lines: OrderLine[]): boolean =>
+  lines.some((line) => line.claims.paymentTerms !== principal.paymentTerms);
 
 /**
  * Edit and pick_alternative (SPEC-011): the new lines go through every token check and the rules of
@@ -486,14 +529,21 @@ const revise = async (
 ): Promise<Result<StoredOrder, DecisionError>> => {
   if (!isOpen(known, request.proposalVersion)) return changed();
   const isEdit = request.decision === "edit";
-  const proposal =
-    request.decision === "edit"
-      ? await edited(deps.offers, known, request.changes)
-      : picked(known, request.offerId);
+  const alternative = isEdit
+    ? []
+    : known.alternatives.filter((line) => line.offerId === request.offerId);
+  if (termsChanged(principal, [...known.lines, ...alternative]))
+    return failure(
+      "CONFLICT",
+      "The account's payment terms changed since the offers were made. Reject the order and ask the agent for new offers.",
+    );
+  const proposal = isEdit
+    ? await edited(deps.offers, known, request.changes)
+    : picked(known, request.offerId);
   if (!proposal.ok) return proposal;
   const tokens = proposal.value.map((line) => line.token);
   const now = deps.now();
-  // The stored alternatives were checked when the order was placed; they are not offered again.
+  // The stored alternatives were checked when the order was placed; they are not checked again here.
   const checked = await checkTokens(deps, principal, tokens, [], now);
   if (!checked.ok)
     return isEdit && checked.error.code === "OFFER_INVALID"
@@ -503,11 +553,16 @@ const revise = async (
       : failure(checked.error.code, checked.error.message);
   if (isExpired(checked.value.lines, now))
     return failure("OFFER_EXPIRED", "An offer of this order has expired.");
-  const alternatives = underCurrentMandate(
-    known,
+  const alternatives = pickable(
     known.alternatives.filter((line) => !tokens.includes(line.token)),
     checked.value.mandate,
+    now,
   );
+  if (alternatives.dropped > 0)
+    console.log("Alternatives that can no longer be picked were dropped.", {
+      orderId: known.orderId,
+      dropped: alternatives.dropped,
+    });
   const pairs = pairsOf(proposal.value, checked.value.lines);
   const checkedAgain = await evaluateChecked(deps, principal, checked.value, now);
   const evaluated = isEdit ? withPriceChanged(checkedAgain, pricedUp(pairs)) : checkedAgain;
@@ -521,8 +576,8 @@ const revise = async (
       .filter((offerId) => !order.offerIds.includes(offerId));
     if (await tx.hasUsedOffers(principal.customer, added))
       return failure("OFFER_INVALID", "An offer has already been used in an order.");
-    // `known` and `order` are the same pending proposal: every change to a pending order raises
-    // proposalVersion, and isOpen checked it under the lock.
+    // `known` and `order` are the same pending proposal: every write that keeps an order pending
+    // raises proposalVersion, every other write moves it out of pending, and isOpen checked it here.
     const revised = revision({
       principal,
       order,
@@ -544,7 +599,7 @@ const revise = async (
             now,
           })
         : revised;
-    await write(tx, final, request.proposalVersion);
+    await guardedWrite(tx, final, request.proposalVersion);
     return ok(final);
   });
 };
@@ -585,7 +640,7 @@ export const decide = async (
         ? await approve(deps, principal, tx, order, mandate, now)
         : ok(reject(principal, order, request, now));
     if (!decided.ok) return decided;
-    await write(tx, decided.value, request.proposalVersion);
+    await guardedWrite(tx, decided.value, request.proposalVersion);
     return decided;
   });
 };

@@ -83,7 +83,7 @@ const orderTx = (tx: Executor): OrderTx => ({
       .where(
         and(
           eq(orders.customer, customer),
-          // A line's offer, or one an approver's edit replaced: both stay consumed (SPEC-009).
+          // A line's offer, or one an approver's edit or pick replaced: both stay consumed (SPEC-009).
           or(
             ...offerIds.flatMap((offerId) => [
               sql`(${orders.lines} #>> '{}')::jsonb @> jsonb_build_array(jsonb_build_object('offerId', ${offerId}::text))`,

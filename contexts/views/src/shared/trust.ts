@@ -32,7 +32,7 @@ const TEXT = {
  * Finnish allergen names in the partitive, which follows every relation ("Sisältää kananmunaa",
  * "ei laktoosia"): the EU's 14 allergens and lactose, under the English names the server sends.
  */
-const FI_ALLERGENS: Record<string, string> = {
+export const FI_ALLERGENS: Record<string, string> = {
   gluten: "gluteenia",
   crustaceans: "äyriäisiä",
   egg: "kananmunaa",

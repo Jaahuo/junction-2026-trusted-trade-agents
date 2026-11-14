@@ -55,9 +55,16 @@ const fakeViews: ViewPages = {
     view === "approval-card" ? ok(`<html>${view}</html>`) : err("NOT_FOUND"),
 };
 
+const QUIET_TWINS = [
+  ["find_products", "search_products"],
+  ["quote_offers", "get_offers"],
+] as const;
+
 const inputs: { [T in ToolName]: z.input<(typeof TOOL_INPUT)[T]> } = {
   search_products: fixtures.searchRequest,
+  find_products: fixtures.searchRequest,
   get_offers: fixtures.offersRequest,
+  quote_offers: fixtures.offersRequest,
   place_order: fixtures.placeOrderRequest,
   get_order_status: { orderId: fixtures.order.orderId },
   get_mandate: {},
@@ -83,7 +90,8 @@ const ToolSchema = z.looseObject({
     })
     .optional(),
 });
-const uiOf = ({ _meta: meta }: z.infer<typeof ToolSchema>) => meta?.ui;
+const metaOf = ({ _meta: meta }: z.infer<typeof ToolSchema>) => meta;
+const uiOf = (tool: z.infer<typeof ToolSchema>) => metaOf(tool)?.ui;
 const ToolsListSchema = z.looseObject({ result: z.looseObject({ tools: z.array(ToolSchema) }) });
 const CallResultSchema = z.looseObject({
   result: z.looseObject({
@@ -116,7 +124,7 @@ const mcp = (overrides: Partial<McpDeps> = {}) => {
 };
 
 describe("tools/list", () => {
-  test("MCP_VIEW_TOOLS=app lists the seven model tools and the three view tools as app-only", async () => {
+  test("MCP_VIEW_TOOLS=app lists the nine model tools and the three view tools as app-only", async () => {
     const tools = await mcp().listTools();
     expect(tools.map((tool) => tool.name).toSorted()).toEqual(
       [...MODEL_TOOLS, ...VIEW_TOOLS].toSorted(),
@@ -178,6 +186,27 @@ describe("tools/list", () => {
     }
     expect(VIEWS_NOT_IN_CHAT.has("offer-comparison")).toBe(true);
   });
+
+  test("the quiet twins find_products and quote_offers have no view and the same schemas as search_products and get_offers", async () => {
+    const tools = await mcp().listTools();
+    const byName = (name: string) => tools.find((tool) => tool.name === name);
+    for (const [quiet, loud] of QUIET_TWINS) {
+      const tool = byName(quiet);
+      expect({ quiet, meta: tool === undefined ? undefined : metaOf(tool) }).toEqual({
+        quiet,
+        meta: {},
+      });
+      expect({ quiet, input: tool?.inputSchema, output: tool?.outputSchema }).toEqual({
+        quiet,
+        input: z.toJSONSchema(TOOL_INPUT[loud], { target: "draft-7", io: "input" }),
+        output: byName(loud)?.outputSchema,
+      });
+    }
+    const shown = byName("search_products");
+    expect(shown === undefined ? undefined : uiOf(shown)?.resourceUri).toBe(
+      "ui://trusted-trade/search-results",
+    );
+  });
 });
 
 describe("tools/call", () => {
@@ -196,6 +225,21 @@ describe("tools/call", () => {
     const result = await callTool("search_products", fixtures.searchRequest);
     expect(result.structuredContent).toEqual(fixtures.searchResult);
     expect(calls).toEqual([{ route: "search", args: [fixtures.searchRequest] }]);
+  });
+
+  test("a quiet twin calls the same route and returns the same result as its twin", async () => {
+    for (const [quiet, loud] of QUIET_TWINS) {
+      const twin = mcp();
+      const viewless = mcp();
+      const shown = await twin.callTool(loud, inputs[loud]);
+      const result = await viewless.callTool(quiet, inputs[quiet]);
+      expect({ quiet, content: result.structuredContent, text: result.content[0]?.text }).toEqual({
+        quiet,
+        content: shown.structuredContent,
+        text: shown.content[0]?.text,
+      });
+      expect({ quiet, calls: viewless.calls }).toEqual({ quiet, calls: twin.calls });
+    }
   });
 
   test("language reaches no REST route: search_products sends the request without it", async () => {

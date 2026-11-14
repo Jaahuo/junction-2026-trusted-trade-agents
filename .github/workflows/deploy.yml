@@ -86,8 +86,8 @@ jobs:
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
       - name: Start deployment evidence
         run: |
-          mkdir -p deployment-evidence
-          printf 'sourceSha=%s\ngateRunId=%s\ngateRunAttempt=%s\n' "$SHA" "$RUN_ID" "$ATTEMPT" > deployment-evidence/identity.txt
+          mkdir -p "$RUNNER_TEMP/deployment-evidence"
+          printf 'sourceSha=%s\ngateRunId=%s\ngateRunAttempt=%s\n' "$SHA" "$RUN_ID" "$ATTEMPT" > "$RUNNER_TEMP/deployment-evidence/identity.txt"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build deployment image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -121,7 +121,7 @@ jobs:
           lock_hash=$(sha256sum bun.lock | cut -d ' ' -f 1)
           jq -n --arg sha "$SHA" --arg run "$RUN_ID" --arg attempt "$ATTEMPT" --arg image "$image_id" --arg chatImage "$chat_image_id" --arg lock "$lock_hash" \
             --arg build "$GITHUB_RUN_ID" --arg buildAttempt "$GITHUB_RUN_ATTEMPT" \
-            '{schemaVersion: 2, sourceSha: $sha, gateRunId: $run, gateRunAttempt: $attempt, buildRunId: $build, buildRunAttempt: $buildAttempt, imageId: $image, chatImageId: $chatImage, lockfileSha256: $lock, securityScans: "paused"}' > deployment-evidence/manifest.json
+            '{schemaVersion: 2, sourceSha: $sha, gateRunId: $run, gateRunAttempt: $attempt, buildRunId: $build, buildRunAttempt: $buildAttempt, imageId: $image, chatImageId: $chatImage, lockfileSha256: $lock, securityScans: "paused"}' > "$RUNNER_TEMP/deployment-evidence/manifest.json"
           docker load --input "$RUNNER_TEMP/image.tar"
           docker load --input "$RUNNER_TEMP/chat-image.tar"
       - name: Smoke production runtime
@@ -200,11 +200,11 @@ jobs:
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             [ "sha256:$(sha256sum "$RUNNER_TEMP/manifest.json" | cut -d ' ' -f 1)" = "$digest" ]
             pushed=$(jq -er '.config.digest' "$RUNNER_TEMP/manifest.json")
-            expected=$(jq -er --arg field "$field" '.[$field]' deployment-evidence/manifest.json)
+            expected=$(jq -er --arg field "$field" '.[$field]' "$RUNNER_TEMP/deployment-evidence/manifest.json")
             [ "$pushed" = "$expected" ] || { echo "Pushed config digest $pushed does not match evidence $expected" >&2; exit 1; }
             pinned="ghcr.io/$repository@$digest"
             printf '%s=%s\n' "$output" "$pinned" >> "$GITHUB_OUTPUT"
-            printf '%s=%s\n' "$identity" "$pinned" >> deployment-evidence/identity.txt
+            printf '%s=%s\n' "$identity" "$pinned" >> "$RUNNER_TEMP/deployment-evidence/identity.txt"
           }
           publish_image "gate-image:$SHA" "$tag" imageId image image
           publish_image "gate-chat-image:$SHA" "$chat_tag" chatImageId chat_image chatImage
@@ -213,7 +213,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: deployment-${{ github.run_id }}-${{ github.run_attempt }}
-          path: deployment-evidence
+          path: ${{ runner.temp }}/deployment-evidence
           retention-days: 90
           if-no-files-found: error
 

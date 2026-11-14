@@ -132,3 +132,42 @@ export function decodeBoard(value: unknown) {
     issue: { id: text(field(issue, "id")), projectItems: { nodes: items } },
   };
 }
+const name = (value: unknown) => text(field(value, "name"));
+export const decodeBacklogIssues = (value: unknown) =>
+  list(value, (entry) => ({
+    number: number(field(entry, "number")),
+    title: text(field(entry, "title")),
+    body: text(field(entry, "body")),
+    labels: list(field(entry, "labels"), name),
+    assignees: list(field(entry, "assignees"), (user) => login(user).login),
+    projects: list(field(entry, "projectItems"), (item) => {
+      const status = field(item, "status");
+      const label = status === null || status === undefined ? null : field(status, "name");
+      return {
+        title: text(field(item, "title")),
+        status: typeof label === "string" && label.length > 0 ? label : null,
+      };
+    }),
+  }));
+export const decodeIssueStates = (value: unknown) =>
+  list(value, (entry) => ({
+    number: number(field(entry, "number")),
+    state: text(field(entry, "state")),
+  }));
+export const decodeOpenPrs = (value: unknown) =>
+  list(value, (entry) => ({
+    number: number(field(entry, "number")),
+    headRefName: text(field(entry, "headRefName")),
+    closes: list(field(entry, "closingIssuesReferences"), (issue) =>
+      number(field(issue, "number")),
+    ),
+  }));
+export const decodeProjectTitles = (value: unknown) =>
+  list(field(field(field(field(value, "data"), "repository"), "projectsV2"), "nodes"), (node) =>
+    text(field(node, "title")),
+  );
+export const decodeIssueComments = (value: unknown) =>
+  list(field(value, "comments"), (comment) => ({
+    body: text(field(comment, "body")),
+    createdAt: text(field(comment, "createdAt")),
+  }));

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ErrorEnvelopeSchema } from "@app/contract";
-import { context } from "./index.ts";
+import { context, rootRoutes } from "./index.ts";
 import { skillRoutes } from "./skill.ts";
 
 const get = (path: string) => skillRoutes().handle(new Request(`http://localhost${path}`));
@@ -31,7 +31,8 @@ test("unknown file returns 404", async () => {
   }
 });
 
-test("the discovery context exposes the root route", async () => {
-  expect(context.root).toBe(skillRoutes);
-  expect((await get(`${base}/SKILL.md`)).status).toBe(200);
+test("the discovery context root serves the skill files", async () => {
+  expect(context.root).toBe(rootRoutes);
+  const response = await rootRoutes().handle(new Request(`http://localhost${base}/SKILL.md`));
+  expect(response.status).toBe(200);
 });

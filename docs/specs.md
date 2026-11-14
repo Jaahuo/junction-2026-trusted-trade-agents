@@ -102,7 +102,8 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 export interface ErrorEnvelope {
   error: { code: ErrorCode; message: string; nextDeliveryDate?: string };
 }
-export const ERROR_STATUS: Record<ErrorCode, number> = {
+export const ERROR_STATUS = {
+  // as const satisfies Record<ErrorCode, number>: each status is a literal type
   BAD_REQUEST: 400,
   OFFER_INVALID: 400,
   NOT_AUTHENTICATED: 401,
@@ -358,7 +359,7 @@ export interface OfferClaims { iss: string; offerId: string; customer: string; a
   product: { name: string; category: string; perSalesUnit: Quantity | null; countryOfOrigin: string | null;
     deliveryReliability: number | null; co2PerKg: number | null; match: Record<string, MatchState> };
   iat: number; exp: number }
-export interface Precheck { decision: "auto" | "needs_approval" | "rejected"; reasons: ReasonCode[] }
+export type Precheck = Evaluation;   // PrecheckSchema is EvaluationSchema (SPEC-009): same shape, same rule
 export type OmitReason = "NO_PRICE" | "SALES_BLOCKED" | "NO_DELIVERY_DATE" | "UNKNOWN_PRODUCT" | "INVALID_QUANTITY"
   | "INSUFFICIENT_STOCK" | "CONSTRAINT_CONTRADICTED";
 export interface OfferLine { offerId: string; token: string; claims: OfferClaims; precheck: Precheck | null;
@@ -376,8 +377,8 @@ export const offerSigningKeyFromEnv: () => Promise<OfferSigningKey>;
 export const localOfferKeys: (jwks: { keys: JsonWebKey[] }) => OfferKeySet;
 export const remoteOfferKeys: (jwksUrl: URL) => OfferKeySet;   // caches; refetches once on an unknown kid
 export const signOfferToken: (claims: Omit<OfferClaims, "iat" | "exp">, key: OfferSigningKey, exp: Date) => Promise<string>;
-export const verifyOfferToken: (token: string, keys: OfferKeySet, now?: Date) =>
-  Promise<Result<OfferClaims, { code: "OFFER_INVALID" } | { code: "OFFER_EXPIRED"; claims: OfferClaims }>>;
+export type OfferVerification = Result<OfferClaims, { code: "OFFER_INVALID" } | { code: "OFFER_EXPIRED"; claims: OfferClaims }>;   // root export
+export const verifyOfferToken: (token: string, keys: OfferKeySet, now?: Date) => Promise<OfferVerification>;
 ```
 
 Steps of `get_offers`:
@@ -461,7 +462,7 @@ export const REASON_TEXT: Record<ReasonCode, string>;         // one plain sente
 export const FORCED_APPROVAL = ["QUANTITY_UNUSUAL", "UNCONFIRMED_STOCK"] as const;   // no mandate setting turns these into auto
 export const GUARDRAILS = { quantityCapFactor: 10, quantityCapNoHistory: 2000 /* std units */,
   unconfirmedStockMax: 500 /* std units per product */, paymentFailAbove: 5000 /* EUR gross */, maxLinesPerOrder: 20 } as const;
-export interface Evaluation { decision: "auto" | "needs_approval" | "rejected"; reasons: ReasonCode[] }
+export interface Evaluation { decision: "auto" | "needs_approval" | "rejected"; reasons: ReasonCode[] }   // EvaluationSchema rejects "auto" with any reason
 export type Evaluate = (input: { claims: OfferClaims[]; mandate: Mandate | null; history: { productId: string; quantity: Quantity }[];
   live: ValidateResult | null; now: Date }) => Evaluation;    // pure: no I/O, no writes
 ```

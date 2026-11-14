@@ -25,7 +25,7 @@ export const ErrorEnvelopeSchema = z.strictObject({
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
 
-export const ERROR_STATUS: Record<ErrorCode, number> = {
+export const ERROR_STATUS = {
   BAD_REQUEST: 400,
   OFFER_INVALID: 400,
   NOT_AUTHENTICATED: 401,
@@ -36,4 +36,4 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   OFFER_EXPIRED: 409,
   NOT_IMPLEMENTED: 501,
   UPSTREAM_FAILED: 502,
-};
+} as const satisfies Record<ErrorCode, number>;

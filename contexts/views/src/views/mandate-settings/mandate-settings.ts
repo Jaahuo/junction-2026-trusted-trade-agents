@@ -1,23 +1,35 @@
+import type { MandateDraft, StoredMandate } from "@app/contract";
 import { brand } from "@app/ui/brand";
-import { formatMoney, formatQuantity, formatTimestamp, ORDER_WORDING } from "@app/ui/format";
-import { css, html } from "lit";
+import { formatMoney, formatTimestamp, ORDER_WORDING } from "@app/ui/format";
+import { css, html, nothing } from "lit";
 import {
   callAction,
   plainPageUrl,
+  type Source,
   type ViewData,
   type ViewEntryOf,
   viewEntry,
 } from "../../shared/bridge.ts";
 import { lang, pick } from "../../shared/locale.ts";
-import { preferred } from "../../shared/constraints.ts";
+import { required } from "../../shared/constraints.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { loadMandate } from "./loader.ts";
 import {
   categoriesText,
+  co2Text,
+  draftRows,
   effectiveStatus,
   expiryDelay,
+  inForce,
+  isDraft,
+  isNoCurrentMandate,
+  percentText,
   policyText,
+  registeredContext,
+  registerInput,
+  registersDraft,
+  softText,
   substitutionText,
   thresholdText,
 } from "./presentation.ts";
@@ -30,8 +42,12 @@ const row = (label: string, value: string) =>
   </div>`;
 
 export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
+  // No decorators: the bundler leaves them untransformed.
   static override properties = {
     ...ViewElement.properties,
+    registering: { state: true },
+    registerError: { state: true },
+    currentUnknown: { state: true },
     revoking: { state: true },
     revokeFailed: { state: true },
   };
@@ -116,6 +132,15 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
       details dl {
         margin-top: var(--spacing-md);
       }
+      .proposed {
+        font-weight: 600;
+      }
+      .in-force {
+        display: block;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-xs);
+        margin-top: var(--spacing-2xs);
+      }
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -145,17 +170,27 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
   ];
 
   readonly entry = viewEntry("mandate-settings");
+  private expiryTimer: number | undefined;
+  private renderedStatus: "active" | "expired" | "revoked" | null = null;
+  declare private registering: boolean;
+  /** Why the last Register failed, shown next to the button; `unconfirmed` when the outcome is unknown. */
+  declare private registerError: { message: string; unconfirmed: boolean } | null;
+  /** True after a Register whose outcome no check settled: the view cannot tell which limits are in force. */
+  declare private currentUnknown: boolean;
+  /** Created at the first Register of a draft and kept, so a retry is a replay (SPEC-008). */
+  private operationId: string | null = null;
   /** True while a substitution rule is being removed. */
   declare private revoking: boolean;
   declare private revokeFailed: boolean;
 
   constructor() {
     super();
+    this.registering = false;
+    this.registerError = null;
+    this.currentUnknown = false;
     this.revoking = false;
     this.revokeFailed = false;
   }
-  private expiryTimer: number | undefined;
-  private renderedStatus: "active" | "expired" | "revoked" | null = null;
 
   override connectedCallback() {
     // The shared shell loads on connect; this view must distinguish the current endpoint's 404.
@@ -175,7 +210,10 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     clearTimeout(this.expiryTimer);
     const state = this.state;
     if (!this.isConnected || state.kind !== "done" || this.renderedStatus === null) return;
-    const delay = expiryDelay(state.data.mandate.exp, this.renderedStatus);
+    // A draft shows its current mandate as in force only until that mandate expires.
+    const exp = isDraft(state.data) ? state.data.current?.mandate.exp : state.data.mandate.exp;
+    if (exp === undefined) return;
+    const delay = expiryDelay(exp, this.renderedStatus);
     if (delay !== null) this.expiryTimer = window.setTimeout(() => this.requestUpdate(), delay);
   }
 
@@ -186,8 +224,49 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     this.state = await loadMandate(source, retry);
   }
 
+  private async register(draft: MandateDraft) {
+    const source = this.source;
+    if (source === null || this.registering) return;
+    this.operationId ??= `op_view_${crypto.randomUUID()}`;
+    this.registering = true;
+    this.registerError = null;
+    const result = await callAction(
+      source,
+      "register_mandate",
+      registerInput(draft.draft, this.operationId),
+      null,
+    );
+    if (result.kind === "done") return this.registered(source, result.data);
+    // The register may have committed before its answer was lost: the mandate in force tells.
+    const check = await callAction(source, "get_mandate", {}, null);
+    if (check.kind === "done" && registersDraft(check.data, draft))
+      return this.registered(source, check.data);
+    this.registering = false;
+    const none =
+      check.kind === "error" &&
+      (check.message.startsWith("NOT_FOUND:") || isNoCurrentMandate(new Error(check.message)));
+    // The check is the latest word on the mandate in force; without one, nothing is claimed.
+    if (check.kind === "done" || none)
+      this.state = {
+        kind: "done",
+        data: { ...draft, current: check.kind === "done" ? check.data : null },
+      };
+    this.currentUnknown = check.kind !== "done" && !none;
+    this.registerError = {
+      message: result.kind === "error" ? result.message : "",
+      unconfirmed: this.currentUnknown,
+    };
+  }
+
+  private registered(source: Source, stored: StoredMandate) {
+    this.registering = false;
+    this.currentUnknown = false;
+    this.state = { kind: "done", data: stored };
+    void source.context?.(registeredContext(stored));
+  }
+
   /** Registers the mandate again without the rule at `index`, then shows the new version. */
-  private async revoke(record: ViewData<"mandate-settings">, index: number) {
+  private async revoke(record: StoredMandate, index: number) {
     const source = this.source;
     if (source === null) return;
     const { limits, standingConstraints, exp } = record.mandate;
@@ -207,10 +286,10 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     );
     this.revoking = false;
     this.revokeFailed = saved.kind !== "done";
-    if (saved.kind === "done") this.state = saved;
+    if (saved.kind === "done") this.registered(source, saved.data);
   }
 
-  private rules(record: ViewData<"mandate-settings">, active: boolean) {
+  private rules(record: StoredMandate, active: boolean) {
     const rules = record.mandate.limits.substitutionRules ?? [];
     if (rules.length === 0) return html``;
     const text = pick(MANDATE);
@@ -295,7 +374,79 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     </article>`;
   }
 
-  protected override renderDone(record: ViewData<"mandate-settings">) {
+  protected override renderDone(data: ViewData<"mandate-settings">) {
+    return isDraft(data) ? this.renderDraft(data) : this.renderStored(data);
+  }
+
+  private renderDraft(record: MandateDraft) {
+    const text = pick(MANDATE);
+    const current = this.currentUnknown ? null : inForce(record);
+    this.renderedStatus =
+      record.current === null || this.currentUnknown ? null : effectiveStatus(record.current);
+    return html`<article class="card" part="draft">
+      ${this.header()}
+      <div class="body">
+        <div class="status inactive" part="status">
+          <p class="strong">${text.draftStatus}</p>
+          <p>${text.draftNote}</p>
+        </div>
+        <section>
+          <h3>${text.proposedLimits}</h3>
+          <p class="secondary">
+            ${
+              this.currentUnknown
+                ? text.draftUnknownCurrent
+                : current === null
+                  ? text.draftNoCurrent
+                  : text.draftCompare(current.mandate.version)
+            }
+          </p>
+          <dl>
+            ${draftRows({ ...record, current }).map(
+              (item) =>
+                html`<div class="row">
+                  <dt>${item.label}</dt>
+                  <dd>
+                    <span class=${item.current === null ? "" : "proposed"}>${item.proposed}</span>
+                    ${
+                      item.current === null
+                        ? nothing
+                        : html`<span class="in-force">${text.inForce(item.current)}</span>`
+                    }
+                  </dd>
+                </div>`,
+            )}
+          </dl>
+        </section>
+        ${
+          this.registerError === null
+            ? nothing
+            : html`<div class="message danger" role="alert" part="register-error">
+                <p class="strong">
+                  ${this.registerError.unconfirmed ? text.registerUnconfirmedTitle : text.registerFailedTitle}
+                </p>
+                <p>${this.registerError.message}</p>
+                <p>
+                  ${this.registerError.unconfirmed ? text.registerUnconfirmedBody : text.registerFailedBody}
+                </p>
+              </div>`
+        }
+        <div class="actions">
+          <button
+            class="btn primary"
+            aria-busy=${this.registering ? "true" : "false"}
+            ?disabled=${this.registering || this.source === null}
+            @click=${() => this.register(record)}
+          >
+            ${this.registering ? text.registering : text.register}
+          </button>
+        </div>
+        <p class="secondary">${text.humanOnly}</p>
+      </div>
+    </article>`;
+  }
+
+  private renderStored(record: StoredMandate) {
     const { mandate } = record;
     const { limits, standingConstraints } = mandate;
     const status = effectiveStatus(record);
@@ -326,8 +477,8 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
         <section>
           <h3>${text.productData}</h3>
           <dl>
-            ${row(text.minReliability, `${thresholdText(limits.minDeliveryReliability, (value) => new Intl.NumberFormat(l === "fi" ? "fi-FI" : "en-FI", { style: "percent", maximumFractionDigits: 4 }).format(value))} ${limits.minDeliveryReliability === null ? "" : text.reliabilityRule}`)}
-            ${row(text.maxCo2, `${thresholdText(limits.maxCo2PerKg, (value) => text.co2PerKg(formatQuantity({ value, unit: "KGM" }, l)))} ${limits.maxCo2PerKg === null ? "" : text.co2Rule}`)}
+            ${row(text.minReliability, `${thresholdText(limits.minDeliveryReliability, percentText)} ${limits.minDeliveryReliability === null ? "" : text.reliabilityRule}`)}
+            ${row(text.maxCo2, `${thresholdText(limits.maxCo2PerKg, co2Text)} ${limits.maxCo2PerKg === null ? "" : text.co2Rule}`)}
             ${row(text.missingAllergen, text.allergenRule(policyText(limits.allergenData.ifNoData)))}
           </dl>
         </section>
@@ -345,7 +496,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
             hard.length === 0
               ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${hard.map(() => html`<li>${text.freeFromLactose}</li>`)}
+                  ${hard.map((item) => html`<li>${required(item.attribute)}</li>`)}
                 </ul>`
           }
           <p class="strong">${text.preferred}</p>
@@ -353,7 +504,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
             soft.length === 0
               ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${soft.map((item) => html`<li>${preferred(item.attribute, item.prefer)}</li>`)}
+                  ${soft.map((item) => html`<li>${softText(item)}</li>`)}
                 </ul>`
           }
         </section>

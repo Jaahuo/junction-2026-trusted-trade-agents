@@ -6,6 +6,7 @@ import {
   APPROVAL_REASONS,
   AUDIT_EVENTS,
   DEMO_ACCOUNT,
+  DraftMandateRequestSchema,
   ERROR_CODES,
   fixtures,
   MODEL_TOOLS,
@@ -15,6 +16,7 @@ import {
   PlaceOrderRequestSchema,
   REASON_TEXT,
   REJECT_REASONS,
+  MandateDraftSchema,
   ROUTES,
   SearchRequestSchema,
   TOOL_INPUT,
@@ -108,7 +110,7 @@ test("MODEL_TOOLS, VIEW_TOOLS, PAYMENT_TERMS, ORDER_STATUSES, reason lists, AUDI
   same(REJECT_REASONS, specList("REJECT_REASONS"));
   same(AUDIT_EVENTS, specList("AUDIT_EVENTS"));
   const table = routeTable();
-  expect(table).toHaveLength(15);
+  expect(table).toHaveLength(16);
   same(
     ROUTES.map(({ key, tool, method, path, context, output }) => ({
       key,
@@ -168,10 +170,25 @@ test("OrderSchema and PlaceOrderRequestSchema reject an unknown key such as stat
   expect(PlaceOrderRequestSchema.safeParse(fixtures.placeOrderRequest).success).toBe(true);
 });
 
+test("a mandate draft takes the register body without operationId and has the current mandate or null", () => {
+  const { operationId: _operationId, ...draft } = fixtures.registerMandateRequest;
+  expect(DraftMandateRequestSchema.safeParse(draft).success).toBe(true);
+  expect(DraftMandateRequestSchema.safeParse(fixtures.registerMandateRequest).success).toBe(false);
+  expect(DraftMandateRequestSchema.safeParse({ ...draft, mandateId: "mnd_1" }).success).toBe(false);
+  expect(MandateDraftSchema.safeParse({ draft, current: null }).success).toBe(true);
+  expect(MandateDraftSchema.safeParse({ draft }).success).toBe(false);
+  expect(MandateDraftSchema.safeParse({ ...fixtures.mandateDraft, registered: true }).success).toBe(
+    false,
+  );
+});
+
 test("DEMO_ACCOUNT equals the SPEC-015 values", () => {
   const source = /- `DEMO_ACCOUNT`: `(\{[^`]*\})`/.exec(spec)?.[1] ?? "";
   same(DEMO_ACCOUNT, literal(source));
 });
+
+const refusal = (hard: unknown) =>
+  SearchRequestSchema.safeParse({ ...fixtures.searchRequest, hard }).error?.issues[0]?.message;
 
 describe("hard constraints (SPEC-003, SPEC-004)", () => {
   test("an unsupported attribute or value is refused", () => {
@@ -179,10 +196,24 @@ describe("hard constraints (SPEC-003, SPEC-004)", () => {
     expect(SearchRequestSchema.safeParse(request).success).toBe(true);
     for (const hard of [
       [{ attribute: "gluten", is: "free_from" }],
+      [{ attribute: "vegan", is: "yes" }],
+    ]) {
+      expect(SearchRequestSchema.safeParse({ ...request, hard }).success).toBe(true);
+    }
+    for (const hard of [
+      [{ attribute: "unicorn", is: "free_from" }],
+      [{ attribute: "Gluten", is: "free_from" }],
+      [{ attribute: "AW", is: "free_from" }],
       [{ attribute: "lactose", is: "low" }],
+      [{ attribute: "vegan", is: "free_from" }],
     ]) {
       expect(SearchRequestSchema.safeParse({ ...request, hard }).success).toBe(false);
     }
+  });
+
+  test("the refusal names the attribute, or says it is missing", () => {
+    expect(refusal([{ attribute: "unicorn", is: "free_from" }])).toContain('"unicorn"');
+    expect(refusal([{ is: "free_from" }])).toContain('"missing"');
   });
 
   test("empty terms are refused", () => {

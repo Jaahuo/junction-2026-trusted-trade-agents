@@ -3,21 +3,18 @@ import { brand } from "@app/ui/brand";
 import { formatQuantity } from "@app/ui/format";
 import { css, html, type TemplateResult } from "lit";
 import { type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
-import { preferred, words } from "../../shared/constraints.ts";
+import { preferred, required } from "../../shared/constraints.ts";
 import { intlLocale, lang, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { brandHeader, cardStyles, rows } from "../approval-card/parts.ts";
 import { RESULTS } from "./strings.ts";
 
-// Every hard constraint is "free_from" (SPEC-004). Any attribute, so new allergens (#71) need no change.
 type Results = Omit<ViewData<"search-results">, "constraints"> & {
   constraints: Omit<ViewData<"search-results">["constraints"], "hard"> & {
     hard: { attribute: string }[];
   };
 };
-const required = (attribute: string) =>
-  attribute === "lactose" ? pick(RESULTS).lactoseFree : pick(RESULTS).free(words(attribute));
 const decode = (value: string) => {
   try {
     return decodeURIComponent(value);

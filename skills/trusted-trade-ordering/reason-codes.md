@@ -30,16 +30,16 @@ Results:
 
 ## Rejected codes
 
-| Code                | Meaning                                                                                                | Next action                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `NOT_AUTHENTICATED` | The request was not authenticated. The first build never returns it.                                   | Tell the user. Stop.                                                                                                          |
-| `MANDATE_INVALID`   | No valid mandate exists for the agent: none, expired or revoked.                                       | Tell the user that an approver must register a mandate. Stop.                                                                 |
-| `OFFER_INVALID`     | An offer token failed verification, or the request repeats a token. Refused with 400, no order stored. | Call `get_offers` again. Place the new tokens unchanged, each token once.                                                     |
-| `OFFER_EXPIRED`     | An offer expired before the order was placed.                                                          | Call `get_offers` again for the same need. Place the new tokens with a new `idempotencyKey`.                                  |
-| `CREDIT_LIMIT`      | The order total is above the remaining credit.                                                         | Tell the user the total and the remaining credit. Stop. Do not shrink or split the order to fit.                              |
-| `PAYMENT_FAILED`    | The payment was not authorized.                                                                        | Tell the user. Stop.                                                                                                          |
-| `CUTOFF_PASSED`     | The order cut-off for the delivery date has passed.                                                    | Tell the user the next delivery date from `nextDeliveryDate`. Request new offers for that date only when the user accepts it. |
-| `SALES_BLOCKED`     | The product is blocked from sale.                                                                      | Tell the user. You may search again for the user's need and place a new order for a product that is not blocked.              |
+| Code                | Meaning                                                                                                | Next action                                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `NOT_AUTHENTICATED` | The request was not authenticated. The first build never returns it.                                   | Tell the user. Stop.                                                                                                             |
+| `MANDATE_INVALID`   | No valid mandate exists for the agent: none, expired or revoked.                                       | Tell the user. Call `draft_mandate` with the terms the user gives, and ask the user to press Register in the mandate view. Stop. |
+| `OFFER_INVALID`     | An offer token failed verification, or the request repeats a token. Refused with 400, no order stored. | Call `get_offers` again. Place the new tokens unchanged, each token once.                                                        |
+| `OFFER_EXPIRED`     | An offer expired before the order was placed.                                                          | Call `get_offers` again for the same need. Place the new tokens with a new `idempotencyKey`.                                     |
+| `CREDIT_LIMIT`      | The order total is above the remaining credit.                                                         | Tell the user the total and the remaining credit. Stop. Do not shrink or split the order to fit.                                 |
+| `PAYMENT_FAILED`    | The payment was not authorized.                                                                        | Tell the user. Stop.                                                                                                             |
+| `CUTOFF_PASSED`     | The order cut-off for the delivery date has passed.                                                    | Tell the user the next delivery date from `nextDeliveryDate`. Request new offers for that date only when the user accepts it.    |
+| `SALES_BLOCKED`     | The product is blocked from sale.                                                                      | Tell the user. You may search again for the user's need and place a new order for a product that is not blocked.                 |
 
 ## Errors before an order exists
 

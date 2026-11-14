@@ -113,6 +113,7 @@ export interface Chat {
   readonly secretKey: string;
   readonly adminEmail: string;
   readonly adminPassword: string;
+  readonly recipePermission: string;
 }
 
 /** The chat settings, or undefined when VERDA_INFERENCE_KEY is unset and the deploy skips the chat host. */
@@ -132,6 +133,8 @@ export const chatSettings = (
     secretKey: value("OPENWEBUI_SECRET_KEY"),
     adminEmail: value("OPENWEBUI_ADMIN_EMAIL"),
     adminPassword: value("OPENWEBUI_ADMIN_PASSWORD"),
+    recipePermission:
+      settings["VALIO_AIMO_RECIPE_PERMISSION"]?.toLowerCase() === "true" ? "True" : "False",
   };
 };
 
@@ -142,12 +145,21 @@ export const chatEnv = (outputs: Outputs, chat: Chat): Map<string, string> =>
     ["WEBUI_AUTH", "True"],
     ["ENABLE_SIGNUP", "False"],
     ["ENABLE_OLLAMA_API", "False"],
+    ["ENABLE_TITLE_GENERATION", "False"],
+    ["ENABLE_FOLLOW_UP_GENERATION", "False"],
+    ["ENABLE_TAGS_GENERATION", "False"],
+    ["VALIO_AIMO_RECIPE_PERMISSION", chat.recipePermission],
     ["WEBUI_SECRET_KEY", chat.secretKey],
     ["WEBUI_ADMIN_EMAIL", chat.adminEmail],
     ["WEBUI_ADMIN_PASSWORD", chat.adminPassword],
     ["OPENAI_API_BASE_URL", CHAT_MODEL_URL],
     ["OPENAI_API_KEY", chat.inferenceKey],
   ]);
+
+// Interpolated so Bun shell passes the patterns to rsync instead of expanding them as globs.
+export const CHAT_SYNC_EXCLUDES = [".env", ".env.*", "__pycache__", "*.pyc"].map(
+  (pattern) => `--exclude=${pattern}`,
+);
 
 export const CHAT_SERVICE = `[Unit]
 Description=Trusted trade chat host (Open WebUI)
@@ -157,7 +169,7 @@ Requires=docker.service
 ConditionPathExists=/etc/trusted-trade-chat.env
 
 [Service]
-ExecStart=/usr/bin/docker run --rm --name trusted-trade-chat --pull=never --env-file /etc/trusted-trade-chat.env -p 127.0.0.1:${CHAT_PORT}:8080 -v trusted-trade-chat:/app/backend/data ${CHAT_IMAGE}
+ExecStart=/usr/bin/docker run --rm --name trusted-trade-chat --pull=never --env-file /etc/trusted-trade-chat.env -p 127.0.0.1:${CHAT_PORT}:8080 -v trusted-trade-chat:/app/backend/data -v /opt/trusted-trade-chat/branding/custom.css:/app/backend/open_webui/static/custom.css:ro -v /opt/trusted-trade-chat/branding:/app/backend/open_webui/static/acme:ro ${CHAT_IMAGE}
 ExecStop=/usr/bin/docker stop --time 30 trusted-trade-chat
 TimeoutStopSec=40
 Restart=on-failure
@@ -312,6 +324,8 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
   // Everything slow or network-bound for the chat host happens before the app stops.
   if (chat) {
     await $`ssh ${SSH} ${host} docker pull --quiet ${CHAT_IMAGE}`;
+    await $`ssh ${SSH} ${host} mkdir -p /opt/trusted-trade-chat`;
+    await $`rsync -az ${CHAT_SYNC_EXCLUDES} -e ${remoteShell} hosts/openwebui/agent hosts/openwebui/branding hosts/openwebui/scripts ${`${host}:/opt/trusted-trade-chat/`}`;
     await $`ssh ${SSH} ${host} install -m 600 /dev/stdin /etc/trusted-trade-chat.env < ${new Response(renderEnvFile(chatEnv(outputs, chat)))}`;
     await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/systemd/system/trusted-trade-chat.service < ${new Response(CHAT_SERVICE)}`;
   }
@@ -345,6 +359,7 @@ docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' ${she
       openaiUrl: CHAT_MODEL_URL,
       openaiKey: chat.inferenceKey,
       baseModel: CHAT_BASE_MODEL,
+      recipePermission: chat.recipePermission,
     });
   } else console.log("chat host: skipped, VERDA_INFERENCE_KEY is not set");
 };

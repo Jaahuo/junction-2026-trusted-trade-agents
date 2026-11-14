@@ -17,7 +17,7 @@ Inference sends chat content to Verda and can incur charges.
    Generate the first two with `openssl rand -hex 32` and `openssl rand -base64 24`.
    Keep this file private and ignored by Git.
 3. Start this worktree's API with `bun run dev`.
-4. Run `bun scripts/openwebui.ts up`.
+4. Run `bun scripts/openwebui.ts up`. It builds the custom chat image from the repository root with `hosts/openwebui/Dockerfile`.
 5. Open the printed loopback URL. Sign in with the operator credentials from the file.
 6. Select Acme Kitchens or Acme Bakery.
 
@@ -26,9 +26,9 @@ Set `OPENWEBUI_MCP_URL` to connect another server. Setup prints a warning for th
 The stored Docker connection uses `host.docker.internal` for a local API.
 The MCP server must be reachable from the container.
 
-`bun scripts/openwebui.ts setup` refreshes models, tools, embedded skills and persisted inference settings.
+`bun scripts/openwebui.ts setup` runs the host Python provisioner to refresh models, tools, embedded skills and persisted inference settings from the local checkout.
 The system prompt embeds this checkout's `skills/trusted-trade-ordering/SKILL.md` and `reason-codes.md`.
-Run setup again after a base prompt or local skill changes.
+Run setup again after a base prompt or local skill changes. Run `up` again to rebuild the image and package those changes for a production-like runtime.
 `OPENWEBUI_MAX_TOKENS` defaults to 4096.
 `bun scripts/openwebui.ts down` stops the container and preserves its data volume.
 
@@ -68,7 +68,7 @@ The server still controls approval. Do not give the model human approval credent
 The canonical [shared prompt](../hosts/openwebui/agent/purchasing.md) combines both previous base prompts.
 Direct orders use short, voice-friendly replies. Planning can use lists and tables.
 The main project's embedded ordering skill defines tool arguments and recovery rules.
-Setup reads the skill and reason-code reference from the same checkout, not from another server.
+Local setup reads the skill and reason-code reference from the same checkout, not from another server. Hosted provisioning reads them from the chat image.
 The persona and combined base prompt follow those references in the system prompt.
 
 Recipe arithmetic is deterministic and has no purchasing or network access.
@@ -89,7 +89,7 @@ Speech provider configuration remains optional; no paid TTS service is enabled b
 | Recipe fetching   | None                     | Permission-gated                             | Permission-gated; off by default             |
 | Local login       | Off                      | On                                           | On; existing default account migration       |
 | Buyer voice       | Optional                 | Disabled by permissions                      | Available; provider setup remains separate   |
-| Deployment        | Local and hosted         | Local Compose                                | Local Compose and hosted asset mounts        |
+| Deployment        | Local and hosted         | Local Compose                                | Local Compose and hosted chat image          |
 
 The port includes the workspace's two local commits through `b834c18`.
 It excludes Ollama, model downloads, local Finnish speech auditions, caches and private configuration.

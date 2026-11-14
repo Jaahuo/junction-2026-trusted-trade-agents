@@ -18,6 +18,7 @@ import {
   nextDeliveryDateAfterCutoff,
   netTotal,
   reasonsByProduct,
+  ruleFor,
 } from "../domain/evaluate.ts";
 import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import type {
@@ -174,11 +175,26 @@ const replayOrConflict = (
 const auditOf = (
   evaluation: Evaluation,
   byProduct: Map<string, ReasonCode[]>,
+  checked: Pick<Checked, "lines" | "mandate">,
   at: string,
 ): AuditEvent[] => {
+  const standing: AuditEvent[] = checked.lines.flatMap(({ claims }) => {
+    const rule = checked.mandate === null ? undefined : ruleFor(checked.mandate.limits, claims);
+    if (rule?.policy !== "auto") return [];
+    return [
+      {
+        at,
+        actor: "server",
+        event: "check_passed",
+        productId: claims.productId,
+        detail: `Substitute allowed without asking: standing approval given ${rule.decidedAt.slice(0, 10)}.`,
+      },
+    ];
+  });
   const opened: AuditEvent[] = [
     { at, actor: "agent", event: "order_requested" },
     { at, actor: "server", event: "offer_verified" },
+    ...standing,
   ];
   if (evaluation.decision === "auto")
     return [...opened, { at, actor: "server", event: "check_passed" }];
@@ -212,7 +228,7 @@ const buildOrder = (
 ): StoredOrder => {
   const claims = checked.lines.map((line) => line.claims);
   const at = now.toISOString();
-  const audit = auditOf(evaluation, byProduct, at);
+  const audit = auditOf(evaluation, byProduct, checked, at);
   const requested = audit[0];
   if (requested !== undefined && request.supersedes !== undefined)
     requested.detail = `Replaces ${request.supersedes.orderId} proposal ${request.supersedes.proposalVersion}`;

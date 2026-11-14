@@ -394,7 +394,7 @@ Failure paths: upstream down → 502 `UPSTREAM_FAILED`. A body field `customer` 
 PRD: [Partial stock](prd.md#partial-stock), [Substitution](prd.md#substitution).
 
 - Confirmed amount below the request: floor the available amount to a multiple of `allowedLotSize`. A result of 0 → omitted `INSUFFICIENT_STOCK`. Otherwise one offer for the floored amount, with `shortfall` = request − floored amount, in std units; when `perSalesUnit` is null, in the sales unit.
-- For the shortfall, substitute candidates come from the product's substitution pairs. Mandate `substitutions: "never"` → no substitute offers. A substitute with a `contradicted` merged hard constraint is excluded. A substitute quantity rounds up to its own lot size.
+- For the shortfall, substitute candidates come from the product's substitution pairs. Mandate `substitutions: "never"` → no substitute offers. A substitution rule with `policy: "never"` for the pair → no offer of that substitute. A substitute with a `contradicted` merged hard constraint is excluded. A substitute quantity rounds up to its own lot size.
 - Rank: best first, by soft matches, then price per std unit, then reliability, then CO2. Up to 3 substitute offers, each covering the shortfall, with `replaces`, `rank` and `comparison`.
 - Unconfirmed stock: the offer says so and carries the reliability score.
 
@@ -407,7 +407,11 @@ export type Policy = "auto" | "ask";
 export interface MandateLimits { maxOrderTotal: { value: number; currency: "EUR"; basis: "gross" };
   categories: string[] | null /* null = all */; substitutions: "never" | "ask" | "auto"; newProducts: Policy;
   minDeliveryReliability: { value: number; ifNoData: Policy } | null; maxCo2PerKg: { value: number; ifNoData: Policy } | null;
-  allergenData: { ifNoData: Policy }; paymentTerms: Record<PaymentTerms, Policy> }
+  allergenData: { ifNoData: Policy }; paymentTerms: Record<PaymentTerms, Policy>;
+  substitutionRules?: SubstitutionRule[] /* absent = none */ }
+export interface SubstitutePair { replaces: string; productId: string }
+export interface SubstitutionRule extends SubstitutePair { policy: "auto" | "never";
+  productName?: string; replacesName?: string /* display only */; decidedAt: string }
 export interface Mandate { iss: string /* customer */; mandateId: string; version: number; agent: string /* agentId */;
   signedBy: string /* accountId */; limits: MandateLimits; standingConstraints: { hard: HardConstraint[]; soft: SoftConstraint[] };
   iat: number; exp: number }
@@ -472,7 +476,7 @@ Then the order is stored with every reason collected:
 1. No current mandate for the principal's agent → `MANDATE_INVALID`.
 2. Expiry: `cutoffAt` passed → `CUTOFF_PASSED` with `nextDeliveryDate`; else `exp` passed → `OFFER_EXPIRED`. Cut-off takes precedence.
 3. Fixed guardrails: a sales block or lost date from `validate` → `SALES_BLOCKED` or `CUTOFF_PASSED`. The summed quantity of a product over 10 × the median of that product's order history (sales units, SPEC-010) or, with no history, over 2000 std units (no conversion → over) → `QUANTITY_UNUSUAL`. Unconfirmed stock over 500 std units for a product (no conversion → over) → `UNCONFIRMED_STOCK`.
-4. Buyer limits: order gross total over `maxOrderTotal` → `SPEND_OVER_LIMIT`; category not listed → `CATEGORY_NOT_ALLOWED`; `replaces` set and policy not `auto` → `SUBSTITUTION`; no order history row for the product (SPEC-010) and `newProducts: ask` → `NEW_PRODUCT`; reliability below minimum → `RELIABILITY_BELOW_MIN`, missing with `ifNoData: ask` → `UNCONFIRMED_DATA`; CO2 above maximum → `CO2_ABOVE_MAX`, missing with ask → `UNCONFIRMED_DATA`; a merged hard constraint on an attribute in `ALLERGEN_ATTRIBUTES` whose match in the offer is `unknown` and `allergenData.ifNoData: ask` → `UNCONFIRMED_ALLERGEN`; a merged hard constraint whose match is `contradicted` or missing → `UNCONFIRMED_ALLERGEN` whatever the setting; terms policy `ask` → `PAYMENT_TERMS`; `deliveryDate` after `requestedDate` or `shortfall` set → `AVAILABILITY_DIFFERS`.
+4. Buyer limits: order gross total over `maxOrderTotal` → `SPEND_OVER_LIMIT`; category not listed → `CATEGORY_NOT_ALLOWED`; `replaces` set and policy not `auto` → `SUBSTITUTION`, except policy `ask` with an `auto` substitution rule for the pair (`samePair`), which also adds a `check_passed` audit event with the `productId`; no order history row for the product (SPEC-010) and `newProducts: ask` → `NEW_PRODUCT`; reliability below minimum → `RELIABILITY_BELOW_MIN`, missing with `ifNoData: ask` → `UNCONFIRMED_DATA`; CO2 above maximum → `CO2_ABOVE_MAX`, missing with ask → `UNCONFIRMED_DATA`; a merged hard constraint on an attribute in `ALLERGEN_ATTRIBUTES` whose match in the offer is `unknown` and `allergenData.ifNoData: ask` → `UNCONFIRMED_ALLERGEN`; a merged hard constraint whose match is `contradicted` or missing → `UNCONFIRMED_ALLERGEN` whatever the setting; terms policy `ask` → `PAYMENT_TERMS`; `deliveryDate` after `requestedDate` or `shortfall` set → `AVAILABILITY_DIFFERS`.
 5. Result: any reject reason → `rejected`; else any approval reason → `pending_approval`; else `commitPlacement` (SPEC-010), which checks credit.
 
 - Invariant: an order with any hard-constraint match that is not `confirmed` is never placed automatically, except an `unknown` match under `allergenData.ifNoData: auto`.
@@ -575,6 +579,7 @@ export interface Order {
   offerSignature?: { state: "verified" | "expired" | "invalid"; validUntil: string };
   receiptSignature?: { state: "verified" | "pending" | "invalid"; signedAt: string | null };
   auditIntegrity?: "intact" | "unverified" | "broken";
+  standingOffer?: SubstitutePair & { timesApproved: number; replacesName?: string };
 }
 export interface PendingList {
   orders: Order[];
@@ -594,6 +599,7 @@ export interface PrecheckRequest {
 - `place_order` takes signed offer tokens only. `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
 - Idempotency: unique (customer, idempotencyKey). See SPEC-009 R2.
 - Replacement: when the buyer changes a pending proposal, `supersedes` identifies that exact order and proposal version. The server requires the same customer, account and agent, pending status and matching version under the customer lock; otherwise `409 CONFLICT`. Only an accepted replacement (`pending_approval`, `placed` or `awaiting_payment`) closes the predecessor as `declined`, with `decision.next: "stop"` and server identity. Rejected or failed replacements leave it open. Both audits identify the other order. The transaction preserves unrelated orders and rolls back both writes on failure. Idempotency includes the replacement reference; changing or omitting it with the same key gives `409 CONFLICT`. Replacement is not a human approval and never places the predecessor.
+- `standingOffer` is set only on the approve response, never stored: policy `ask`, the order has `SUBSTITUTION`, a substitute line has no rule yet, and the customer has approved that pair 3 or more times, this order included. The approval card then offers to save an `auto` rule; after a rejection it offers a `never` rule. The view saves either with `register_mandate`.
 - Trust and rationale fields (optional; the views hide each part when it is absent): `purpose` and line `rationale` come from the agent; line `allergens` with their `status` are computed by the server from the buyer's hard rules; `offerSignature` and `receiptSignature` report the wholesaler's signature checks; `auditIntegrity` and `integrityOk` report the audit signature or hash-chain check, per log and per entry. An `invalid` offer signature or an `error` allergen must be refused at approval by the server; the views only report them.
 - `approvalUrl` is computed when the order is read: `${publicBaseUrl()}/approvals/<orderId>` while pending, else null. It is not stored. It points to the approval page (SPEC-013), the one plain page with the approval actions.
 - Order history: a table owned by the orders context, with rows `{ productId, quantity /* sales units */, placedAt }`. A placed order adds one row per line. The demo seed adds rows directly; they are not orders and use no credit. `QUANTITY_UNUSUAL` compares sales units with the median of that product's rows; `NEW_PRODUCT` means the product has no row.
@@ -770,6 +776,7 @@ export interface DemoProducts {
   s2: { productId: string; quantity: Quantity };
   s3: { productId: string; quantity: Quantity } | null /* null = no product found */;
   late: { productId: string } | null;
+  s3Substitute?: { productId: string } /* the wholesaler's substitute for s3 */;
   triedForS3: { productId: string; quantity: Quantity }[];
 }
 ```
@@ -778,5 +785,5 @@ export interface DemoProducts {
 - Later (SPEC-002): `acct_pay` (customer `cust_pay_01`, agent `agent_pay`, pay-on-order, creditLimit null).
 - Mandate: maxOrderTotal 1000 EUR gross; categories null; substitutions ask; newProducts ask; reliability 0.9 with ifNoData auto; CO2 3.0 with ifNoData auto; allergenData ifNoData ask; payment terms invoice auto, pay_on_order ask; standing soft constraint countryOfOrigin fi. Demo users may change every value.
 - Demo products: the tracked file `data/demo-products.json`, parsed with `DemoProductsSchema`. It holds product ids, quantities, observation time and scenario status only, as the one allowed exception to the dataset rule in [team rules](team-rules.md) R-23. Seeds and scripts read it; when it is absent, seeds add no history and log one warning.
-- Order history rows (SPEC-010), in sales units derived from the demo file: S1 product, 3 rows of `s1.quantity`; S2 product, 3 rows of `s2.quantity` / 5, rounded up to a whole sales unit; S3 product (when `s3` is set), 3 rows of `s3.quantity` / 5, rounded up. Scenario 1 (`s1.quantity`) gives no reason; scenario 2 (`s2.quantity`, the 1000 LTR request, gross above 1000 EUR) gives exactly `SPEND_OVER_LIMIT`.
+- Order history rows (SPEC-010), in sales units derived from the demo file: S1 product, 3 rows of `s1.quantity`; S2 product, 3 rows of `s2.quantity` / 5, rounded up to a whole sales unit; S3 product (when `s3` is set), 3 rows of `s3.quantity` / 5, rounded up. With `s3Substitute` also set: 2 rows of the same amount for the substitute and 2 approved, placed orders of the substitute alone (`replaces` the S3 product), so the demo's approval of the pair is the third. Scenario 1 (`s1.quantity`) gives no reason; scenario 2 (`s2.quantity`, the 1000 LTR request, gross above 1000 EUR) gives exactly `SPEND_OVER_LIMIT`.
 - Credit: placed orders use up the 5000 EUR credit. `bun run db:reset` restores it; run it before each rehearsal.

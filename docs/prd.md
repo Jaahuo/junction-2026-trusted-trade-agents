@@ -304,7 +304,7 @@ The approver sets these in the mandate.
 | ---------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | Spend per order              | Gross total, with VAT and deposits, stays under the maximum    | Offer total. Variable-weight products need a tolerance.                                      |
 | Allowed categories           | The agent may only order from listed categories                | Category codes come without names, so the settings view needs labels.                        |
-| Substitution policy          | Never, ask, or auto within the wholesaler's listed substitutes | The substitution pairs in the product data                                                   |
+| Substitution policy          | Never, ask or auto, plus per-pair rules from the approval card | The substitution pairs in the product data                                                   |
 | New products                 | A product the customer has not ordered before needs approval   | Needs seeded order history in the mock                                                       |
 | Minimum delivery reliability | The product's score must meet the minimum                      | Scores exist for 4,425 products. No data means ask, unless the user chose auto.              |
 | Maximum CO2 per kg           | The product's footprint must be under the maximum              | Category-level estimates for 11,033 products. No data means ask, unless the user chose auto. |
@@ -385,6 +385,7 @@ The pending list contains only proposals that still need a decision. When the bu
 - Candidates are ranked good, better, best on soft constraints, price per litre or kilogram, delivery reliability and CO2.
 - The mandate's substitution policy decides the result: never means not offered, ask means approval with `SUBSTITUTION`, auto means placed if every other check passes.
 - Each substitute offer names the product it replaces and states the differences in price, origin and reliability.
+- Trust grows from the human's decisions, with nothing to type. After the human approves the same substitute 3 times, the card asks "Let the agent do this without asking?". Yes saves an auto rule for that pair: later orders skip `SUBSTITUTION` for it, and every other check still applies. After a rejection, the card asks whether the agent should keep suggesting that substitute; **Don't suggest again** saves a never rule: the agent is not offered that substitute again. The human removes either rule in the mandate view.
 
 ### Products that cannot be offered
 

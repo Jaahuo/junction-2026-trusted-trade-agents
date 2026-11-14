@@ -131,6 +131,7 @@ async function main(): Promise<void> {
   }
   const host = localHost(env, mcpUrl);
   if (command === "up") {
+    await compose("build", "open-webui");
     await compose("stop", "open-webui");
     await compose(
       "run",
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
       "--entrypoint",
       "python",
       "open-webui",
-      "/opt/companion/migrate_auth.py",
+      "/opt/trusted-trade/hosts/openwebui/scripts/migrate_auth.py",
     );
     await compose("up", "-d");
   }

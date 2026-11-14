@@ -4,6 +4,7 @@ import {
   type Order,
   OrderSchema,
   PendingListSchema,
+  RegisterMandateRequestSchema,
   ROUTES,
   TOOL_OUTPUT,
   type ToolName,
@@ -171,10 +172,26 @@ export function fixtureSource(fixture: unknown, now = () => new Date().toISOStri
       : new Promise<never>(() => {});
   // The orders as decided so far, so a second decision builds on the first.
   const orders = new Map<string, Order>();
+  // The mandate as registered so far, so a rule saved on the card shows in the next read.
+  let mandate = HARNESS_MANDATE;
   return {
     load: () => result,
     call: async (tool, args) => {
-      if (tool === "get_mandate") return HARNESS_MANDATE;
+      if (tool === "get_mandate") return mandate;
+      if (tool === "register_mandate") {
+        const { limits, standingConstraints, exp } = RegisterMandateRequestSchema.parse(args);
+        mandate = {
+          ...mandate,
+          mandate: {
+            ...mandate.mandate,
+            version: mandate.mandate.version + 1,
+            limits,
+            standingConstraints,
+            exp: exp ?? mandate.mandate.exp,
+          },
+        };
+        return mandate;
+      }
       const input = DecideApprovalInputSchema.safeParse(args);
       if (tool !== "decide_approval" || !input.success)
         throw new Error(`The harness has no server to call ${tool}.`);

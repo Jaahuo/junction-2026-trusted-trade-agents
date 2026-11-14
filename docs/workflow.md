@@ -61,7 +61,11 @@ The `gate` workflow keeps one aggregate `gate` check for required-check consumer
 | Publish | Build and smoke the selected main commit's image, then publish its digest   |
 | Deploy  | Deploy that digest with production-only credentials and verify health       |
 
-All jobs use GitHub-hosted `ubuntu-24.04` runners. PR, main-push and scheduled gates run code checks without production credentials. Only a successful main-push gate can enable automatic deployment. Scheduled gates do not deploy.
+Gate jobs use `[self-hosted, linux, x64, junction-ci]` to select four repository-scoped Vultr runners. Each runner has a separate Docker daemon and network namespace, so concurrent jobs can reuse service ports and container names. The separate `vultr-github-runners` OpenTofu project owns the host. This repository contains no runner infrastructure.
+
+These persistent runners are privileged and accept trusted code only. Do not approve untrusted fork jobs on them. PR, main-push and scheduled gates run code checks without production credentials.
+
+Deployment jobs stay on GitHub-hosted `ubuntu-24.04` runners. Only a successful main-push gate can enable automatic deployment. Scheduled gates do not deploy.
 
 ### Caches
 

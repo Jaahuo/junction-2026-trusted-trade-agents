@@ -8,7 +8,7 @@ import {
   type ToolName,
   VIEWS,
 } from "@app/contract";
-import { harnessDecide } from "./harness-decide.ts";
+import { HARNESS_MANDATE, harnessDecide } from "./harness-decide.ts";
 
 /** The orders in a loaded tool result: a pending list or one order. */
 const ordersIn = (raw: unknown): Order[] => {
@@ -149,6 +149,7 @@ export function fixtureSource(fixture: unknown, now = () => new Date().toISOStri
   return {
     load: () => result,
     call: async (tool, args) => {
+      if (tool === "get_mandate") return HARNESS_MANDATE;
       const input = DecideApprovalInputSchema.safeParse(args);
       if (tool !== "decide_approval" || !input.success)
         throw new Error(`The harness has no server to call ${tool}.`);

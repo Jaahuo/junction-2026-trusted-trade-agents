@@ -21,6 +21,11 @@ function bridgeSource(view: ViewName): Source {
       const result = await app.callServerTool(request);
       return { isError: result.isError === true, structuredContent: result.structuredContent };
     },
+    sendMessage: async (text) => {
+      await ready;
+      const result = await app.sendMessage({ role: "user", content: [{ type: "text", text }] });
+      return result.isError !== true;
+    },
   });
   const ready = app.connect();
   return source;

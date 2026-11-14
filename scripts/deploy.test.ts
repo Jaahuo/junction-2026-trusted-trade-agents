@@ -172,7 +172,7 @@ test("the chat host runs with login on, sign-up off and the hosted inference end
   expect(env.get("OPENAI_API_KEY")).toBe("inference-key");
   expect(env.get("MCP_SERVER_URL")).toBe(`${outputs.public_base_url}/mcp`);
   expect(env.get("AGENT_MODEL_ID")).toBe("nemotron-3.5-super-vl");
-  expect(env.get("OPENWEBUI_MAX_TOKENS")).toBe("4096");
+  expect(env.get("OPENWEBUI_MAX_TOKENS")).toBe("16384");
   expect(renderEnvFile(env)).toContain("WEBUI_ADMIN_PASSWORD=admin-password\n");
 });
 

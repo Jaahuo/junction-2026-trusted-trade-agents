@@ -58,7 +58,7 @@ export function provisionEnv(host: ChatHost): Record<string, string> {
     OPENAI_API_BASE_URL: host.openaiUrl || DEFAULT_MODEL_URL,
     OPENAI_API_KEY: host.openaiKey ?? "",
     AGENT_MODEL_ID: host.baseModel || DEFAULT_MODEL,
-    OPENWEBUI_MAX_TOKENS: host.maxTokens || "4096",
+    OPENWEBUI_MAX_TOKENS: host.maxTokens || "16384",
     VALIO_AIMO_RECIPE_PERMISSION: host.recipePermission || "False",
     MCP_AGENT_KEY: host.mcpKey || "",
   };

@@ -1,35 +1,38 @@
 import { css, html, nothing, type TemplateResult } from "lit";
 import { type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
+import { pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
+import { RESULTS } from "./strings.ts";
 
 export function renderSearchResults(data: ViewData<"search-results">): TemplateResult {
+  const text = pick(RESULTS);
   return html`<section class="results" part="done">
-    <h2>Search results</h2>
+    <h2>${text.title}</h2>
     <section class="constraints" aria-labelledby="constraints-heading">
-      <h3 id="constraints-heading">Applied constraints</h3>
+      <h3 id="constraints-heading">${text.applied}</h3>
       <div class="constraint-group">
-        <h4>Required</h4>
+        <h4>${text.required}</h4>
         ${
           data.constraints.hard.length === 0
-            ? html`<p class="secondary">None</p>`
+            ? html`<p class="secondary">${text.none}</p>`
             : html`<ul>
-                ${data.constraints.hard.map(() => html`<li>Lactose free</li>`)}
+                ${data.constraints.hard.map(() => html`<li>${text.lactoseFree}</li>`)}
               </ul>`
         }
       </div>
       <div class="constraint-group">
-        <h4>Preferred</h4>
+        <h4>${text.preferred}</h4>
         ${
           data.constraints.soft.length === 0
-            ? html`<p class="secondary">None</p>`
+            ? html`<p class="secondary">${text.none}</p>`
             : html`<ul>
                 ${data.constraints.soft.map(
                   (constraint) =>
                     html`<li>
                       ${
                         constraint.attribute === "countryOfOrigin"
-                          ? "Country of origin"
+                          ? text.countryOfOrigin
                           : constraint.attribute
                       }:
                       ${constraint.prefer}
@@ -44,37 +47,37 @@ export function renderSearchResults(data: ViewData<"search-results">): TemplateR
         (candidate) =>
           html`<article class="candidate">
             <h3>${candidate.name}</h3>
-            <p class="secondary body-small">Product ID: ${candidate.productId}</p>
+            <p class="secondary body-small">${text.productId(candidate.productId)}</p>
             <p class="quantity">
               ${
                 candidate.orderQuantity === null
-                  ? "Quantity unknown"
-                  : html`Order quantity: ${candidate.orderQuantity.value}
+                  ? text.quantityUnknown
+                  : html`${text.orderQuantity} ${candidate.orderQuantity.value}
                     ${candidate.orderQuantity.unit}`
               }
             </p>
             ${
               candidate.equals === null
                 ? nothing
-                : html`<p>Equals: ${candidate.equals.value} ${candidate.equals.unit}</p>`
+                : html`<p>${text.equals} ${candidate.equals.value} ${candidate.equals.unit}</p>`
             }
             <div class="matches">
-              <h4>Constraint matches</h4>
+              <h4>${text.matches}</h4>
               ${
                 Object.entries(candidate.match).length === 0
-                  ? html`<p class="secondary">No match information</p>`
+                  ? html`<p class="secondary">${text.noMatchInfo}</p>`
                   : html`<ul>
                       ${Object.entries(candidate.match).map(
                         ([attribute, state]) =>
                           html`<li>
-                            ${attribute === "lactose" ? "Lactose free" : attribute}:
+                            ${attribute === "lactose" ? text.lactoseFree : attribute}:
                             <span class=${state}
                               >${
                                 state === "confirmed"
-                                  ? "Confirmed"
+                                  ? text.confirmed
                                   : state === "unknown"
-                                    ? "Unknown"
-                                    : "Contradicted"
+                                    ? text.unknown
+                                    : text.contradicted
                               }</span
                             >
                           </li>`,

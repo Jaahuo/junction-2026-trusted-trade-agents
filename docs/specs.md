@@ -243,7 +243,7 @@ export const ALLERGEN_ATTRIBUTES = ["lactose"] as const; // hard constraint attr
 - Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the values in `HARD_CONSTRAINT_VALUES`. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
 - Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
-- A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by soft matches, then reliability.
+- A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, then soft matches, then reliability.
 - Quantity: consumer-unit volume × units per sales unit gives `perSalesUnit`; `GRM` converts to `KGM`; the order quantity rounds up to a multiple of `allowedLotSize`. No volume → `orderQuantity` and `equals` are null.
 - The index loads once per process; parallel first requests share one load.
 

@@ -46,8 +46,8 @@ Feature code belongs in `contexts/<name>/src/`. Stay within the task's agreed wr
 10. Commit focused changes. Never force-push. Use the task and PR workflow, with green CI for ordinary reversible work, independent review for high-impact changes and human approval for hard-to-reverse decisions.
 11. Keep secrets out of Git. Put local secrets in ignored `.env`, list names in `.env.example`, and read them with `env("NAME")` from `@app/server-kit`, not `process.env`. Do not share project tokens across repos.
 12. Put external APIs and LLMs behind application ports and infra adapters. `contexts/notes/src/infra/claude-summarizer.ts` is the reference. Test with a fake, not the real service.
-13. Read [DESIGN.md](DESIGN.md) before building a screen. Use `@app/ui` components, not raw `<button>`, `<input>`, `<select>`, `<textarea>`, `<dialog>` or `<table>`.
-14. Style with theme tokens, not raw palette colors, arbitrary values or inline styles. On an `@app/ui` component, `className` may only change layout.
+13. Read [DESIGN.md](DESIGN.md) before building a screen. Use `@app/ui` components, not raw `<button>`, `<input>`, `<select>`, `<textarea>`, `<dialog>` or `<table>`. MCP App views in `contexts/views` are the exception: they are framework-agnostic Lit web components that use the shared view styles in `contexts/views/src/shared/styles.ts` and native elements inside their shadow DOM. See [DESIGN.md](DESIGN.md#views).
+14. Style with theme tokens, not raw palette colors, arbitrary values or inline styles. On an `@app/ui` component, `className` may only change layout. Views use the view tokens in `contexts/views/src/shared/styles.ts`.
 15. If a component, variant or token is missing, coordinate the shared change, update `packages/ui` and `DESIGN.md` together, and assess its cross-area impact.
 16. Export demo `seed` from `api/seed.ts` and pass it in `context`. Reset should leave a state worth showing.
 17. Resolve lockfile conflicts deliberately and regenerate the lockfile as needed; do not discard a teammate's dependency changes.
@@ -57,4 +57,4 @@ Feature code belongs in `contexts/<name>/src/`. Stay within the task's agreed wr
 
 Elysia 2 is pinned to a release candidate in the root catalog. Do not change that version. Use the `elysiajs` skill for Elysia questions. Route options come before the handler: `.post(path, options, handler)`.
 
-Tool versions are pinned in `mise.toml`; change versions there, not with a global install. The stack is Bun, Elysia 2, Eden, Drizzle on PostgreSQL, React, TanStack Query, wouter, Tailwind and Vite+ (oxlint and oxfmt).
+Tool versions are pinned in `mise.toml`; change versions there, not with a global install. The stack is Bun, Elysia 2, Eden, Drizzle on PostgreSQL, React, TanStack Query, wouter, Tailwind, Lit (MCP App views) and Vite+ (oxlint and oxfmt).

@@ -20,7 +20,7 @@ These rules are for every person and agent who works on an issue of the product 
 14. R-14 A cross-context call goes through an application port, an Eden client typed by `import type { Api }` with `parseDate: false` and `selfBaseUrl()`, or `callRoute` where the import would create a cycle, and a fake in tests (AGENTS.md:38, 48).
 15. R-15 Only a wholesaler adapter in `src/infra/` names the wholesaler (docs/prd.md:82).
 16. R-16 Domain and ui code import only the `@app/contract` root; `@app/contract/server` is for infra and api (AGENTS.md:27-31).
-17. R-17 Screens and views use `@app/ui` components and theme tokens. A PR that changes a screen or view includes a screenshot of each changed state (AGENTS.md:49-51).
+17. R-17 Screens use `@app/ui` components and theme tokens. Views are Lit web components that use the view styles and tokens in `contexts/views/src/shared/styles.ts`. A PR that changes a screen or view includes a screenshot of each changed state (AGENTS.md:49-51).
 18. R-18 Signing keys live in an ignored `.env`; create them with `bun scripts/generate-keys.ts`, which arrives with the foundation issue. The wholesaler API key comes from the user: put it only in your worktree's `.env`, never in an issue, PR, commit or chat (AGENTS.md:47).
 19. R-19 Fetch `origin/main` before you create a worktree, and run `task.ts sync` after a dependency merges (AGENTS.md:5; workflow.md:7).
 20. R-20 An issue is done when its PR merged through `bun run ship` lists each acceptance criterion with its actual result, the gate result, the screenshots, and the risk evidence, and `bun run task finish` ran (workflow.md:9-11, 47-53).

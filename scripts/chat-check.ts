@@ -1,5 +1,5 @@
 // Runs chat sentences in the Open WebUI host and reports what the agent did with the tools.
-// Usage: bun scripts/host-check.ts [--only <name>] [--scenarios <file>] [--api <url>] [--no-reset] [--headed] [--timeout <seconds>]
+// Usage: bun scripts/chat-check.ts [--only <name>] [--scenarios <file>] [--api <url>] [--no-reset] [--headed] [--timeout <seconds>]
 // The host must run (bun scripts/openwebui.ts up) and point at the server under test.
 import { chromium, type Page } from "playwright-core";
 import { parseEnv } from "./openwebui.ts";
@@ -7,11 +7,11 @@ import { loadRuntime } from "./runtime.ts";
 
 const ROOT = `${import.meta.dir}/..`;
 const HOST_DIR = `${ROOT}/hosts/openwebui`;
-const OUT_DIR = `${ROOT}/.local/host-check`;
+const OUT_DIR = `${ROOT}/.local/chat-check`;
 const SERVER_ID = "trusted-trade";
 const MODEL_ID = "buyer-agent";
 const USAGE =
-  "Usage: bun scripts/host-check.ts [--only <name>] [--scenarios <file>] [--api <url>] [--no-reset] [--headed] [--timeout <seconds>]";
+  "Usage: bun scripts/chat-check.ts [--only <name>] [--scenarios <file>] [--api <url>] [--no-reset] [--headed] [--timeout <seconds>]";
 
 type Json = Record<string, unknown>;
 
@@ -631,7 +631,7 @@ async function main(): Promise<void> {
   // This worktree can reset only its own database.
   const reset = options.reset && options.api === undefined;
   console.log(
-    `host check: Open WebUI ${host} with the server at ${api}${reset ? "" : "; the database is not reset"}`,
+    `chat check: Open WebUI ${host} with the server at ${api}${reset ? "" : "; the database is not reset"}`,
   );
 
   await Bun.$`mkdir -p ${OUT_DIR}`.quiet();
@@ -673,7 +673,7 @@ async function main(): Promise<void> {
     await browser.close();
   }
   console.log(
-    `\n${passed} of ${scenarios.length} scenarios passed. Screenshots: .local/host-check/`,
+    `\n${passed} of ${scenarios.length} scenarios passed. Screenshots: .local/chat-check/`,
   );
   if (passed < scenarios.length) process.exit(1);
 }

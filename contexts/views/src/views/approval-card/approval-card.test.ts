@@ -4,6 +4,7 @@ import { DecideApprovalRequestSchema, type Order, OrderSchema } from "@app/contr
 import standingOffer from "../../../fixtures/approval-card/approved-standing-offer.json";
 import declinedSubstitution from "../../../fixtures/approval-card/declined-substitution.json";
 import pendingLate from "../../../fixtures/approval-card/pending-late.json";
+import pendingNew from "../../../fixtures/approval-card/pending-new-product.json";
 import pendingPartial from "../../../fixtures/approval-card/pending-partial.json";
 import pending from "../../../fixtures/approval-card/pending.json";
 import trust from "../../../fixtures/approval-card/pending-trust.json";
@@ -11,6 +12,8 @@ import mismatch from "../../../fixtures/approval-card/placed-mismatch.json";
 import signed from "../../../fixtures/approval-card/placed-signed.json";
 import unsigned from "../../../fixtures/approval-card/placed-unsigned.json";
 import { pick, setLang } from "../../shared/locale.ts";
+import { pricePerStdUnit } from "../offer-comparison/model.ts";
+import { OFFERS } from "../offer-comparison/strings.ts";
 import { ApprovalCard, reasonSummaries } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
 import { day, money } from "./parts.ts";
@@ -341,6 +344,22 @@ test("a declined substitute offers one tap to stop suggesting it", () => {
   expect(visible(card)).toContain(text.neverSaved(SUBSTITUTE, ORIGINAL));
 });
 
+for (const next of ["stop", "alternatives"] as const) {
+  test(`a server decline with next ${next} does not offer a standing substitution rule`, () => {
+    const text = pick(CARD);
+    const order = OrderSchema.parse(declinedSubstitution);
+    for (const event of order.audit) {
+      if (event.event === "declined") event.actor = "server";
+    }
+    const { card } = cardFor({
+      ...order,
+      decision: { ...order.decision, action: "reject", next, by: "server" },
+    });
+    expect(visible(card)).not.toContain(text.dontSuggestAgain);
+    expect(visible(card)).not.toContain(text.neverSuggest(SUBSTITUTE, ORIGINAL));
+  });
+}
+
 test("a pair that already has a rule is not offered again", () => {
   const text = pick(CARD);
   const { card } = cardFor(declinedSubstitution);
@@ -408,4 +427,119 @@ test("without a known order limit there is nothing to reduce to", () => {
   const { card } = cardFor(pending);
   card.orderLimit = null;
   expect(markup(card.render())).not.toContain('part="reduce"');
+});
+
+/** Each product row's offer summary, by offerId: status, short reason, price and toggle. */
+const offerRows = (card: ApprovalCard) =>
+  new Map(
+    markup(card.render())
+      .split('class="line-offer"')
+      .slice(1)
+      .map((block) => {
+        const id = /aria-controls=offer-(\S+)/.exec(block)?.[1] ?? "";
+        const field = (pattern: RegExp) => pattern.exec(block)?.[1]?.trim() ?? "";
+        return [
+          id,
+          {
+            expanded: field(/aria-expanded=(\w+)/),
+            label: field(/aria-label=(.*?)\s+@click=/s),
+            status: field(/offer-status (\w+)/),
+            reason: field(/class="offer-reason">([^<]*)</),
+            price: field(/class="offer-price">([^<]*)</),
+            block,
+          },
+        ];
+      }),
+  );
+const lineOf = (data: unknown, productId: string) => {
+  const line = OrderSchema.parse(data).lines.find((l) => l.claims.productId === productId);
+  if (line === undefined) throw new Error(`no line for ${productId}`);
+  return line.claims;
+};
+const rowOf = (card: ApprovalCard, offerId: string) => {
+  const row = offerRows(card).get(offerId);
+  if (row === undefined) throw new Error(`no offer row for ${offerId}`);
+  return row;
+};
+const MILK = "prod_test_off_test_10";
+const FLOUR = "prod_test_off_test_11";
+
+test("each product row shows the status icon, the short reason and the price per l/kg", () => {
+  const text = pick(OFFERS);
+  const over = cardFor(pending).card;
+  over.orderLimit = 1000;
+  const milk = lineOf(pending, MILK);
+  const milkRow = rowOf(over, milk.offerId);
+  expect(milkRow.status).toBe("attention");
+  expect(milkRow.reason).toBe(text.short.SPEND_OVER_LIMIT);
+  expect(milkRow.price).toBe(pricePerStdUnit(milk)?.shown ?? "missing");
+  expect(milkRow.label).toContain(text.words.needsApproval);
+  const flour0 = rowOf(over, lineOf(pending, FLOUR).offerId);
+  expect([flour0.status, flour0.reason]).toEqual(["auto", ""]);
+
+  const fresh = cardFor(pendingNew).card;
+  const barista = rowOf(fresh, lineOf(pendingNew, "prod_test_off_test_17").offerId);
+  expect([barista.status, barista.reason]).toEqual(["attention", text.short.NEW_PRODUCT]);
+  const flour = rowOf(fresh, lineOf(pendingNew, "prod_test_off_test_11").offerId);
+  expect(flour.reason).toBe(text.short.CO2_ABOVE_MAX);
+
+  const short = rowOf(
+    cardFor(pendingPartial).card,
+    lineOf(pendingPartial, "prod_test_off_test_18").offerId,
+  );
+  expect(short.status).toBe("attention");
+  expect(short.reason).toMatch(/ of /);
+  const late = rowOf(
+    cardFor(pendingLate).card,
+    lineOf(pendingLate, "prod_test_off_test_18").offerId,
+  );
+  expect(late.reason).toMatch(/late/);
+
+  expect(offerRows(cardFor(signed).card).size).toBe(0);
+});
+
+test("the chevron opens one product's details and closes the others", () => {
+  const { card } = cardFor(pending);
+  card.orderLimit = 1000;
+  const milk = lineOf(pending, MILK).offerId;
+  const flour = lineOf(pending, FLOUR).offerId;
+  expect([...offerRows(card).values()].every((row) => row.expanded === "false")).toBe(true);
+  click(card, `aria-controls=offer-${milk}`);
+  expect(rowOf(card, milk).expanded).toBe("true");
+  expect(rowOf(card, milk).block).toContain(pick(OFFERS).needsYourApproval);
+  expect(rowOf(card, milk).block).toContain(`id=offer-${milk}`);
+  click(card, `aria-controls=offer-${flour}`);
+  expect([rowOf(card, milk).expanded, rowOf(card, flour).expanded]).toEqual(["false", "true"]);
+  click(card, `aria-controls=offer-${flour}`);
+  expect([...offerRows(card).values()].every((row) => row.expanded === "false")).toBe(true);
+});
+
+test("missing reliability or CO2 reads No data, never 0", () => {
+  const order = OrderSchema.parse(pending);
+  const [first, ...rest] = order.lines;
+  if (first === undefined) throw new Error("no line");
+  const product = { ...first.claims.product, deliveryReliability: null, co2PerKg: null };
+  const blank = { ...order, lines: [{ ...first, claims: { ...first.claims, product } }, ...rest] };
+  const { card } = cardFor(blank);
+  click(card, `aria-controls=offer-${first.claims.offerId}`);
+  const text = pick(OFFERS);
+  const block = rowOf(card, first.claims.offerId).block.replace(/>\s+</g, "><");
+  expect(block).toContain(`<dt>${text.labels.reliability}</dt><dd>${text.noData}</dd>`);
+  expect(block).toContain(`<dt>${text.labels.co2}</dt><dd>${text.noData}</dd>`);
+});
+
+test("Finnish renders the product row and its details", () => {
+  setLang("fi");
+  try {
+    const { card } = cardFor(pending);
+    card.orderLimit = 1000;
+    const milk = lineOf(pending, MILK).offerId;
+    expect(rowOf(card, milk).reason).toBe(OFFERS.fi.short.SPEND_OVER_LIMIT);
+    expect(rowOf(card, milk).label).toContain(CARD.fi.offerDetails);
+    expect(rowOf(card, milk).label).not.toContain(CARD.en.offerDetails);
+    click(card, `aria-controls=offer-${milk}`);
+    expect(rowOf(card, milk).block).toContain(OFFERS.fi.needsYourApproval);
+  } finally {
+    setLang("en");
+  }
 });

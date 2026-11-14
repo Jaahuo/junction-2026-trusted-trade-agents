@@ -15,6 +15,8 @@ const en = {
   } satisfies Record<ReasonCode, string>,
   overOrderLimit: "Over your order limit",
   newProduct: "New product",
+  priceUnknown: "price per unit unknown",
+  offerDetails: "offer details",
   newProductDetail: (customer: string) =>
     `${customer} has not ordered a product in this order before`,
   substituteProposed: "Substitute proposed",
@@ -219,6 +221,8 @@ const fi: typeof en = {
   reason: FI_REASON,
   overOrderLimit: "Tilausraja ylittyy",
   newProduct: "Uusi tuote",
+  priceUnknown: "yksikköhinta ei tiedossa",
+  offerDetails: "tarjouksen tiedot",
   newProductDetail: (customer) => `${customer} ei ole aiemmin tilannut yhtä tilauksen tuotteista`,
   substituteProposed: "Korvaavaa tuotetta ehdotetaan",
   substituteDetail: "tilauksen tuote on loppu varastosta",

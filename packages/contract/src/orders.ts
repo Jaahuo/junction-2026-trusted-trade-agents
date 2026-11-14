@@ -176,6 +176,9 @@ export const PlaceOrderRequestSchema = z.strictObject({
   offers: OfferRefsSchema,
   alternatives: z.array(OfferRefSchema).max(20).optional(),
   originalRequest: z.string().optional(),
+  supersedes: z
+    .strictObject({ orderId: z.string().min(1), proposalVersion: z.number().int().positive() })
+    .optional(),
   idempotencyKey: z.string().min(1),
 });
 export type PlaceOrderRequest = z.infer<typeof PlaceOrderRequestSchema>;

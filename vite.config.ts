@@ -29,7 +29,6 @@ export default defineConfig({
       "contexts/*/migrations/**",
       ".agents/skills/elysiajs/**",
       "skills-lock.json",
-      "data/**",
       "docs/open_api.json",
     ],
   },

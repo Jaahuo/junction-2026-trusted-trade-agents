@@ -1,9 +1,6 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { expect, test } from "bun:test";
 import { toOrderQuantity } from "../domain/quantity.ts";
-import { DATA_FILES, loadProductFile, parseValueCsv } from "./product-file.ts";
+import { RawProductSchema, toProduct } from "./projection.ts";
 
 // Invented products in the shape of the product file (team rules R-23).
 const raw = (
@@ -132,25 +129,19 @@ const records = [
       ],
     },
   ),
-  { id: "T-BROKEN" },
 ];
 
-let dir = "";
-beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "catalog-index-"));
-  await Bun.write(join(dir, DATA_FILES.products), JSON.stringify(records));
-  await Bun.write(
-    join(dir, DATA_FILES.reliability),
-    "productId,deliveryReliability\r\nT-1,0.97\r\nT-2,1.5\r\n",
-  );
-  await Bun.write(join(dir, DATA_FILES.co2), "productId,AVG kg CO2-eq/kg\r\nT-1,2.34\r\nT-3,\r\n");
-});
-afterAll(async () => {
-  await rm(dir, { recursive: true, force: true });
-});
-
 const byId = async () =>
-  new Map((await loadProductFile(dir)).map((product) => [product.productId, product]));
+  new Map(
+    records.map((record) => {
+      const product = toProduct(
+        RawProductSchema.parse(record),
+        new Map([["T-1", 0.97]]),
+        new Map([["T-1", 2.34]]),
+      );
+      return [product.productId, product] as const;
+    }),
+  );
 
 test("the slim index maps names, claims, volume per sales unit, reliability, CO2 and substitutes", async () => {
   const products = await byId();
@@ -196,12 +187,6 @@ test("the slim index maps names, claims, volume per sales unit, reliability, CO2
     countryOfOrigin: null,
     claims: new Set(),
   });
-});
-
-test("CSV values parse with CRLF line ends and skip blank or out-of-range values", () => {
-  expect(parseValueCsv("id,v\r\na,0.5\r\nb,\r\nc,2\r\n", { min: 0, max: 1 })).toEqual(
-    new Map([["a", 0.5]]),
-  );
 });
 
 test("the volume per sales unit comes from weight, case, or identifiable consumer units", async () => {
@@ -255,28 +240,4 @@ test("a weight or case sales unit converts a std quantity to its own unit, round
     equals: null,
     quantityReason: "Sales unit conversion is unavailable.",
   });
-});
-
-test("a product file that is empty or has no valid record fails the load", async () => {
-  const empty = await mkdtemp(join(tmpdir(), "catalog-empty-"));
-  try {
-    await Bun.write(join(empty, DATA_FILES.reliability), "productId,deliveryReliability\r\n");
-    await Bun.write(join(empty, DATA_FILES.co2), "productId,AVG kg CO2-eq/kg\r\n");
-    const failures: unknown[] = [];
-    for (const fileRecords of [[], [{ id: "T-BAD" }]]) {
-      await Bun.write(join(empty, DATA_FILES.products), JSON.stringify(fileRecords));
-      failures.push(
-        await loadProductFile(empty).then(
-          () => null,
-          (error: unknown) => (error instanceof Error ? error.message : error),
-        ),
-      );
-    }
-    expect(failures).toEqual([
-      `${DATA_FILES.products} has no valid product records (0 rejected)`,
-      `${DATA_FILES.products} has no valid product records (1 rejected)`,
-    ]);
-  } finally {
-    await rm(empty, { recursive: true, force: true });
-  }
 });

@@ -1,9 +1,10 @@
 // Proves demo scenarios 1 and 2 against a running server through the SPEC-003 REST routes.
-// Usage: bun scripts/demo-smoke.ts --scenario 1|2 [--base-url <url>] [--no-reset]
+// Usage: bun scripts/demo-smoke.ts --scenario 1|2 [--base-url <url>] [--no-reset] [--database-env NAME]
 // It prints step names, HTTP statuses, order ids and audit event names only, never product data.
+import { readDemoProducts } from "../contexts/catalog/src/api/index.ts";
+import { closeDb, openDb } from "../packages/server-kit/src/index.ts";
 import {
   DecideApprovalRequestSchema,
-  DemoProductsSchema,
   ErrorEnvelopeSchema,
   OffersRequestSchema,
   OffersResultSchema,
@@ -14,6 +15,7 @@ import {
   SearchResultSchema,
   type DemoProducts,
 } from "../packages/contract/src/index.ts";
+import { demoDatabaseUrl } from "./check-demo-data.ts";
 import { loadRuntime } from "./runtime.ts";
 
 type Schema<T> = {
@@ -39,7 +41,7 @@ class StepFailure extends Error {
 
 function usage(message: string): never {
   console.error(
-    `${message}\nUsage: bun scripts/demo-smoke.ts --scenario 1|2 [--base-url <url>] [--no-reset]`,
+    `${message}\nUsage: bun scripts/demo-smoke.ts --scenario 1|2 [--base-url <url>] [--no-reset] [--database-env NAME]`,
   );
   process.exit(2);
 }
@@ -47,6 +49,7 @@ function usage(message: string): never {
 function parseArgs(args: string[]) {
   let scenario: 1 | 2 | undefined;
   let baseUrl: string | undefined;
+  let databaseEnv: string | undefined;
   let reset = true;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -57,11 +60,16 @@ function parseArgs(args: string[]) {
     } else if (arg === "--base-url") {
       baseUrl = args[++i];
       if (!baseUrl || !/^https?:\/\//.test(baseUrl)) usage("--base-url must be an http(s) URL.");
+    } else if (arg === "--database-env") {
+      databaseEnv = args[++i];
+      if (!databaseEnv) usage("--database-env requires an environment variable name.");
     } else if (arg === "--no-reset") reset = false;
     else usage(`Unknown argument: ${arg}`);
   }
   if (scenario === undefined) usage("Missing --scenario.");
-  return { scenario, baseUrl, reset };
+  if (databaseEnv !== undefined && reset)
+    usage("--database-env requires --no-reset; reset the selected target separately.");
+  return { scenario, baseUrl, reset, databaseEnv };
 }
 
 function issues(error: { issues: { path: PropertyKey[]; message: string }[] }): string {
@@ -279,13 +287,20 @@ async function runScenario(scenario: 1 | 2, baseUrl: string, reset: boolean, dem
 }
 
 async function main() {
-  const { scenario, baseUrl: flag, reset } = parseArgs(process.argv.slice(2));
+  const { scenario, baseUrl: flag, reset, databaseEnv } = parseArgs(process.argv.slice(2));
   let baseUrl = flag ?? Bun.env["PUBLIC_BASE_URL"];
   if (!baseUrl) {
     await loadRuntime();
     baseUrl = `http://127.0.0.1:${process.env["PORT"]}`;
   }
-  const demo = DemoProductsSchema.parse(await Bun.file(`${ROOT}/data/demo-products.json`).json());
+  const db = openDb(await demoDatabaseUrl(baseUrl, databaseEnv));
+  let demo: DemoProducts | null;
+  try {
+    demo = await readDemoProducts(db);
+  } finally {
+    await closeDb(db);
+  }
+  if (!demo) throw new Error("Demo products are not configured in the catalogue database.");
   try {
     await runScenario(scenario, baseUrl.replace(/\/$/, ""), reset, demo);
     console.log(`scenario ${scenario} passed`);

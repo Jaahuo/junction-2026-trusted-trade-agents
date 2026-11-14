@@ -28,7 +28,7 @@ const MESSAGES: Record<SearchError, string> = {
   CATALOG_UNAVAILABLE: "The product index could not be loaded.",
 };
 
-export const createApi = (deps: CatalogDeps = catalogAdapters()) =>
+export const createApi = (deps: CatalogDeps) =>
   new Elysia({ prefix: "/catalog" })
     .use(badRequestEnvelope())
     .post(
@@ -64,4 +64,14 @@ export const createApi = (deps: CatalogDeps = catalogAdapters()) =>
 
 export type Api = ReturnType<typeof createApi>;
 
-export const context: ContextModule = { name: "catalog", api: () => createApi() };
+export const context: ContextModule = {
+  name: "catalog",
+  api: (db) => createApi(catalogAdapters(db)),
+};
+
+export {
+  importCatalogue,
+  loadCatalogProducts,
+  migrateCatalogue,
+  readDemoProducts,
+} from "../infra/catalog-store.ts";

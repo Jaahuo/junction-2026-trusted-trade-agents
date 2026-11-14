@@ -1,16 +1,21 @@
-import { selfBaseUrl } from "@app/server-kit";
-import { type CatalogDeps, lazyCatalog } from "../application/catalog.ts";
+import { type Db, selfBaseUrl } from "@app/server-kit";
+import { type CatalogDeps, type CatalogSource, lazyCatalog } from "../application/catalog.ts";
 import { createCatalog } from "../domain/catalog.ts";
+import { loadCatalogProducts } from "../infra/catalog-store.ts";
 import { offersAvailability } from "../infra/availability-client.ts";
 import { edenMandateSource } from "../infra/mandate-client.ts";
-import { defaultDataDir, loadProductFile } from "../infra/product-file.ts";
 
-// One index per process (SPEC-004); nothing loads before the first request.
-const fileCatalog = lazyCatalog(async () => createCatalog(await loadProductFile(defaultDataDir())));
+const catalogs = new WeakMap<Db, CatalogSource>();
 
-/** The file catalog adapter of SPEC-005, the only one built. */
-export const catalogAdapters = (): CatalogDeps => ({
-  catalog: fileCatalog,
-  mandates: edenMandateSource(() => `${selfBaseUrl()}/api`),
-  availability: offersAvailability,
-});
+export const catalogAdapters = (db: Db): CatalogDeps => {
+  let catalog = catalogs.get(db);
+  if (catalog === undefined) {
+    catalog = lazyCatalog(async () => createCatalog(await loadCatalogProducts(db)));
+    catalogs.set(db, catalog);
+  }
+  return {
+    catalog,
+    mandates: edenMandateSource(() => `${selfBaseUrl()}/api`),
+    availability: offersAvailability,
+  };
+};

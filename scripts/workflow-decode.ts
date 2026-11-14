@@ -128,3 +128,31 @@ export function decodeBoard(value: unknown) {
     issue: { id: text(field(issue, "id")), projectItems: { nodes: items } },
   };
 }
+const name = (value: unknown) => text(field(value, "name"));
+export const decodeBacklogIssues = (value: unknown) =>
+  list(value, (entry) => ({
+    number: number(field(entry, "number")),
+    title: text(field(entry, "title")),
+    body: text(field(entry, "body")),
+    labels: list(field(entry, "labels"), name),
+    assignees: list(field(entry, "assignees"), (user) => login(user).login),
+    status:
+      list(field(entry, "projectItems"), (item) => {
+        const status = field(item, "status");
+        const label = status === null || status === undefined ? null : field(status, "name");
+        return typeof label === "string" && label.length > 0 ? label : null;
+      })[0] ?? null,
+  }));
+export const decodeIssueStates = (value: unknown) =>
+  list(value, (entry) => ({
+    number: number(field(entry, "number")),
+    state: text(field(entry, "state")),
+  }));
+export const decodeOpenPrs = (value: unknown) =>
+  list(value, (entry) => ({
+    number: number(field(entry, "number")),
+    headRefName: text(field(entry, "headRefName")),
+    closes: list(field(entry, "closingIssuesReferences"), (issue) =>
+      number(field(issue, "number")),
+    ),
+  }));

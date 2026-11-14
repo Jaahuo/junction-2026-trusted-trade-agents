@@ -15,6 +15,7 @@ import {
 import { err, ok, type Result } from "@app/kernel";
 import { grossTotal, netTotal, ruleFor } from "../domain/evaluate.ts";
 import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
+import { expireCutoff } from "./cutoff.ts";
 import { auditOf, checkTokens, type Evaluated, evaluateChecked, type OrderDeps } from "./orders.ts";
 import type { OrderTx, RequotePort, StoredOrder } from "./ports.ts";
 
@@ -620,6 +621,10 @@ const revise = async (
     const order = await tx.find(principal.customer, known.orderId);
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (!isOpen(order, request.proposalVersion)) return changed();
+    const cutoff = await expireCutoff(tx, order, deps.now());
+    if (cutoff === "audit_invalid")
+      return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+    if (cutoff === "expired") return changed();
     const added = checked.value.lines
       .map((line) => line.offerId)
       .filter((offerId) => !order.offerIds.includes(offerId));
@@ -690,6 +695,10 @@ export const decide = async (
     const order = await tx.find(principal.customer, orderId);
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (!isOpen(order, request.proposalVersion)) return changed();
+    const cutoff = await expireCutoff(tx, order, deps.now());
+    if (cutoff === "audit_invalid")
+      return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+    if (cutoff === "expired") return changed();
     const verified = await appendOrderAudit(order, []);
     if (!verified.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
     const decided =

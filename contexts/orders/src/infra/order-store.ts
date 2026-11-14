@@ -163,6 +163,24 @@ export const postgresOrderStore = (db: Db): OrderStore => ({
         .where(and(eq(orders.customer, customer), eq(orders.status, "pending_approval")))
         .orderBy(asc(orders.createdAt))
     ).map(toStored),
+  expiredPending: async (now, customer) =>
+    (
+      await db
+        .select()
+        .from(orders)
+        .where(
+          and(
+            eq(orders.status, "pending_approval"),
+            customer === undefined ? undefined : eq(orders.customer, customer),
+            sql`exists (
+              select 1 from jsonb_array_elements((${orders.lines} #>> '{}')::jsonb) as line
+              where line->'claims'->>'cutoffAt' is not null
+                and (line->'claims'->>'cutoffAt')::timestamptz <= ${now.toISOString()}::timestamptz
+            )`,
+          ),
+        )
+        .orderBy(asc(orders.createdAt), asc(orders.orderId))
+    ).map(toStored),
   findByKey: (customer, key) => findByKey(db, customer, key),
   history: async (customer, productIds) =>
     productIds.length === 0

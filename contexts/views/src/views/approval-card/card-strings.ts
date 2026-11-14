@@ -74,6 +74,9 @@ const en = {
   reducedToFit: (limit: string) =>
     `Reduced to fit your ${limit} limit. Check the amounts and confirm.`,
   cannotFit: "Even one of each is over your limit. Remove products or reject the order.",
+  reducePrompt: (orderId: string) =>
+    `Get order ${orderId} under my order limit. Keep the products we need most. Send me a new offer to approve.`,
+  reduceChips: ["Drop the items I need least", "Switch to cheaper brands", "Lower every quantity"],
   letAgentFind: "Let the agent find another",
   findPrompt: (name: string, outOfStock: string) =>
     `${name} is ${outOfStock}. Find the best replacement. Send me a new offer to approve.`,
@@ -273,6 +276,13 @@ const fi: typeof en = {
   reduceToFit: "Pienennä tilausrajaan",
   reducedToFit: (limit) => `Määrät pienennetty ${limit} tilausrajaan. Tarkista määrät ja vahvista.`,
   cannotFit: "Jo yksi kutakin ylittää rajasi. Poista tuotteita tai hylkää tilaus.",
+  reducePrompt: (orderId) =>
+    `Pienennä tilaus ${orderId} tilausrajani alle. Pidä tärkeimmät tuotteet. Lähetä minulle uusi tarjous hyväksyttäväksi.`,
+  reduceChips: [
+    "Poista vähiten tarvitut tuotteet",
+    "Vaihda edullisempiin merkkeihin",
+    "Pienennä kaikkia määriä",
+  ],
   letAgentFind: "Anna agentin etsiä toinen",
   findPrompt: (name, outOfStock) =>
     `${name} on ${outOfStock}. Etsi paras korvaava tuote. Lähetä minulle uusi tarjous hyväksyttäväksi.`,

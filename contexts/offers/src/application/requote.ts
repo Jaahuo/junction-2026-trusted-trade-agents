@@ -6,7 +6,7 @@ import type {
   Principal,
   RequoteRequest,
 } from "@app/contract";
-import { getOffers, type GetOffersError } from "./get-offers.ts";
+import { getOffers, type GetOffersError, mapLimit, PRECHECK_CONCURRENCY } from "./get-offers.ts";
 import type { OffersDeps } from "./ports.ts";
 
 const badRequest = (message: string): Result<never, GetOffersError> =>
@@ -30,7 +30,8 @@ const claimsOf = async (
 
 /**
  * A substitute keeps naming the product it replaces, so its approval rule still applies. The fresh
- * offer is signed again with that link; its pre-check was made without it, so it is dropped.
+ * offer is signed again with that link under a new offer ID; its pre-check, rank and comparison
+ * were made without it, so they are dropped.
  */
 const relink = async (deps: OffersDeps, offer: OfferLine, replaces: string): Promise<OfferLine> => {
   const { iat: _iat, exp, ...claims } = offer.claims;
@@ -49,7 +50,7 @@ const relink = async (deps: OffersDeps, offer: OfferLine, replaces: string): Pro
 };
 
 /**
- * SPEC-006 `requote`: a new offer for the product, quantity and date of each token, or the given
+ * SPEC-006 `requote`: a new offer for the product, quantity and requested date of each token, or the given
  * changes, under the current mandate, through the same steps as `get_offers`. One offer per token,
  * in token order, or an omitted entry with the reason. No new substitutes are proposed.
  */
@@ -74,9 +75,8 @@ export async function requote(
   if ([...changes.keys()].some((productId) => !products.has(productId)))
     return badRequest("A change names a product that none of the tokens offers.");
 
-  const offers: OfferLine[] = [];
-  const omitted: OffersResult["omitted"] = [];
-  for (const claims of sources.value) {
+  // One get_offers pass per token, a few at a time, so a long order stays inside the caller's timeout.
+  const results = await mapLimit(sources.value, PRECHECK_CONCURRENCY, async (claims) => {
     const change = changes.get(claims.productId);
     const result = await getOffers(deps, principal, {
       lines: [{ productId: claims.productId, quantity: change?.quantity ?? claims.quantity }],
@@ -86,10 +86,19 @@ export async function requote(
       soft: claims.constraints.soft,
     });
     if (!result.ok) return result;
-    omitted.push(...result.value.omitted);
     const fresh = result.value.offers.find((offer) => offer.claims.replaces === null);
-    if (fresh === undefined) continue;
-    offers.push(claims.replaces === null ? fresh : await relink(deps, fresh, claims.replaces));
+    const offer =
+      fresh === undefined || claims.replaces === null
+        ? fresh
+        : await relink(deps, fresh, claims.replaces);
+    return ok({ offer, omitted: result.value.omitted });
+  });
+  const offers: OfferLine[] = [];
+  const omitted: OffersResult["omitted"] = [];
+  for (const result of results) {
+    if (!result.ok) return result;
+    if (result.value.offer !== undefined) offers.push(result.value.offer);
+    omitted.push(...result.value.omitted);
   }
   return ok({ offers, omitted });
 }

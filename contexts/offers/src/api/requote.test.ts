@@ -82,8 +82,8 @@ test("requote issues a new signed offer for the token's product at the changed q
   expect((await verify(fresh?.token ?? "")).ok).toBe(true);
 });
 
-test("a requoted substitute still names the product it replaces", async () => {
-  const { app, offer } = await mount();
+test("a requoted substitute still names the product it replaces, inside its signed token", async () => {
+  const { app, offer, verify } = await mount();
   const response = await requote(app, {
     tokens: [await offer({ productId: RYE, replaces: OAT })],
   });
@@ -91,9 +91,26 @@ test("a requoted substitute still names the product it replaces", async () => {
   expect(result.offers.map((line) => [line.claims.productId, line.claims.replaces])).toEqual([
     [RYE, OAT],
   ]);
+  const [fresh] = result.offers;
+  const verified = await verify(fresh?.token ?? "");
+  if (!verified.ok) throw new Error("The requoted substitute token failed verification.");
+  expect(verified.value).toMatchObject({ productId: RYE, replaces: OAT });
+  expect(verified.value.offerId).not.toBe("off_source");
+  expect(verified.value.offerId).toBe(fresh?.offerId ?? "");
 });
 
-test("an expired token is requoted for the same product and quantity", async () => {
+test("requote keeps the token's hard constraints and payment terms", async () => {
+  const { app, offer, verify } = await mount();
+  const response = await requote(app, { tokens: [await offer()] });
+  const result = OffersResultSchema.parse(await response.json());
+  const verified = await verify(result.offers[0]?.token ?? "");
+  if (!verified.ok) throw new Error("The requoted token failed verification.");
+  expect(fixtures.offerClaims.constraints.hard).not.toEqual([]);
+  expect(verified.value.constraints).toEqual(fixtures.offerClaims.constraints);
+  expect(verified.value.paymentTerms).toBe(fixtures.offerClaims.paymentTerms);
+});
+
+test("an expired token is requoted for the same quantity", async () => {
   const { app, offer } = await mount();
   const response = await requote(app, {
     tokens: [await offer({}, new Date("2026-11-14T09:00:00Z"))],
@@ -115,10 +132,12 @@ test("a quantity the product cannot be offered at is omitted with its reason", a
   expect(result.omitted.map((entry) => entry.reason)).toEqual(["INVALID_QUANTITY"]);
 });
 
-test("a token that fails verification, or a change for a product no token offers, gives 400", async () => {
+test("a token that fails verification or is signed by another key, a change for a product no token offers, or another customer's token gives 400", async () => {
   const { app, offer } = await mount();
+  const other = await mount();
   const bodies = [
     { tokens: ["a.b.c"] },
+    { tokens: [await other.offer()] },
     { tokens: [await offer()], changes: [{ productId: RYE, quantity: { value: 1, unit: "CT" } }] },
     { tokens: [await offer({ customer: "cust_other" })] },
   ];

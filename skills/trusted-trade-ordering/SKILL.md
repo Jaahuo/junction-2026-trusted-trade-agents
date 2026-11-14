@@ -56,7 +56,7 @@ Only a human registers limits. You draft them.
 
 - Money is EUR. Limits apply to the gross total: VAT and deposits included.
 - State the user's quantity in standard units: `LTR` for volume, `KGM` for mass.
-- The wholesaler sells in its own sales unit (for example `KI`). Every candidate gives `orderQuantity` (sales unit) and `equals` (standard units). Pass `orderQuantity` unchanged to `get_offers`: its unit is the product's sales unit and its value is a multiple of the lot size.
+- The wholesaler sells in its own sales unit (for example `KI`). Every candidate gives `orderQuantity` (sales unit) and `equals` (standard units). Pass `orderQuantity` unchanged to `quote_offers` (or `get_offers` when the user asks to compare offers): its unit is the product's sales unit and its value is a multiple of the lot size.
 - A candidate with `orderQuantity: null` has no conversion. Tell the user. Do not compute one.
 - Dates are `YYYY-MM-DD`.
 - `paymentTerms` must equal the account's terms. The demo account uses `invoice`. Another value gives 400.

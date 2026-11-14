@@ -100,6 +100,12 @@ Assess actual blast radius and reversibility rather than choosing based on file 
 }
 ```
 
-The script checks exact head, required gate and current main; updates can invalidate review or checks. It cannot establish that an account represents a human, that agents are independent, or that a review was substantive. These are team conventions, not cryptographically verified or server-enforced guarantees.
+`ship --merge` waits for a running gate and checks the exact head and the required gate. How it treats a branch that is behind `origin/main` depends on risk:
+
+- An `ordinary` PR merges while behind when GitHub reports no conflicts. Main moves every few minutes and the gate takes about two, so requiring current main stalls merges. The gate on every push to main is the backstop: fix or revert a red main before shipping anything else.
+- An `impact` or `lock-in` PR must include current main. Ship merges `origin/main` into the branch with a merge commit (no rebase, no force-push), pushes, waits for the new gate and retries up to six times. On a conflict it aborts the merge and stops.
+- A review of an earlier head still counts when that head is an ancestor of the current head and the PR's own change is identical: the same `git patch-id --stable` of its diff from main. A merge that resolves conflicts, or a main change next to the PR's lines, changes the patch id and requires a new review.
+
+Other new commits still invalidate review and checks. It cannot establish that an account represents a human, that agents are independent, or that a review was substantive. These are team conventions, not cryptographically verified or server-enforced guarantees.
 
 Local workflow checks are not equivalent to server enforcement. On an eligible plan, configure and verify private-repo branch protection and required CI, and verify who can bypass them. A private GitHub Free repository may instead operate in explicitly approved convention mode. In that mode direct pushes and bypasses are possible, and local ship checks do not give an atomic guarantee that the base stays up to date through merge. The team must follow the workflow voluntarily; do not represent it as server-enforced. Do not automatically upgrade the account or switch the repository to public. Repo collaborators and board collaborators are separate, and invitation status is not proof of access.

@@ -10,7 +10,7 @@ import unsigned from "../../../fixtures/approval-card/placed-unsigned.json";
 import { pick, setLang } from "../../shared/locale.ts";
 import { ApprovalCard, reasonSummaries } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
-import { amount, day } from "./parts.ts";
+import { day } from "./parts.ts";
 
 const isTemplate = (value: unknown): value is { strings: readonly string[]; values: unknown[] } =>
   typeof value === "object" &&
@@ -20,27 +20,20 @@ const isTemplate = (value: unknown): value is { strings: readonly string[]; valu
   Array.isArray(value.strings) &&
   Array.isArray(value.values);
 
-/** The `@click` handler of the button whose markup contains `marker`, found without a DOM. */
-const clickHandler = (value: unknown, marker: string): (() => void) | undefined => {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = clickHandler(item, marker);
-      if (found !== undefined) return found;
-    }
-    return undefined;
-  }
-  if (!isTemplate(value)) return undefined;
+/** Every `event` handler (`@click` by default) of the markup containing `marker`, without a DOM. */
+const handlers = (value: unknown, marker: string, event = "@click="): (() => void)[] => {
+  if (Array.isArray(value)) return value.flatMap((item) => handlers(item, marker, event));
+  if (!isTemplate(value)) return [];
+  const found: (() => void)[] = [];
   if (value.strings.join("").includes(marker)) {
-    const index = value.strings.findIndex((part) => part.trimEnd().endsWith("@click="));
+    const index = value.strings.findIndex((part) => part.trimEnd().endsWith(event));
     const handler = value.values[index];
-    if (typeof handler === "function") return () => handler();
+    if (typeof handler === "function") found.push(() => handler());
   }
-  for (const nested of value.values) {
-    const found = clickHandler(nested, marker);
-    if (found !== undefined) return found;
-  }
-  return undefined;
+  for (const nested of value.values) found.push(...handlers(nested, marker, event));
+  return found;
 };
+const clickHandler = (value: unknown, marker: string) => handlers(value, marker)[0];
 
 /** The rendered text and attribute values of a template, in order, without a DOM. */
 const flatten = (value: unknown): string => {
@@ -69,32 +62,37 @@ const firstClaims = (order: Order) => {
   return line.claims;
 };
 
-test("a line with a shortfall gets a to-do naming the amount short, linked to its choices", () => {
+test("a line with a shortfall gets a to-do naming what arrives, linked to its choices", () => {
   const text = pick(CARD);
   const order = OrderSchema.parse(pendingPartial);
   const c = firstClaims(order);
-  if (c.shortfall === null) throw new Error("the partial fixture's first line is short");
   const shown = flatten(cardFor(order).card.render());
 
-  expect(shown).toContain(text.shortForDelivery(amount(c.shortfall)));
-  expect(shown).toContain(text.chooseHowToHandle);
-  expect(shown).toContain(text.howToHandle(amount(c.shortfall)));
+  // 24 packs of 0.5 kg arrive; the 8 kg shortfall is 16 packs.
+  expect(shown).toContain(text.onlyCanArrive("24", text.packs("40"), day(c.deliveryDate)));
+  expect(shown).toContain(text.chooseHowToDeliver);
+  expect(shown).toContain(text.howToHandle(text.packs("16")));
+  expect(shown).toContain(text.twoDeliveries);
   expect(shown).toContain(`id="line-${c.offerId}"`);
   expect(shown).not.toContain(text.checkYouWantProduct);
   expect(reasonSummaries(order)).toEqual([text.notAllOnTime(c.product.name)]);
 });
 
-test("a late line with no shortfall is flagged and gets a to-do naming the delivery date", () => {
+test("a late line with no shortfall is flagged with the same choices as a short line", () => {
   const text = pick(CARD);
   const order = OrderSchema.parse(pendingLate);
   const c = firstClaims(order);
   const shown = flatten(cardFor(order).card.render());
 
-  expect(shown).toContain(text.arrivesOn(day(c.deliveryDate), day(c.requestedDate)));
-  expect(shown).toContain(text.approveOrRemove);
+  expect(shown).toContain(
+    text.canArriveLate(day(c.deliveryDate), text.days(2), day(c.requestedDate)),
+  );
+  expect(shown).toContain(text.chooseHowToDeliver);
   expect(shown).toContain('class="product flagged"');
-  expect(shown).toContain(text.letAgentFindOnTime);
-  expect(shown).not.toContain("short for this delivery");
+  expect(shown).toContain(text.howToHandleLate);
+  expect(shown).toContain(text.deliverOn(day(c.deliveryDate)));
+  expect(shown).toContain(text.letAgentSort);
+  expect(shown).not.toContain(text.onlyCanArrive("24", text.packs("24"), day(c.deliveryDate)));
   expect(reasonSummaries(order)).toEqual([text.arrivesLateNamed(c.product.name)]);
 });
 
@@ -102,12 +100,13 @@ test("a line that is late and short gets one to-do per case", () => {
   const text = pick(CARD);
   const order = OrderSchema.parse(pendingPartial);
   const c = firstClaims(order);
-  if (c.shortfall === null) throw new Error("the partial fixture's first line is short");
   c.deliveryDate = "2026-11-18";
   const shown = flatten(cardFor(order).card.render());
 
-  expect(shown).toContain(text.shortForDelivery(amount(c.shortfall)));
-  expect(shown).toContain(text.arrivesOn(day(c.deliveryDate), day(c.requestedDate)));
+  expect(shown).toContain(text.onlyCanArrive("24", text.packs("40"), day(c.deliveryDate)));
+  expect(shown).toContain(
+    text.canArriveLate(day(c.deliveryDate), text.days(2), day(c.requestedDate)),
+  );
 });
 
 test("a late line's choices send approve, remove or the agent prompt", () => {
@@ -124,15 +123,19 @@ test("a late line's choices send approve, remove or the agent prompt", () => {
   ]);
 
   const removing = cardFor(order);
-  const remove = clickHandler(removing.card.render(), 'class="link-button"');
-  if (remove === undefined) throw new Error("the late line shows its remove button");
-  remove();
+  const more = clickHandler(removing.card.render(), 'class="more-products"');
+  if (more === undefined) throw new Error("the late line shows its other choices");
+  more();
+  // The second handling radio is "Remove from this order".
+  const [, removeRadio] = handlers(removing.card.render(), 'name="handling-', "@change=");
+  if (removeRadio === undefined) throw new Error("the late line offers removal");
+  removeRadio();
   const confirm = clickHandler(removing.card.render(), 'part="button approve"');
   if (confirm === undefined) throw new Error("the pending card shows the approve button");
   confirm();
   expect(removing.sent).toEqual([
     {
-      type: "tt-confirm-changes",
+      type: "tt-decide",
       detail: {
         decision: "edit",
         proposalVersion: order.proposalVersion,

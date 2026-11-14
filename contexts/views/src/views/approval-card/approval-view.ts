@@ -9,6 +9,7 @@ import {
 } from "../../shared/bridge.ts";
 import checkCircle from "../../shared/icons/check-circle-32.svg?raw";
 import loadingIcon from "../../shared/icons/loading.svg?raw";
+import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 import warningSmall from "../../shared/icons/warning-16.svg?raw";
 import warningLarge from "../../shared/icons/warning-32.svg?raw";
 import { base } from "../../shared/styles.ts";
@@ -26,6 +27,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     ...ViewElement.properties,
     openId: { state: true },
     busyId: { state: true },
+    updatingId: { state: true },
   };
 
   static override styles = [
@@ -122,6 +124,17 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       a.btn {
         text-decoration: none;
       }
+      .updating {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-lg);
+        padding: var(--spacing-lg) var(--spacing-xl);
+        background: var(--color-bg-brand);
+        color: var(--color-text-on-brand);
+      }
+      .updating-text {
+        flex: 1;
+      }
       .back {
         margin-bottom: var(--spacing-sm);
         padding-left: 0;
@@ -144,11 +157,14 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   readonly entry = viewEntry("approval-card");
   declare private openId: string | null;
   declare private busyId: string | null;
+  /** The order the agent is updating after a message (prototype P4). */
+  declare private updatingId: string | null;
 
   constructor() {
     super();
     this.openId = null;
     this.busyId = null;
+    this.updatingId = null;
   }
 
   private reload() {
@@ -157,7 +173,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     void loadView(this.entry, this.source).then((state) => (this.state = state));
   }
 
-  private async decide(order: Order, request: DecideApprovalRequest) {
+  /** Sends a decision; `thenApprove` approves the new offer an edit returns ("Save and order"). */
+  private async decide(order: Order, request: DecideApprovalRequest, thenApprove = false) {
     if (this.source === null) return;
     this.busyId = order.orderId;
     const result = await callAction(
@@ -174,6 +191,42 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const state = this.state;
     if (state.kind === "done")
       this.state = { kind: "done", data: replace(state.data, result.data) };
+    const updated = result.data;
+    if (thenApprove && updated.status === "pending_approval")
+      await this.decide(updated, {
+        decision: "approve",
+        proposalVersion: updated.proposalVersion,
+      });
+  }
+
+  /** Sends the card's message to the agent in the chat; the card then waits for the update. */
+  private async ask(order: Order, text: string) {
+    const message = this.source?.message;
+    if (message === undefined) return;
+    this.updatingId = order.orderId;
+    try {
+      await message(text);
+    } catch (cause) {
+      this.updatingId = null;
+      this.state = {
+        kind: "error",
+        message: cause instanceof Error ? cause.message : "The message was not sent.",
+        plainUrl: order.approvalUrl,
+      };
+    }
+  }
+
+  /** Prototype P4: the collapsed card while the agent works on the order. */
+  private updating(order: Order) {
+    const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
+    return html`<article class="updating" part="updating" role="status">
+      ${icon(logo, "Valio Aimo")}
+      <div class="updating-text">
+        <p class="strong">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</p>
+        <p class="body-small">The agent is updating this order</p>
+      </div>
+      <span class="spinner" aria-hidden="true"></span>
+    </article>`;
   }
 
   private loading() {
@@ -293,6 +346,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const orders = "orders" in data ? data.orders : [data];
     const open = orders.length === 1 ? orders[0] : orders.find((o) => o.orderId === this.openId);
     if (open === undefined) return orders.length === 0 ? this.empty() : this.list(orders);
+    if (this.updatingId === open.orderId) return this.updating(open);
     return html`${
         orders.length > 1
           ? html`<button class="btn ghost back" @click=${() => (this.openId = null)}>
@@ -303,7 +357,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       <tt-approval-card
         .order=${open}
         ?busy=${this.busyId === open.orderId}
+        ?can-ask=${this.source?.message !== undefined}
         @tt-decide=${(e: CustomEvent<DecideApprovalRequest>) => this.decide(open, e.detail)}
+        @tt-edit-and-order=${(e: CustomEvent<DecideApprovalRequest>) =>
+          this.decide(open, e.detail, true)}
+        @tt-ask-agent=${(e: CustomEvent<string>) => this.ask(open, e.detail)}
       ></tt-approval-card>`;
   }
 }

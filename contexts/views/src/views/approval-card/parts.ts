@@ -15,7 +15,8 @@ const UNIT: Record<string, string> = {
   PCE: "pcs",
   ST: "pcs",
 };
-const unit = (code: string) => UNIT[code] ?? code;
+/** "packs", "kg": the short name of a unit code. */
+export const unit = (code: string) => UNIT[code] ?? code;
 
 const euro = (digits: number) =>
   new Intl.NumberFormat("en-GB", {

@@ -23,6 +23,8 @@ export type ViewState<T> =
 export type Source = {
   load: () => Promise<unknown>;
   call: (tool: ToolName, args: Record<string, unknown>) => Promise<unknown>;
+  /** Sends a message to the agent in the chat; absent outside a chat (plain mode). */
+  message?: (text: string) => Promise<void>;
 };
 
 /** The part of the MCP Apps bridge (`App` of ext-apps) a view uses. */
@@ -32,6 +34,8 @@ export type Host = {
     name: string;
     arguments: Record<string, unknown>;
   }) => Promise<{ isError?: boolean; structuredContent?: unknown }>;
+  /** Posts a user message to the chat; false when the host rejects it. */
+  sendMessage: (text: string) => Promise<boolean>;
 };
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -52,6 +56,9 @@ export function hostSource(host: Host): Source {
       const response = await host.callServerTool({ name, arguments: args });
       if (response.isError === true) throw new Error(`${name} failed.`);
       return response.structuredContent;
+    },
+    message: async (text) => {
+      if (!(await host.sendMessage(text))) throw new Error("The chat did not take the message.");
     },
   };
 }
@@ -124,6 +131,8 @@ export function fixtureSource(fixture: unknown): Source {
     call: async (tool) => {
       throw new Error(`The harness has no server to call ${tool}.`);
     },
+    // The harness shows the chat states, so messages are accepted and dropped.
+    message: async () => {},
   };
 }
 

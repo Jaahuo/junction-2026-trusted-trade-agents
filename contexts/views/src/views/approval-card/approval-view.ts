@@ -216,9 +216,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       updated.reasons.every((r) => order.reasons.includes(r))
     )
       await this.decide(updated, { decision: "approve", proposalVersion: updated.proposalVersion });
-    // The agent says in the chat that it will not place a rejected order.
+    // The agent answers in the chat: it confirms a placed order and will not place a rejected one.
     if (request.decision === "reject" && updated.status !== "pending_approval")
       void this.source.message?.(`I rejected order ${order.orderId}. Do not place it.`);
+    if (request.decision !== "reject" && updated.status === "placed")
+      void this.source.message?.(`I confirmed order ${order.orderId}.`);
   }
 
   /** Sends the card's message to the agent in the chat; with `update` the card waits for it. */

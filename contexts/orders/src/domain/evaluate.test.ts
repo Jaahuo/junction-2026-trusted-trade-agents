@@ -333,3 +333,55 @@ describe("rejections", () => {
     expect(run([claim()], { live: lost }).reasons).toEqual(["CUTOFF_PASSED"]);
   });
 });
+
+const rule = (policy: "auto" | "never", productId = fixtures.offerClaims.productId) => ({
+  replaces: "prod_test_requested",
+  productId,
+  policy,
+  decidedAt: "2026-11-14T10:00:00+00:00",
+});
+
+describe("substitution rules", () => {
+  const substitute = claim({ replaces: "prod_test_requested" });
+
+  test("an auto rule for the pair places the substitute without asking", () => {
+    const mandate = mandateWith({ substitutions: "ask", substitutionRules: [rule("auto")] });
+    expect(run([substitute], { mandate })).toEqual({ decision: "auto", reasons: [] });
+  });
+
+  test("an auto rule for another pair still asks", () => {
+    const mandate = mandateWith({
+      substitutions: "ask",
+      substitutionRules: [rule("auto", "prod_test_other")],
+    });
+    expect(run([substitute], { mandate }).reasons).toEqual(["SUBSTITUTION"]);
+  });
+
+  test("a never rule or substitutions never still asks", () => {
+    for (const mandate of [
+      mandateWith({ substitutions: "ask", substitutionRules: [rule("never")] }),
+      mandateWith({ substitutions: "never", substitutionRules: [rule("auto")] }),
+    ])
+      expect(run([substitute], { mandate }).reasons).toEqual(["SUBSTITUTION"]);
+  });
+
+  test("an auto rule removes only SUBSTITUTION", () => {
+    const mandate = mandateWith({
+      substitutions: "ask",
+      substitutionRules: [rule("auto")],
+      newProducts: "ask",
+      allergenData: { ifNoData: "ask" },
+      maxOrderTotal: { value: 50, currency: "EUR", basis: "gross" },
+    });
+    const result = run(
+      [claim({ replaces: "prod_test_requested" }, { match: { lactose: "unknown" } })],
+      {
+        mandate,
+        history: [],
+      },
+    );
+    expect(result.reasons.toSorted()).toEqual(
+      (["NEW_PRODUCT", "SPEND_OVER_LIMIT", "UNCONFIRMED_ALLERGEN"] as ReasonCode[]).toSorted(),
+    );
+  });
+});

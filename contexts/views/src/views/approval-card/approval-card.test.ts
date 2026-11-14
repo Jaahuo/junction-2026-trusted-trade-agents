@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { DecideApprovalRequestSchema, type Order, OrderSchema } from "@app/contract";
+import standingOffer from "../../../fixtures/approval-card/approved-standing-offer.json";
+import declinedSubstitution from "../../../fixtures/approval-card/declined-substitution.json";
 import pendingLate from "../../../fixtures/approval-card/pending-late.json";
 import pendingPartial from "../../../fixtures/approval-card/pending-partial.json";
 import pending from "../../../fixtures/approval-card/pending.json";
@@ -55,6 +57,8 @@ const ORDER_FIXTURES = [
   "awaiting-payment",
   "declined-stop",
   "declined-alternatives",
+  "approved-standing-offer",
+  "declined-substitution",
 ];
 
 const firstClaims = (order: Order) => {
@@ -289,6 +293,75 @@ test("the trust parts follow the view language", () => {
     expect(output).toContain("Voi sisältää seesaminsiemeniä");
     expect(output).toContain("Rikkoo sääntöäsi: ei kananmunaa");
     expect(output).toContain("Tarkista, sopiiko se sääntöösi: ei seesaminsiemeniä");
+  } finally {
+    setLang("en");
+  }
+});
+
+const SUBSTITUTE = "Test plant-based yogurt unsweetened 400 g";
+const ORIGINAL = "Test plant-based yogurt 750 g";
+
+test("the server's standing offer asks to stop asking; Yes sends the auto rule", () => {
+  const text = pick(CARD);
+  const { card, sent } = cardFor(standingOffer);
+  expect(visible(card)).toContain(text.standingOffer(SUBSTITUTE, ORIGINAL, 3));
+  click(card, 'part="rule"');
+  expect(sent).toEqual([
+    {
+      type: "tt-remember",
+      detail: {
+        replaces: "prod_test_yogurt_750",
+        productId: "prod_test_yogurt_400",
+        policy: "auto",
+        productName: SUBSTITUTE,
+        replacesName: ORIGINAL,
+      },
+    },
+  ]);
+  card.remembered = true;
+  expect(visible(card)).toContain(text.standingSaved(SUBSTITUTE, ORIGINAL));
+});
+
+test("Keep asking hides the offer, and an approval without the offer shows none", () => {
+  const text = pick(CARD);
+  const { card } = cardFor(standingOffer);
+  click(card, 'class="btn ghost"');
+  expect(visible(card)).not.toContain(text.keepAsking);
+  const { standingOffer: _offer, ...plain } = standingOffer;
+  expect(visible(cardFor(plain).card)).not.toContain(text.yesAutomatically);
+});
+
+test("a declined substitute offers one tap to stop suggesting it", () => {
+  const text = pick(CARD);
+  const { card, sent } = cardFor(declinedSubstitution);
+  expect(visible(card)).toContain(text.neverSuggest(SUBSTITUTE, ORIGINAL));
+  click(card, 'class="rule"');
+  expect(sent).toMatchObject([{ type: "tt-remember", detail: { policy: "never" } }]);
+  card.remembered = true;
+  expect(visible(card)).toContain(text.neverSaved(SUBSTITUTE, ORIGINAL));
+});
+
+test("a pair that already has a rule is not offered again", () => {
+  const text = pick(CARD);
+  const { card } = cardFor(declinedSubstitution);
+  card.rules = [
+    {
+      replaces: "prod_test_yogurt_750",
+      productId: "prod_test_yogurt_400",
+      policy: "never",
+      decidedAt: "2026-11-14T10:00:00+00:00",
+    },
+  ];
+  expect(visible(card)).not.toContain(text.dontSuggestAgain);
+  card.remembered = true;
+  expect(visible(card)).toContain(text.neverSaved(SUBSTITUTE, ORIGINAL));
+});
+
+test("the rule offers follow the view language", () => {
+  setLang("fi");
+  try {
+    expect(visible(cardFor(standingOffer).card)).toContain("Saako agentti tehdä tämän kysymättä?");
+    expect(visible(cardFor(declinedSubstitution).card)).toContain("Älä ehdota enää");
   } finally {
     setLang("en");
   }

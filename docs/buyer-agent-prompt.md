@@ -149,15 +149,15 @@ BAD REPLIES, never write like this
 
 ## Why the prompt says what it says
 
-| Rule in the prompt                                       | The fault it prevents                                                                                         |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| A count of items is a quantity in pieces (`ST`)          | The model asked for the pack size before it searched                                                          |
-| Search words are single plain words                      | A phrase in one search word finds nothing                                                                     |
-| Search again in the other measure, then ask one question | The model said "standard conversion" and offered a different kind of product                                  |
-| Pick one product                                         | The model listed every candidate with its arithmetic                                                          |
-| No menu; one everyday sentence for a failure             | The model ended with a list of options                                                                        |
-| A firm requirement only when the person states it        | The model added lactose-free on its own                                                                       |
-| Say when a dietary requirement cannot be confirmed       | The server enforces only allergens, free-from claims and vegan ([PRD, Search request](prd.md#search-request)) |
+| Rule in the prompt                                       | The fault it prevents                                                                |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| A count of items is a quantity in pieces (`ST`)          | The model asked for the pack size before it searched                                 |
+| Search words are single plain words                      | A phrase in one search word finds nothing                                            |
+| Search again in the other measure, then ask one question | The model said "standard conversion" and offered a different kind of product         |
+| Pick one product                                         | The model listed every candidate with its arithmetic                                 |
+| No menu; one everyday sentence for a failure             | The model ended with a list of options                                               |
+| A firm requirement only when the person states it        | The model added lactose-free on its own                                              |
+| Say when a dietary requirement cannot be confirmed       | Only allergens and vegan are enforced ([PRD, Search request](prd.md#search-request)) |
 
 ## Test sentences
 

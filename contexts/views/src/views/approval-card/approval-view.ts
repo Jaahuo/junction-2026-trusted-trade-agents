@@ -236,11 +236,38 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     if (updated.status !== "pending_approval") void this.source.context?.(decisionContext(updated));
   }
 
-  /** Sends the card's message to the agent in the chat; with `update` the card waits for it. */
+  /**
+   * Sends the card's message to the agent in the chat. With `update` (agent help) the order is
+   * rejected first, with `next: "alternatives"` and the prompt as its note, so only the agent's
+   * new offer stays open; the card then waits for it. A failed rejection sends nothing.
+   */
   private async ask(order: Order, text: string, update: boolean) {
-    const message = this.source?.message;
-    if (message === undefined) return;
-    if (update) this.updatingId = order.orderId;
+    const source = this.source;
+    const message = source?.message;
+    if (source === null || message === undefined) return;
+    if (update) {
+      this.updatingId = order.orderId;
+      const rejected = await callAction(
+        source,
+        "decide_approval",
+        {
+          orderId: order.orderId,
+          proposalVersion: order.proposalVersion,
+          decision: "reject",
+          next: "alternatives",
+          note: text,
+        },
+        order.approvalUrl,
+      );
+      if (rejected.kind !== "done") {
+        this.updatingId = null;
+        this.state = rejected;
+        return;
+      }
+      void source.context?.(
+        `Order ${order.orderId} was rejected on the approval card because the approver asked for a new offer. Place the new order for approval when you have it.`,
+      );
+    }
     try {
       await message(text);
     } catch (cause) {

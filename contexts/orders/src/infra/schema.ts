@@ -57,11 +57,18 @@ export const refusals = pgTable("orders_refusals", {
   event: jsonb().$type<AuditEvent>().notNull(),
 });
 
-/** One row per placed line, plus demo seed rows (SPEC-010). Quantities in sales units. */
-export const history = pgTable("orders_history", {
-  id: serial().primaryKey(),
-  customer: text().notNull(),
-  productId: text().notNull(),
-  quantity: jsonb().$type<Quantity>().notNull(),
-  placedAt: timestamp({ withTimezone: true }).notNull(),
-});
+/**
+ * One row per placed line, in its sales unit, plus demo seed rows in the demo file's standard unit
+ * (SPEC-010); evaluate converts standard units. Read by customer and product on every order.
+ */
+export const history = pgTable(
+  "orders_history",
+  {
+    id: serial().primaryKey(),
+    customer: text().notNull(),
+    productId: text().notNull(),
+    quantity: jsonb().$type<Quantity>().notNull(),
+    placedAt: timestamp({ withTimezone: true }).notNull(),
+  },
+  (table) => [index("orders_history_customer_product").on(table.customer, table.productId)],
+);

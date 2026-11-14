@@ -10,7 +10,11 @@ import { createApi } from "./index.ts";
 
 // Smoke test of the tracked data files: general invariants only, no dataset values (team rules R-23).
 const load = lazyCatalog(async () => createCatalog(await loadProductFile(defaultDataDir())));
-const app = createApi({ catalog: load, mandates: { current: async () => ok(null) } });
+const app = createApi({
+  catalog: load,
+  mandates: { current: async () => ok(null) },
+  availability: { deliverable: async (_deliverBy, productIds) => ok(new Set(productIds)) },
+});
 
 const requested = { value: 1000, unit: "LTR" };
 

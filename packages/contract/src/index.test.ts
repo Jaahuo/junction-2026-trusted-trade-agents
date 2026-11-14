@@ -187,16 +187,33 @@ test("DEMO_ACCOUNT equals the SPEC-015 values", () => {
   same(DEMO_ACCOUNT, literal(source));
 });
 
+const refusal = (hard: unknown) =>
+  SearchRequestSchema.safeParse({ ...fixtures.searchRequest, hard }).error?.issues[0]?.message;
+
 describe("hard constraints (SPEC-003, SPEC-004)", () => {
   test("an unsupported attribute or value is refused", () => {
     const request = fixtures.searchRequest;
     expect(SearchRequestSchema.safeParse(request).success).toBe(true);
     for (const hard of [
       [{ attribute: "gluten", is: "free_from" }],
+      [{ attribute: "vegan", is: "yes" }],
+    ]) {
+      expect(SearchRequestSchema.safeParse({ ...request, hard }).success).toBe(true);
+    }
+    for (const hard of [
+      [{ attribute: "unicorn", is: "free_from" }],
+      [{ attribute: "Gluten", is: "free_from" }],
+      [{ attribute: "AW", is: "free_from" }],
       [{ attribute: "lactose", is: "low" }],
+      [{ attribute: "vegan", is: "free_from" }],
     ]) {
       expect(SearchRequestSchema.safeParse({ ...request, hard }).success).toBe(false);
     }
+  });
+
+  test("the refusal names the attribute, or says it is missing", () => {
+    expect(refusal([{ attribute: "unicorn", is: "free_from" }])).toContain('"unicorn"');
+    expect(refusal([{ is: "free_from" }])).toContain('"missing"');
   });
 
   test("empty terms are refused", () => {

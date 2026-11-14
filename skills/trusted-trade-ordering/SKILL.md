@@ -24,7 +24,7 @@ One request gives one order. When the user names several products in one request
 4. **Choose.** For each product, choose one offer among the offers that meet the user's need. Done when you hold one offer token per product. Keep the unchosen offers: pass them as `alternatives`.
    Apply the choice rule in this order, and go to the next rule only on a tie:
    1. **Pre-check.** Prefer `precheck.decision` `auto`. When no offer is `auto`, take the best offer that meets the need: the human then decides.
-   2. **Price per standard unit.** Prefer the lower gross price per `LTR` or `KGM`: `claims.total.gross` divided by the candidate's `equals.value`.
+   2. **Price per standard unit.** Prefer the lower `claims.pricePerStandardUnit.gross` (EUR per `LTR` or `KGM`, VAT included). Compare only offers with the same `unit`. When it is `null`, do not compute one: skip this rule for that offer.
    3. **Delivery date.** Prefer the earlier `claims.deliveryDate`.
 5. **Place the order.** Call `place_order` once, with `offers` (one token per product, up to 20), optional `alternatives`, `originalRequest`, and a new `idempotencyKey`. After a timeout or a lost reply, send the same tokens with the same key: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
 6. **Act on the status.**
@@ -49,6 +49,7 @@ Only a human approves. You have no tool that decides an approval: `decide_approv
 ## Units
 
 - Money is EUR. Limits apply to the gross total: VAT and deposits included.
+- When an offer has `depositsIncluded: false`, the wholesaler gives no deposit amount and the total leaves deposits out. Say so when you report the total.
 - State the user's quantity in standard units: `LTR` for volume, `KGM` for mass.
 - The wholesaler sells in its own sales unit (for example `KI`). Every candidate gives `orderQuantity` (sales unit) and `equals` (standard units). Pass `orderQuantity` unchanged to `get_offers`: its unit is the product's sales unit and its value is a multiple of the lot size.
 - A candidate with `orderQuantity: null` has no conversion. Tell the user. Do not compute one.

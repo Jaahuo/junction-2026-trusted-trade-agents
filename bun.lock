@@ -29,9 +29,9 @@
       "dependencies": {
         "@app/contract": "workspace:*",
         "@app/server-kit": "workspace:*",
+        "@ctx/catalog": "workspace:*",
         "@ctx/orders": "workspace:*",
         "@elysia/eden": "catalog:",
-        "drizzle-orm": "catalog:",
         "elysia": "catalog:",
       },
     },
@@ -67,6 +67,7 @@
         "@app/server-kit": "workspace:*",
         "@ctx/mandates": "workspace:*",
         "@elysia/eden": "catalog:",
+        "drizzle-orm": "catalog:",
         "elysia": "catalog:",
         "zod": "catalog:",
       },

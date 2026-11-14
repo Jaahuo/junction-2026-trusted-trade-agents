@@ -1,0 +1,140 @@
+{
+  "id": "eb8f87a0-a542-4133-9c65-72e1d4ee2f10",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.catalog_csv_rows": {
+      "name": "catalog_csv_rows",
+      "schema": "",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cells": {
+          "name": "cells",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "catalog_csv_rows_source_ordinal_pk": {
+          "name": "catalog_csv_rows_source_ordinal_pk",
+          "columns": [
+            "source",
+            "ordinal"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.catalog_manifest": {
+      "name": "catalog_manifest",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "checksums": {
+          "name": "checksums",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "counts": {
+          "name": "counts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sourceSchema": {
+          "name": "sourceSchema",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "demoProducts": {
+          "name": "demoProducts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.catalog_products": {
+      "name": "catalog_products",
+      "schema": "",
+      "columns": {
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "productId": {
+          "name": "productId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "record": {
+          "name": "record",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "catalog_products_productId_unique": {
+          "name": "catalog_products_productId_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "productId"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

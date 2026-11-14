@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,7 +16,6 @@ import {
   renderEnvFile,
   renderService,
   resetEnv,
-  transferData,
 } from "./deploy.ts";
 
 const outputs: Outputs = {
@@ -255,9 +254,7 @@ test("push uses the exact digest and strict host checking, and stops on a digest
       join(root, "ssh"),
       '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\ncase "$*" in\n  *"docker container inspect"*) printf "%s %s\\n" "$FAKE_CONTAINER_IMAGE" "$FAKE_CONTAINER_RUNNING";;\n  *"docker image inspect"*) printf "%s\\n%s\\n" "$FAKE_IMAGE_ID" "$FAKE_DIGEST";;\n  *"install -m"*) cat >> "$FAKE_INPUT";;\nesac\n',
     );
-    await writeFile(join(root, "rsync"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\n');
     await chmod(join(root, "ssh"), 0o755);
-    await chmod(join(root, "rsync"), 0o755);
     process.env["PATH"] = `${root}:${previous["PATH"] ?? ""}`;
     process.env["DEPLOY_ENV"] = keys;
     process.env["FAKE_LOG"] = log;
@@ -278,6 +275,8 @@ test("push uses the exact digest and strict host checking, and stops on a digest
     expect(commands).toContain("StrictHostKeyChecking=yes");
     expect(commands).not.toContain("StrictHostKeyChecking=accept-new");
     expect(await readFile(input, "utf8")).toContain(`TRUSTED_TRADE_IMAGE="${image}"`);
+    expect(commands).not.toMatch(/rsync|mkdir -p.*\/data|chown.*\/data|chmod.*\/data/);
+    expect(await readFile(input, "utf8")).not.toContain("/app/data");
 
     process.env["FAKE_CONTAINER_IMAGE"] = `sha256:${"d".repeat(64)}`;
     expect(await failure(push(localOutputs, settings))).toMatch(/Running container image hash/);
@@ -343,9 +342,7 @@ case "$*" in
 esac
 `,
     );
-    await writeFile(join(root, "rsync"), '#!/bin/sh\nprintf \'rsync %s\\n\' "$*" >> "$FAKE_LOG"\n');
     await chmod(join(root, "ssh"), 0o755);
-    await chmod(join(root, "rsync"), 0o755);
     process.env["PATH"] = `${root}:${previous["PATH"] ?? ""}`;
     process.env["DEPLOY_ENV"] = keys;
     process.env["FAKE_LOG"] = log;
@@ -446,42 +443,22 @@ esac
   }
 });
 
-test("data transfer sends files to the literal remote data directory", async () => {
-  const root = await mkdtemp(join(tmpdir(), "deploy-rsync-"));
-  try {
-    const source = join(root, "source");
-    const appDir = join(root, "app");
-    const destination = join(appDir, "data");
-    const remoteShell = join(root, "local-remote-shell");
-    await mkdir(source);
-    await mkdir(destination, { recursive: true });
-    await writeFile(join(source, "catalog.json"), '{"catalog":"transferred"}\n');
-    await writeFile(join(destination, "retained.json"), '{"retained":true}\n');
-    // rsync invokes the remote shell with a host followed by a shell command, as ssh does.
-    await writeFile(remoteShell, '#!/bin/sh\nshift\nexec /bin/sh -c "$*"\n');
-    await chmod(remoteShell, 0o755);
-
-    await transferData(`${source}/`, "local", appDir, remoteShell);
-
-    expect(await readFile(join(destination, "catalog.json"), "utf8")).toBe(
-      '{"catalog":"transferred"}\n',
-    );
-    expect(await readFile(join(destination, "retained.json"), "utf8")).toBe('{"retained":true}\n');
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("the service runs the persisted digest on loopback with read-only host data", () => {
-  const unit = renderService({ ...outputs, app_port: 8123, app_dir: "/opt/trusted trade" });
+test("the service runs the persisted digest on loopback without a data mount", () => {
+  const unit = renderService({ ...outputs, app_port: 8123 });
   expect(unit).toContain("EnvironmentFile=/etc/trusted-trade-image.env\n");
   expect(unit).toContain(
-    'ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:8123:3000 -v "/opt/trusted trade/data:/app/data:ro" ${TRUSTED_TRADE_IMAGE}\n',
+    "ExecStart=/usr/bin/docker run --rm --name trusted-trade --pull=never --env-file /etc/trusted-trade.env -p 127.0.0.1:8123:3000 ${TRUSTED_TRADE_IMAGE}\n",
   );
+  expect(unit).not.toMatch(/(?: -v | --mount |\/app\/data)/);
   expect(unit).toContain(
     "ExecStop=/usr/bin/docker stop --time 30 trusted-trade\nTimeoutStopSec=40\n",
   );
-  expect(() => renderService({ ...outputs, app_dir: "/opt/a:b" })).toThrow(/app_dir/);
+});
+
+test("cloud-init provisions the API without catalogue transfer or a data mount", async () => {
+  const cloudInit = await Bun.file("infra/cloud-init.yaml.tftpl").text();
+  expect(cloudInit).not.toMatch(/rsync|\/app\/data|app_dir\}\/data| --mount | -v /);
+  expect(cloudInit).toContain("127.0.0.1:${app_port}:3000 $${TRUSTED_TRADE_IMAGE}");
 });
 
 const deployRun = (conclusion: string) => [

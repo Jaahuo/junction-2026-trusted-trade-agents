@@ -1,50 +1,33 @@
 name: deploy
 on:
-  workflow_run:
-    workflows: [gate]
-    types: [completed]
-    branches: [main]
-  workflow_dispatch:
+  workflow_call:
 permissions: {}
 jobs:
   target:
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
     outputs:
       ready: ${{ steps.select.outputs.ready }}
-      sha: ${{ steps.select.outputs.sha }}
-      run_id: ${{ steps.select.outputs.run_id }}
-      attempt: ${{ steps.select.outputs.attempt }}
+      sha: ${{ github.sha }}
+      run_id: ${{ github.run_id }}
+      attempt: ${{ github.run_attempt }}
     steps:
-      - name: Select latest successful gate for current main
+      - name: Skip when main already moved past this commit
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
-          run=$(gh api --paginate "repos/$REPO/actions/workflows/gate.yml/runs?head_sha=$sha&event=push&status=success&per_page=100" \
-            | jq -sc --arg sha "$sha" --arg repo "$REPO" '[.[].workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .conclusion == "success" and .path == ".github/workflows/gate.yml" and .repository.full_name == $repo and .head_repository.full_name == $repo)] | sort_by(.created_at, .id) | last // empty')
-          if [ -z "$run" ]; then
-            # Main moved past the gate that triggered this run; that commit's own gate deploys it.
-            echo "Skipped: $sha has no successful push gate run yet." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(gh api "repos/$REPO/commits/main" --jq .sha)" != "$GITHUB_SHA" ]; then
+            echo "Skipped: main moved past $GITHUB_SHA; a newer run deploys it." >> "$GITHUB_STEP_SUMMARY"
             echo 'ready=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          id=$(jq -er '.id | tostring | select(test("^[1-9][0-9]*$"))' <<< "$run")
-          attempt=$(jq -er '.run_attempt | tostring | select(test("^[1-9][0-9]*$"))' <<< "$run")
-          printf 'ready=true\nsha=%s\nrun_id=%s\nattempt=%s\n' "$sha" "$id" "$attempt" >> "$GITHUB_OUTPUT"
-          echo "Deploying $sha from gate run $id attempt $attempt." >> "$GITHUB_STEP_SUMMARY"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+          echo "Deploying $GITHUB_SHA from gate run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT." >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     needs: target
@@ -84,6 +67,7 @@ jobs:
           ref: ${{ needs.target.outputs.sha }}
           persist-credentials: false
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
+      - run: bun install --frozen-lockfile
       - name: Start deployment evidence
         run: |
           mkdir -p "$RUNNER_TEMP/deployment-evidence"
@@ -144,16 +128,34 @@ jobs:
           df -h "$RUNNER_TEMP"
       - name: Smoke production runtime
         run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/fictional-catalogue"
+          bun -e 'import { writeFictionalSources } from "./contexts/catalog/src/infra/test-fixtures.ts"; const dir = process.argv[1]; if (!dir) throw new Error("Missing fixture directory"); await writeFictionalSources(dir);' "$fixture"
+          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/image_smoke bun scripts/catalog-import.ts --source "$fixture"
           umask 077
           bun scripts/generate-keys.ts > "$RUNNER_TEMP/image.env"
           printf '%s\n' \
             'DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/image_smoke' \
-            'PORT=3000' 'WHOLESALER_LIVE=fixture' >> "$RUNNER_TEMP/image.env"
-          trap 'docker logs gate-smoke; docker rm -f gate-smoke; rm -f "$RUNNER_TEMP/image.env"' EXIT
+            'PORT=3000' 'WHOLESALER_LIVE=mock' \
+            'VALIO_AIMO_API_KEY=fictional-smoke-key' \
+            'VALIO_AIMO_BASE_URL=http://127.0.0.1:3001' >> "$RUNNER_TEMP/image.env"
+          bun scripts/catalogue-smoke-availability.ts 3001 > "$RUNNER_TEMP/availability.log" 2>&1 &
+          availability_pid=$!
+          trap 'docker logs gate-smoke; docker rm -f gate-smoke; kill "$availability_pid"; rm -f "$RUNNER_TEMP/image.env"' EXIT
+          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --max-time 2 http://127.0.0.1:3001/health
           docker run --detach --name gate-smoke --network host --env-file "$RUNNER_TEMP/image.env" "gate-image:$SHA"
           curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --max-time 2 http://127.0.0.1:3000/api/health
+          docker exec gate-smoke /usr/local/bin/bun apps/api/src/remote-reset.ts --yes
+          test "$(docker inspect --format '{{json .Mounts}}' gate-smoke)" = '[]'
+          curl --fail --silent --show-error -H 'content-type: application/json' \
+            -d '{"terms":["fictional oats"],"hard":[],"soft":[],"quantity":{"value":1,"unit":"ST"},"deliverBy":"2026-11-20","paymentTerms":"invoice"}' \
+            http://127.0.0.1:3000/api/catalog/search | jq -e '.availability.checked == true and (.candidates | any(.productId == "fictional-oats" and .orderQuantity.value == 1))'
+          curl --fail --silent --show-error -H 'content-type: application/json' \
+            -d '{"productIds":["fictional-oats"],"hard":[]}' \
+            http://127.0.0.1:3000/api/catalog/facts | jq -e '.products | any(.productId == "fictional-oats" and .deliveryReliability == 0.95 and .co2PerKg == 1.25)'
           docker exec gate-smoke /usr/local/bin/bun -e '
             if (process.getuid() !== 1000) throw new Error("Expected runtime UID 1000");
+            if (await Bun.file("/app/data/valio_aimo_junction26_product_data.json").exists()) throw new Error("Unexpected source data");
             for (const path of ["/bin/sh", "/bin/bash", "/sbin/apk", "/usr/bin/apt", "/usr/bin/apt-get"]) {
               if (await Bun.file(path).exists()) throw new Error(`Unexpected runtime tool: ${path}`);
             }

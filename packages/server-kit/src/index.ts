@@ -6,12 +6,16 @@ import { migrate } from "drizzle-orm/bun-sql/migrator";
 import { type AnyElysia, Elysia, ParseError, status, ValidationError } from "elysia";
 
 export type Db = BunSQLDatabase & { $client: SQL };
+
+export interface SeedInputs {
+  demoProducts?: unknown;
+}
 export interface ContextModule {
   readonly name: string;
   readonly api: (db: Db) => AnyElysia;
   /** Root routes, mounted after `/api` and before the web fallback. */
   readonly root?: (db: Db) => AnyElysia;
-  readonly seed?: (db: Db) => void | Promise<void>;
+  readonly seed?: (db: Db, inputs?: SeedInputs) => void | Promise<void>;
 }
 
 export const env = (name: string): string | undefined => {

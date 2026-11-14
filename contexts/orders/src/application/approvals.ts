@@ -8,7 +8,7 @@ import {
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import { ruleFor } from "../domain/evaluate.ts";
-import { commitPlacement } from "./commit-placement.ts";
+import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import type { OrderDeps } from "./orders.ts";
 import type { OrderTx, StoredOrder } from "./ports.ts";
 
@@ -57,18 +57,23 @@ const approve = async (
   now: Date,
 ): Promise<Result<StoredOrder, DecisionError>> => {
   const at = now.toISOString();
-  const decided: StoredOrder = {
-    ...order,
-    decision: { action: "approve", next: null, note: null, by: principal.accountId, at },
-    audit: [...order.audit, approverEvent(at, "approved")],
-  };
-  if (mandate === null)
-    return ok({
-      ...decided,
-      status: "rejected",
-      reasons: [...order.reasons, "MANDATE_INVALID"],
-      audit: [
-        ...decided.audit,
+  const approved = await appendOrderAudit(
+    {
+      ...order,
+      decision: { action: "approve", next: null, note: null, by: principal.accountId, at },
+    },
+    [approverEvent(at, "approved")],
+  );
+  if (!approved.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+  const decided = approved.value;
+  if (mandate === null) {
+    const rejected = await appendOrderAudit(
+      {
+        ...decided,
+        status: "rejected",
+        reasons: [...order.reasons, "MANDATE_INVALID"],
+      },
+      [
         {
           at,
           actor: "server",
@@ -78,35 +83,46 @@ const approve = async (
         },
         { at, actor: "server", event: "rejected", reason: "MANDATE_INVALID" },
       ],
-    });
+    );
+    return rejected.ok
+      ? ok(rejected.value)
+      : failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+  }
   if (madeUnderOtherMandate(order, mandate))
     return failure("STALE_OFFER", "The mandate changed since the offers were made.");
   if (isExpired(order, now)) return failure("OFFER_EXPIRED", "An offer of this order has expired.");
-  return ok(
-    await commitPlacement({
-      tx,
-      order: decided,
-      creditLimit: principal.creditLimit,
-      payment: deps.payment,
-      now,
-    }),
-  );
+  const placed = await commitPlacement({
+    tx,
+    order: decided,
+    creditLimit: principal.creditLimit,
+    payment: deps.payment,
+    signReceipt: deps.signReceipt,
+    now,
+  });
+  return placed.ok
+    ? ok(placed.value)
+    : failure("UPSTREAM_FAILED", "The order could not be finalized.");
 };
 
-const reject = (
+const reject = async (
   principal: Principal,
   order: StoredOrder,
   request: Extract<DecideApprovalRequest, { decision: "reject" }>,
   now: Date,
-): StoredOrder => {
+): Promise<Result<StoredOrder, DecisionError>> => {
   const at = now.toISOString();
   const note = request.note ?? null;
-  return {
-    ...order,
-    status: "declined",
-    decision: { action: "reject", next: request.next, note, by: principal.accountId, at },
-    audit: [...order.audit, approverEvent(at, "declined", note === null ? {} : { detail: note })],
-  };
+  const declined = await appendOrderAudit(
+    {
+      ...order,
+      status: "declined",
+      decision: { action: "reject", next: request.next, note, by: principal.accountId, at },
+    },
+    [approverEvent(at, "declined", note === null ? {} : { detail: note })],
+  );
+  return declined.ok
+    ? ok(declined.value)
+    : failure("UPSTREAM_FAILED", "The audit record could not be verified.");
 };
 
 /** Approvals of one substitute pair after which the card offers to stop asking. */
@@ -172,10 +188,12 @@ export const decide = async (
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (order.status !== "pending_approval" || order.proposalVersion !== request.proposalVersion)
       return failure("CONFLICT", "The order was decided or changed; reload it.");
+    const verified = await appendOrderAudit(order, []);
+    if (!verified.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
     const decided =
       request.decision === "approve"
         ? await approve(deps, principal, tx, order, mandate, now)
-        : ok(reject(principal, order, request, now));
+        : await reject(principal, order, request, now);
     if (!decided.ok) return decided;
     if (!(await tx.decide(decided.value, request.proposalVersion)))
       return failure("CONFLICT", "The order was decided or changed; reload it.");

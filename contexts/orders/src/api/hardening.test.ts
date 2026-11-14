@@ -157,12 +157,16 @@ test("a pay-on-order order that reaches placement is rejected PAYMENT_FAILED and
         order: { ...stored, paymentTerms: "pay_on_order" },
         creditLimit: DEMO_ACCOUNT.creditLimit,
         payment: refusingPayment,
+        signReceipt: async () => {
+          throw new Error("A rejected order must not issue a receipt.");
+        },
         now,
       }),
     );
-    expect(result.status).toBe("rejected");
-    expect(result.reasons.at(-1)).toBe("PAYMENT_FAILED");
-    expect(result.audit.slice(-2).map((event) => event.event)).toEqual([
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.status).toBe("rejected");
+    expect(result.value.reasons.at(-1)).toBe("PAYMENT_FAILED");
+    expect(result.value.audit.slice(-2).map((event) => event.event)).toEqual([
       "payment_failed",
       "rejected",
     ]);

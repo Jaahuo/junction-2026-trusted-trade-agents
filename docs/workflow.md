@@ -52,36 +52,40 @@ Claude resolves the active worktree from the hook input's `cwd`, even when the s
 
 The `gate` workflow keeps one aggregate `gate` check for required-check consumers. Each required job must succeed. Failure, cancellation or an unexpected skip fails the aggregate.
 
-| Stage        | Responsibility                                                              |
-| ------------ | --------------------------------------------------------------------------- |
-| Quality      | Types, formatting, lint, unused code, duplication and migration consistency |
-| Tests        | Full test suite against disposable PostgreSQL                               |
-| Secrets      | Gitleaks scan of Git history                                                |
-| Dependencies | Bun audit of the complete workspace lockfile                                |
-| Image        | Build the amd64 container once, create its SBOM and scan installed packages |
-| Gate         | Require every preceding job to succeed                                      |
-| Publish      | Verify a trusted main-push gate artifact and publish that same image        |
-| Deploy       | Deploy its digest with production-only credentials and verify health        |
+| Stage   | Responsibility                                                              |
+| ------- | --------------------------------------------------------------------------- |
+| Quality | Types, formatting, lint, unused code, duplication and migration consistency |
+| Tests   | Full test suite against disposable PostgreSQL                               |
+| Secrets | Gitleaks scan of Git history                                                |
+| Gate    | Require quality, tests and secrets to succeed                               |
+| Publish | Build and smoke the selected main commit's image, then publish its digest   |
+| Deploy  | Deploy that digest with production-only credentials and verify health       |
 
-Quality, tests, secrets, dependencies, image builds and deployment use [CRACI runners](https://docs.craci.com/guides/runner-workflows/) with the default image and size. The aggregate gate, target selection and artifact-only publication stay on GitHub-hosted runners. The CRACI GitHub App must have access to this repository before jobs can start. A missing connection leaves jobs queued.
+All jobs use GitHub-hosted `ubuntu-24.04` runners. PR, main-push and scheduled gates run code checks without production credentials. Only a successful main-push gate can enable automatic deployment. Scheduled gates do not deploy.
 
-CRACI generates an additional build SBOM automatically. This migration does not configure a blocking egress policy or claim complete SBOM coverage. The existing image scans and delivery evidence remain required.
+### Caches
 
-PR and main-push gates run without production credentials. Scheduled gates refresh security evidence but cannot publish or deploy. Actions and container bases use immutable digests or commit pins. Update these pins deliberately and review the resulting security reports.
+Quality caches Bun package downloads at `~/.bun/install/cache`. Tests and deployment restore that cache. Keys include the runner OS, architecture, pinned tools and lockfile. Every install still uses `--frozen-lockfile`; the cache does not replace installation or checks. GitHub isolates PR caches from the main branch.
 
-### Findings policy
+Deployment builds use the GitHub Actions Docker layer cache under `production-image`. Only the trusted publication job requests cache-write access. It builds the selected main SHA from the checkout, not from PR artifacts. Docker validates layer reuse against build inputs; source changes can still invalidate dependency layers because the Dockerfile copies source before installation.
 
-High and critical dependency or image findings block delivery, including findings with no available fix. Scanner errors, invalid reports and missing evidence also block delivery. Low and moderate findings remain in reports; passing the gate does not mean the reports contain no findings. The initial audit reports the moderate esbuild advisory [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99).
+### Temporary security coverage
 
-Do not use blanket ignore flags or hide unfixed vulnerabilities. A policy exception needs a reviewed issue that names the advisory, affected artifact, owner, mitigation and expiry. The current pipeline has no exception mechanism. Until one is explicitly approved and implemented, fix the finding before delivery.
+Issue #233 records the owner's temporary pause of Bun dependency audits, image vulnerability scans and SBOM generation. Those jobs do not run, and the aggregate gate does not claim they passed. Image builds run only in deployment after the code gate succeeds.
+
+The production image smoke test remains required before publication. It checks health, runtime UID and the absence of common shells and package managers. It does not detect vulnerable dependencies or replace an SBOM.
+
+To restore the previous security gates, revert the scoped #233 implementation commit through a PR. Restore audit and image scanning together with the deployment artifact contract and aggregate gate requirements. Review the current workflow before reverting if later changes touch it.
+
+When restored, high and critical findings block delivery, including findings without a fix. Scanner errors and missing reports also block delivery. Do not hide findings with blanket ignore flags.
 
 ### Evidence and limits
 
-Download the artifacts from the exact gate and deployment run, including its run attempt. Retain the audit JSON, image scan JSON, CycloneDX SBOM, manifest and checksum file. Match the commit, lockfile hash, run identity and image digest before using them as release evidence. Private reports expire after 90 days; large image archives expire after 7 days to limit storage use. Copy required records to an approved archive before expiry. This retention setting is not a tamper-proof audit store.
+Deployment evidence records the selected commit, lockfile hash, successful push gate run and attempt, build run and attempt, image config digest and published image digest. The manifest explicitly marks security scans as paused. The publisher verifies the archive's config digest and the registry manifest before it passes an immutable digest to deployment.
 
-The image SBOM inventories detected OS and installed language packages. It includes development dependencies shipped in the runtime image. It does not prove complete coverage of bundled browser code, the Bun executable, application logic or external services. Scanners use advisory databases available at scan time. New advisories can appear after release. Checksums bind files together but do not authenticate their author. These reports are not signed attestations, an independent security assessment or proof of zero vulnerabilities.
+Identity evidence and deployment results expire after 90 days. Image archives, audit reports, vulnerability reports and SBOMs are not retained or generated in this mode. Registry images need their own retention policy. Copy required records to an approved archive before expiry.
 
-Publication uses the selected main commit's successful push-gate artifact, not an artifact from a PR or the triggering run by assumption. Deployment records link the scanned build to the published digest. See [hosted deployment](deploy.md#security-and-audit-evidence) for configuration, enforcement gaps and rollback constraints.
+Passing code checks and image smoke tests does not prove vulnerability-free dependencies, complete component inventory or release approval. These records are not signed attestations or an independent security assessment. See [hosted deployment](deploy.md#security-and-audit-evidence) for credential boundaries and rollback constraints.
 
 ## Risk and evidence
 

@@ -45,7 +45,8 @@ const records = [
     {
       ...conversion("BASE_UNIT_OR_EACH", "LTR", 1.5),
       classifications: [
-        { name: "allergen", values: [{ id: "AM" }] },
+        { name: "allergen", values: [{ id: "AM" }, { id: "AE", unit: "MAY_CONTAIN" }] },
+        { name: "nonAllergen", values: [{ id: "AW", unit: "FREE_FROM" }] },
         { name: "nutritionalClaim", values: [{ id: "FREE_FROM_LACTOSE" }, { id: "LOW_FAT" }] },
       ],
     },
@@ -180,7 +181,7 @@ test("the slim index maps names, claims, volume per sales unit, reliability, CO2
     countryOfOrigin: "fi",
     deliveryReliability: 0.97,
     co2PerKg: 2.34,
-    claims: new Set(["FREE_FROM_LACTOSE", "LOW_FAT"]),
+    claims: new Set(["MAY_CONTAIN:AE", "FREE_FROM:AW", "FREE_FROM_LACTOSE", "LOW_FAT"]),
     substitutes: ["T-2"],
   });
   expect(products.get("T-2")).toMatchObject({

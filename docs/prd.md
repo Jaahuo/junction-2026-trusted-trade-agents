@@ -89,7 +89,7 @@ One service sits in front of a wholesaler's existing systems and adds the order 
 | Buyer limits                | The wholesaler uses them only for enforcement                                                                                                                   | Decided  |
 | Approval                    | Human only, on the approval card or the approval page; no decision tool is visible to the model                                                                 | Decided  |
 | Views                       | All five, in priority order: approval card, offer comparison, order timeline, search results, mandate settings                                                  | Decided  |
-| Hard constraints            | Every GS1 allergen code and free-from claim in the product data. `MAY_CONTAIN` counts as contradicted.                                                          | Proposed |
+| Hard constraints            | Every GS1 allergen code and free-from claim in the product data, and vegan. `MAY_CONTAIN` counts as contradicted.                                               | Proposed |
 | Agent rationale             | The agent may send a `purpose` and a `rationale` per line. The server stores them and shows them on the card and in the audit record. It never parses them.     | Proposed |
 | Trust chain                 | The views and an independent script verify offer signatures against the published keys. A placed order gets a signed receipt. The audit record is hash-chained. | Proposed |
 | Attack demo                 | A chat jailbreak and a rogue-agent script show the guardrails holding. The demo shows only attacks that the first build stops.                                  | Proposed |
@@ -122,7 +122,7 @@ Three roles exist. Through the MCP tools, the agent can never approve its own or
 
 ## Tools
 
-Nine tools cover the flow: six the model can call and three that only a view calls. Each tool is also a REST endpoint with the same JSON Schema, published as an OpenAPI document.
+Ten tools cover the flow: seven the model can call and three that only a view calls. Each tool is also a REST endpoint with the same JSON Schema, published as an OpenAPI document.
 
 | Tool                     | Caller            | Input                                                                                                                                                  | Returns                                                                                                          |
 | ------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
@@ -131,6 +131,7 @@ Nine tools cover the flow: six the model can call and three that only a view cal
 | `place_order`            | Agent             | One or more signed offer tokens, optional alternative offer tokens, optional original request text, idempotency key                                    | Order with status: placed, pending approval or rejected, plus reason codes                                       |
 | `get_order_status`       | Agent             | Order ID                                                                                                                                               | Current status and the audit record                                                                              |
 | `get_mandate`            | Agent             | None                                                                                                                                                   | The limits currently in force for this agent                                                                     |
+| `draft_mandate`          | Agent             | Proposed limits and standing constraints, from the terms the human gave                                                                                | The draft next to the current limits. Nothing is registered: the human registers it in the mandate view          |
 | `register_mandate`       | Approver          | The mandate as JSON; the demo server signs it with the simulated buyer key                                                                             | Mandate ID. The previous mandate is revoked.                                                                     |
 | `revoke_mandate`         | Approver          | Mandate ID                                                                                                                                             | Confirmation                                                                                                     |
 | `list_pending_approvals` | Agent or approver | None                                                                                                                                                   | Orders waiting for a decision                                                                                    |
@@ -150,7 +151,7 @@ The exact shapes are in [specs](specs.md); the examples below are illustrative.
 
 ### Search request
 
-The host agent fills these fields from the user's sentence. A hard constraint that a product contradicts excludes the product, and one with missing data sends the order to approval. Soft constraints only affect ranking. Standing constraints from the mandate are added by the server. The first build supports one hard constraint attribute, lactose-free, and refuses a request with any other hard constraint.
+The host agent fills these fields from the user's sentence. A hard constraint that a product contradicts excludes the product, and one with missing data sends the order to approval. Soft constraints only affect ranking. Standing constraints from the mandate are added by the server. Hard constraints are the GS1 allergens and free-from claims in the product data, such as gluten-free or egg-free, and vegan. A request with any other hard constraint is refused.
 
 ```json
 {
@@ -417,7 +418,7 @@ Each view is an MCP App: a tool declares a `ui://` resource, and the host render
 | 2        | Offer comparison | `get_offers`                                         | Options side by side: price per litre or kilogram, delivery date, reliability, CO2, pre-check result |
 | 3        | Order timeline   | `get_order_status`                                   | The audit record in readable form                                                                    |
 | 4        | Search results   | `search_products`                                    | Candidates, how each matched, and the quantity to order                                              |
-| 5        | Mandate settings | `get_mandate`                                        | The limits, editable in the view                                                                     |
+| 5        | Mandate settings | `get_mandate`, `draft_mandate`                       | The limits in force, or the agent's draft with a Register button for the human                       |
 
 - Tools always return structured data and text as well, so hosts without MCP Apps still complete the flow.
 - The card in the chat and the approval page show the same information and call the same decision action. An order pending approval returns its `approvalUrl`, the address of the approval page.

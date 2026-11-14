@@ -71,6 +71,9 @@ export function defineView(tag: string, element: CustomElementConstructor) {
 /** Connects a view element to its source and adds it to the page. */
 export function mountView(element: ViewElement<ViewEntry>) {
   element.source = sourceFor(element.entry.view);
+  // Opened as its own page rather than in a chat frame: view.css centres it at card width.
+  if (window.parent === window && document.querySelector("#tt-harness") === null)
+    document.documentElement.classList.add("page");
   const root = document.querySelector("#root");
   if ("standaloneFallback" in element.source) {
     const message = document.createElement("p");

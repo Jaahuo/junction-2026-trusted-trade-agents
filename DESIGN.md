@@ -93,8 +93,10 @@ The default border width, `--border-width-default`, is 1px.
 
 Cards are square. Shared primary, brand, and danger buttons are square.
 The shared button minimum height is `--size-button` (44px), its border is
-`--border-width-button` (2px), and its focus outline is `--size-focus-outline` (3px).
+`--border-width-button` (2px).
 Buttons use 8px vertical and 24px horizontal padding.
+Shared buttons and view fields, chips, and toggles use a solid petrol focus outline.
+The outline uses `--color-border-brand` and `--size-focus-outline` (3px), with a 2px offset.
 
 ## Buttons and status
 

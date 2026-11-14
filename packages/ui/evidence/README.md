@@ -4,6 +4,10 @@ Baseline: `ea534484bf8bee33573fa1bcb8d2be298c6576ff`.
 All images show the running application or the built view harness.
 View fixtures contain invented products.
 
+The browser used a device scale factor of 1.25 for all captures.
+The 1280px gallery uses a 1280 × 900 CSS pixel viewport and images 1600 physical pixels wide.
+The 390px gallery uses a 390 × 900 CSS pixel viewport and images 488 physical pixels wide.
+
 ## 1280px
 
 | Screen or view state                 | Before                                                         | After                                                        |

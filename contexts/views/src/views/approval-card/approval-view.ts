@@ -1,4 +1,5 @@
 import type { DecideApprovalRequest, Order, PendingList } from "@app/contract";
+import { brand } from "@app/ui/brand";
 import { css, html, nothing } from "lit";
 import {
   callAction,
@@ -9,7 +10,6 @@ import {
 } from "../../shared/bridge.ts";
 import checkCircle from "../../shared/icons/check-circle-32.svg?raw";
 import loadingIcon from "../../shared/icons/loading.svg?raw";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 import warningSmall from "../../shared/icons/warning-16.svg?raw";
 import warningLarge from "../../shared/icons/warning-32.svg?raw";
 import { base } from "../../shared/styles.ts";
@@ -133,6 +133,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         background: var(--color-bg-brand);
         color: var(--color-text-on-brand);
       }
+      .updating img {
+        width: 56px;
+        height: auto;
+        flex-shrink: 0;
+      }
       .updating-text {
         flex: 1;
       }
@@ -244,7 +249,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   private updating(order: Order) {
     const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     return html`<article class="updating" part="updating" role="status">
-      ${icon(logo, "Valio Aimo")}
+      <img src=${brand.logo} alt=${brand.name} />
       <div class="updating-text">
         <p class="strong">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</p>
         <p class="body-small">The agent is updating this order</p>
@@ -273,7 +278,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   private error(approvalUrl: string | null) {
     return html`<article class="card" part="error" role="alert">
-      ${brandHeader("Valio Aimo approvals")}
+      ${brandHeader(`${brand.name} approvals`)}
       <div class="body center">
         ${icon(warningLarge)}
         <p class="headline">This approval can't be shown here</p>
@@ -295,7 +300,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   private empty() {
     return html`<article class="card" part="empty">
-      ${brandHeader("Valio Aimo approvals", html`<h2 class="title">Approvals</h2>`)}
+      ${brandHeader(`${brand.name} approvals`, html`<h2 class="title">Approvals</h2>`)}
       <div class="body center">
         ${icon(checkCircle)}
         <p class="headline">No orders wait for approval</p>
@@ -308,7 +313,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     const pending = orders.filter((o) => o.status === "pending_approval").length;
     return html`<article class="card" part="list">
       ${brandHeader(
-        "Valio Aimo approvals",
+        `${brand.name} approvals`,
         html`<h2 class="title">
           ${pending === 0 ? "Approvals" : `${pending} order${pending === 1 ? "" : "s"} wait for approval`}
         </h2>`,

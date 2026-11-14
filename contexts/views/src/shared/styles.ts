@@ -54,8 +54,7 @@ export const base = css`
   .chip:focus-visible,
   .field:focus-visible,
   .toggle:focus-visible {
-    outline: var(--size-focus-outline) solid
-      color-mix(in srgb, var(--color-border-brand) 45%, transparent);
+    outline: var(--size-focus-outline) solid var(--color-border-brand);
     outline-offset: var(--spacing-2xs);
   }
   .chip {

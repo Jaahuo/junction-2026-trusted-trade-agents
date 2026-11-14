@@ -1,0 +1,25 @@
+{
+  "mandate": {
+    "iss": "cust_fixture_expired",
+    "mandateId": "mnd_fixture_expired",
+    "version": 1,
+    "agent": "agent_fixture_buyer",
+    "signedBy": "acct_fixture_owner",
+    "limits": {
+      "maxOrderTotal": { "value": 1000, "currency": "EUR", "basis": "gross" },
+      "categories": null,
+      "substitutions": "auto",
+      "newProducts": "ask",
+      "minDeliveryReliability": null,
+      "maxCo2PerKg": null,
+      "allergenData": { "ifNoData": "ask" },
+      "paymentTerms": { "invoice": "auto", "pay_on_order": "ask" }
+    },
+    "standingConstraints": { "hard": [], "soft": [] },
+    "iat": 1609459200,
+    "exp": 1640995200
+  },
+  "jws": "fixture-expired-mandate-jws",
+  "status": "active",
+  "registeredAt": "2021-01-01T00:00:00+00:00"
+}

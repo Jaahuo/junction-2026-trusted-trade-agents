@@ -21,8 +21,8 @@ export const skillRoutes = () =>
         });
       return new Response(Bun.file(resolve(skillDir, params.file)), {
         headers: {
-          "content-type": "text/markdown; charset=utf-8",
-          "content-disposition": `attachment; filename="${params.file}"`,
+          "content-type": "text/plain; charset=utf-8",
+          "content-disposition": `inline; filename="${params.file}"`,
         },
       });
     },

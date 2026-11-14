@@ -398,10 +398,12 @@ async function claim(number: number, args: string[]) {
     }
     fail(`Claim of #${number} failed:\n${created.text.trim()}`);
   }
-  // Assign before anything else can fail, so a half-done claim is always yours to release.
-  const assigned = await run("gh", "issue", "edit", String(number), "--add-assignee", user.login);
-  if (assigned.code !== 0)
-    await unwind(number, main, `Assigning #${number} failed:\n${assigned.text.trim()}`);
+  const addsAssignment = issue.assignees.length === 0;
+  if (addsAssignment) {
+    const assigned = await run("gh", "issue", "edit", String(number), "--add-assignee", user.login);
+    if (assigned.code !== 0)
+      await unwind(number, main, `Assigning #${number} failed:\n${assigned.text.trim()}`);
+  }
   // Claims of different issues do not serialize. Every overlapping issue that became active
   // after the ready check is a rival claimed at the same time: give way to any of them. Two
   // rivals may both give way, but two can never both proceed.
@@ -410,7 +412,8 @@ async function claim(number: number, args: string[]) {
   if (rival) {
     const dropped = await dropClaim(number, main);
     // Keep the assignment when the drop failed, so release still accepts you.
-    if (dropped) await run("gh", "issue", "edit", String(number), "--remove-assignee", user.login);
+    if (dropped && addsAssignment)
+      await run("gh", "issue", "edit", String(number), "--remove-assignee", user.login);
     console.error(
       `#${rival.number} was claimed at the same time and owns overlapping paths; ${
         dropped

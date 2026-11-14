@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type BacklogIssue,
   type Board,
@@ -175,6 +178,59 @@ describe("blockers", () => {
       plan(board([contested], { claimed: new Set([1]) })).ready.map((entry) => entry.number),
     ).toEqual([]);
   });
+});
+
+describe("claim rollback", () => {
+  for (const preassigned of [true, false]) {
+    test(`a rival claim ${preassigned ? "preserves existing" : "removes newly added"} assignment`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "backlog-claim-"));
+      try {
+        const script = `#!${process.execPath}
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+const args = process.argv.slice(2);
+const git = process.argv[1].endsWith("/git");
+const dir = ${JSON.stringify(dir)};
+appendFileSync(dir + "/calls", JSON.stringify({ git, args }) + "\\n");
+const output = value => console.log(JSON.stringify(value));
+if (git) {
+  if (args[0] === "ls-remote" && !args.includes("--heads")) console.log("a".repeat(40) + "\\trefs/heads/main");
+} else if (args[0] === "repo") {
+  output({nameWithOwner:"owner/repo",name:"repo",owner:{login:"owner"}});
+} else if (args[0] === "api") {
+  if (args[1] === "user") output({login:"jaahuo"});
+  else if (args[1] === "graphql") output({data:{repository:{projectsV2:{nodes:[{title:"Board"}]}}}});
+  else output({});
+} else if (args[0] === "issue" && args[1] === "list" && args.includes("open")) {
+  const count = existsSync(dir + "/count") ? Number(readFileSync(dir + "/count", "utf8")) : 0;
+  writeFileSync(dir + "/count", String(count + 1));
+  const item = (number, assignees) => ({number,title:"Task",body:${JSON.stringify(body("`contexts/offers/**`"))},labels:[],assignees:assignees.map(login=>({login})),projectItems:[]});
+  output(count === 0 ? [item(1, ${JSON.stringify(preassigned ? ["Jaahuo"] : [])})] : [item(1, ["Jaahuo"]), item(2, ["rival"])]);
+} else if (args[1] === "list") {
+  output([]);
+}
+`;
+        await Promise.all(
+          ["gh", "git"].map((name) => writeFile(join(dir, name), script, { mode: 0o755 })),
+        );
+        const child = Bun.spawn(
+          [process.execPath, new URL("./backlog.ts", import.meta.url).pathname, "claim", "1"],
+          {
+            env: { ...process.env, PATH: `${dir}:${process.env["PATH"]}` },
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+        const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+        expect(code).toBe(3);
+        expect(stderr).toContain("#2 was claimed at the same time");
+        const calls = (await readFile(join(dir, "calls"), "utf8")).split("\n");
+        expect(calls.some((line) => line.includes("--remove-assignee"))).toBe(!preassigned);
+        expect(calls.some((line) => line.includes("--add-assignee"))).toBe(!preassigned);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 describe("staggered claims of overlapping issues", () => {

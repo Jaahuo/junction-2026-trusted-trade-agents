@@ -58,7 +58,7 @@ export function provisionEnv(host: ChatHost): Record<string, string> {
     OPENAI_API_BASE_URL: host.openaiUrl || DEFAULT_MODEL_URL,
     OPENAI_API_KEY: host.openaiKey ?? "",
     AGENT_MODEL_ID: host.baseModel || DEFAULT_MODEL,
-    OPENWEBUI_MAX_TOKENS: host.maxTokens || "4096",
+    OPENWEBUI_MAX_TOKENS: host.maxTokens || "16384",
     VALIO_AIMO_RECIPE_PERMISSION: host.recipePermission || "False",
     MCP_AGENT_KEY: host.mcpKey || "",
   };
@@ -122,13 +122,21 @@ async function main(): Promise<void> {
     throw new Error("Set WEBUI_SECRET_KEY in hosts/openwebui/.env (openssl rand -hex 32).");
   if (!env["WEBUI_ADMIN_EMAIL"] || !env["WEBUI_ADMIN_PASSWORD"])
     throw new Error("Set WEBUI_ADMIN_EMAIL and WEBUI_ADMIN_PASSWORD in hosts/openwebui/.env.");
-  let mcpUrl = env["OPENWEBUI_MCP_URL"];
-  if (mcpUrl)
-    console.error(`Warning: OPENWEBUI_MCP_URL overrides this worktree's MCP server: ${mcpUrl}`);
-  else {
+  const override = env["OPENWEBUI_MCP_URL"];
+  let expectedUrl: string | undefined;
+  try {
     await loadRuntime();
-    mcpUrl = `http://host.docker.internal:${process.env["PORT"]}/mcp`;
+    expectedUrl = `http://host.docker.internal:${process.env["PORT"]}/mcp`;
+  } catch (error) {
+    if (!override) throw error;
+    console.error(
+      "Warning: Could not verify OPENWEBUI_MCP_URL against this worktree's MCP server.",
+    );
   }
+  const mcpUrl = override || expectedUrl;
+  if (!mcpUrl) throw new Error("Could not determine the MCP server URL.");
+  if (override && expectedUrl && override !== expectedUrl)
+    console.error(`Warning: OPENWEBUI_MCP_URL overrides this worktree's MCP server: ${override}`);
   const host = localHost(env, mcpUrl);
   if (command === "up") {
     await compose("build", "open-webui");

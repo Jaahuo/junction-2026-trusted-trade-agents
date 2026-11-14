@@ -7,6 +7,7 @@ import {
   readTrace,
   sameServer,
   tokenCopy,
+  type Expectation,
   type OrderState,
   type Trace,
 } from "./chat-check.ts";
@@ -180,6 +181,129 @@ test("expectations about the stored order", () => {
   expect(failures([{ order: "any" }], [pending])).toEqual([null]);
 });
 
+test("multi-product expectations reject split, missing, duplicate and wrong product lines", () => {
+  const products = ["whole milk", "oat drink", "cooking cream"];
+  const milk = { productId: "prod_0", name: products[0] ?? "" };
+  const oat = { productId: "prod_1", name: products[1] ?? "" };
+  const cream = { productId: "prod_2", name: products[2] ?? "" };
+  const lines = [milk, oat, cream];
+  const order = { ...pending, lines };
+  const check = [{ orderProducts: products }];
+  expect(failures(check, [order])).toEqual([null]);
+  expect(failures(check, [order, { ...order, orderId: "another" }])[0]).toContain(
+    "expected one order",
+  );
+  expect(failures(check, [{ ...order, lines: lines.slice(0, 2) }])[0]).toContain("did not match");
+  expect(failures(check, [{ ...order, lines: [milk, milk, cream] }])[0]).toContain("did not match");
+  expect(
+    failures(check, [{ ...order, lines: [milk, oat, { productId: "other", name: "butter" }] }])[0],
+  ).toContain("did not match");
+});
+
+test("accepted multi-product order preserves server-rounded quantities and Monday delivery", () => {
+  const now = new Date("2026-11-15T12:00:00Z");
+  const deadline = "2026-11-16";
+  const quantity = { value: 10, unit: "LTR" };
+  const check = [
+    { orderContents: { products: ["milk", "oat", "cream"], quantity, weekday: "Monday" as const } },
+  ];
+  const makeLine = (productId: string, name: string, packs: number, size: number) => ({
+    productId,
+    name,
+    quantity: { value: packs, unit: "ST" },
+    perSalesUnit: { value: size, unit: "LTR" },
+    requestedDate: deadline,
+    deliveryDate: deadline,
+  });
+  const milk = makeLine("a", "milk", 10, 1);
+  const lines = [milk, makeLine("b", "oat", 7, 1.5), makeLine("c", "cream", 10, 1)];
+  const candidates = lines.map((line) => ({
+    productId: line.productId,
+    orderQuantity: line.quantity,
+    equals: { value: line.quantity.value * line.perSalesUnit.value, unit: "LTR" },
+  }));
+  const search = {
+    tool: "find_products",
+    args: { quantity, deliverBy: deadline },
+    text: JSON.stringify({ results: ["summary", { candidates }] }),
+    error: null,
+  };
+  const searched: Trace = { ...trace, calls: [...trace.calls, search] };
+  const order = { ...pending, lines };
+  const result = (orders: OrderState[], actualTrace = searched) =>
+    judge(check, actualTrace, orders, [], now)[1]?.failure;
+  expect(result([order])).toBeNull();
+  expect(result([{ ...order, status: "placed" }])).toBeNull();
+  expect(result([{ ...order, status: "rejected" }])).toContain("rejected");
+  expect(result([{ ...order, lines: [makeLine("a", "milk", 1, 1), ...lines.slice(1)] }])).toContain(
+    "did not match",
+  );
+  expect(
+    result([
+      { ...order, lines: [{ ...milk, quantity: { value: 10, unit: "KGM" } }, ...lines.slice(1)] },
+    ]),
+  ).toContain("did not match");
+  expect(
+    result([
+      {
+        ...order,
+        lines: [{ ...milk, perSalesUnit: { value: 1, unit: "KGM" } }, ...lines.slice(1)],
+      },
+    ]),
+  ).toContain("did not match");
+  expect(
+    result([{ ...order, lines: [{ ...milk, deliveryDate: "2026-11-17" }, ...lines.slice(1)] }]),
+  ).toContain("did not match");
+  expect(
+    result([{ ...order, lines: [{ ...milk, requestedDate: "2026-11-23" }, ...lines.slice(1)] }]),
+  ).toContain("did not match");
+  expect(
+    result([order], {
+      ...searched,
+      calls: [...searched.calls, { ...search, args: { ...search.args, deliverBy: "2026-11-23" } }],
+    }),
+  ).toContain("search requests");
+});
+
+test("call counts and batched quotes inspect the actual trace", () => {
+  const quote = { tool: "quote_offers", args: { lines: [{}, {}, {}] }, error: null, text: "" };
+  const batched = { ...trace, calls: [...trace.calls, quote] };
+  const checks = [{ callCount: { tool: "place_order", count: 1 } }, { quoteLines: 3 }];
+  expect(
+    judge(checks, batched, [])
+      .slice(1)
+      .map((v) => v.failure),
+  ).toEqual([null, null]);
+  expect(
+    judge(
+      checks,
+      {
+        ...trace,
+        calls: [
+          ...trace.calls,
+          { ...quote, args: { lines: Array.from({ length: 9 }, () => ({})) } },
+        ],
+      },
+      [],
+    )
+      .slice(1)
+      .map((v) => v.failure),
+  ).toEqual([null, null]);
+  expect(
+    judge(checks, { ...batched, calls: [...batched.calls, quote] }, []).slice(1)[1]?.failure,
+  ).not.toBeNull();
+  expect(
+    judge(
+      checks,
+      { ...trace, calls: [...trace.calls, { ...quote, args: { lines: [{}] } }] },
+      [],
+    ).slice(1)[1]?.failure,
+  ).not.toBeNull();
+  expect(
+    judge([{ callCount: { tool: "place_order", count: 2 } }], batched, [])[1]?.failure,
+  ).not.toBeNull();
+});
+
 const first = (t: Trace, problems: string[] = []) => judge([], t, [], problems)[0]?.failure;
 
 test("every scenario fails when a step did not run or the agent gave no reply", () => {
@@ -228,4 +352,41 @@ test("refuses a scenario with an unknown step or expectation", () => {
   );
   expect(() => parseScenarios(scenarioFile({ steps: [] }))).toThrow("has no steps");
   expect(() => parseScenarios("[]")).toThrow("must be a list");
+});
+
+test("parses multi-product expectations and rejects malformed checks", () => {
+  const checks: Expectation[] = [
+    { callCount: { tool: "place_order", count: 1 } },
+    { quoteLines: 3 },
+    { orderProducts: ["milk", "oat", "cream"] },
+    {
+      orderContents: {
+        products: ["milk"],
+        quantity: { value: 10, unit: "LTR" },
+        weekday: "Monday",
+      },
+    },
+  ];
+  expect(parseScenarios(scenarioFile({ expect: checks }))[0]?.expect).toEqual(checks);
+  for (const check of [
+    { callCount: { tool: "place_order", count: -1 } },
+    { callCount: { tool: "place_order", count: 1.5 } },
+    { quoteLines: 0 },
+    { orderProducts: [] },
+    { orderProducts: ["["] },
+    { orderProducts: [1] },
+    { orderContents: { products: ["["], quantity: { value: 10, unit: "LTR" }, weekday: "Monday" } },
+    {
+      orderContents: { products: ["milk"], quantity: { value: 0, unit: "LTR" }, weekday: "Monday" },
+    },
+    {
+      orderContents: {
+        products: ["milk"],
+        quantity: { value: 10, unit: "LTR" },
+        weekday: "Tuesday",
+      },
+    },
+  ]) {
+    expect(() => parseScenarios(scenarioFile({ expect: [check] }))).toThrow("Unknown expectation");
+  }
 });

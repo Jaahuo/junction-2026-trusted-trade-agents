@@ -151,8 +151,8 @@ describe("the render checks", () => {
   });
 });
 
-// The server stores the reason's text as the event detail too, and the timeline shows both.
-test.failing("a timeline event whose detail is its reason text shows it once (#168)", async () => {
+// The server stores the reason's text as the event detail too (#168).
+test("a timeline event whose detail is its reason text shows it once (#168)", async () => {
   const order = OrderSchema.parse(await fixture("order-timeline", "done.json"));
   const audit = order.audit.map((event) =>
     event.reason === undefined ? event : { ...event, detail: REASON_TEXT[event.reason] },

@@ -124,8 +124,8 @@ test("the trust parts follow the view language", () => {
   try {
     const output = rendered(trust);
     expect(output).toContain("Tarkoitus");
-    expect(output).toContain("Voi sisältää sesame");
-    expect(output).toContain("Rikkoo sääntöäsi: no egg");
+    expect(output).toContain("Voi sisältää seesaminsiemeniä");
+    expect(output).toContain("Rikkoo sääntöäsi: ei kananmunaa");
   } finally {
     setLang("en");
   }

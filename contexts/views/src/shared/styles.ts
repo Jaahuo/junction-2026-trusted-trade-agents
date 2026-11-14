@@ -113,6 +113,8 @@ export const base = css`
     outline: 3px solid color-mix(in srgb, var(--color-border-brand) 45%, transparent);
     outline-offset: 2px;
   }
+  /* Outranks the variant colours; the card keeps a busy primary button lime. */
+  .btn:is(.primary, .secondary, .ghost):disabled,
   .btn:disabled {
     border-color: transparent;
     background: var(--color-bg-subtle);

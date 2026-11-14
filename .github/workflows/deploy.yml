@@ -51,7 +51,6 @@ jobs:
     if: needs.target.outputs.ready == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    cache-mode: write
     services:
       postgres:
         image: mirror.gcr.io/library/postgres:17
@@ -72,6 +71,7 @@ jobs:
       packages: write
     outputs:
       image: ${{ steps.publish.outputs.image }}
+      chat_image: ${{ steps.publish.outputs.chat_image }}
     env:
       SHA: ${{ needs.target.outputs.sha }}
       RUN_ID: ${{ needs.target.outputs.run_id }}
@@ -100,16 +100,30 @@ jobs:
           sbom: false
           cache-from: type=gha,scope=production-image
           cache-to: type=gha,scope=production-image,mode=max
+      - name: Build chat image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: hosts/openwebui/Dockerfile
+          platforms: linux/amd64
+          tags: gate-chat-image:${{ env.SHA }}
+          outputs: type=docker,dest=${{ runner.temp }}/chat-image.tar
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=production-chat-image
+          cache-to: type=gha,scope=production-chat-image,mode=max
       - name: Record built image identity
         run: |
           set -euo pipefail
           image_id=$(bun scripts/ci-image.ts config-digest "$RUNNER_TEMP/image.tar")
-          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          chat_image_id=$(bun scripts/ci-image.ts config-digest "$RUNNER_TEMP/chat-image.tar")
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ && "$chat_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
           lock_hash=$(sha256sum bun.lock | cut -d ' ' -f 1)
-          jq -n --arg sha "$SHA" --arg run "$RUN_ID" --arg attempt "$ATTEMPT" --arg image "$image_id" --arg lock "$lock_hash" \
+          jq -n --arg sha "$SHA" --arg run "$RUN_ID" --arg attempt "$ATTEMPT" --arg image "$image_id" --arg chatImage "$chat_image_id" --arg lock "$lock_hash" \
             --arg build "$GITHUB_RUN_ID" --arg buildAttempt "$GITHUB_RUN_ATTEMPT" \
-            '{schemaVersion: 2, sourceSha: $sha, gateRunId: $run, gateRunAttempt: $attempt, buildRunId: $build, buildRunAttempt: $buildAttempt, imageId: $image, lockfileSha256: $lock, securityScans: "paused"}' > deployment-evidence/manifest.json
+            '{schemaVersion: 2, sourceSha: $sha, gateRunId: $run, gateRunAttempt: $attempt, buildRunId: $build, buildRunAttempt: $buildAttempt, imageId: $image, chatImageId: $chatImage, lockfileSha256: $lock, securityScans: "paused"}' > deployment-evidence/manifest.json
           docker load --input "$RUNNER_TEMP/image.tar"
+          docker load --input "$RUNNER_TEMP/chat-image.tar"
       - name: Smoke production runtime
         run: |
           umask 077
@@ -126,7 +140,39 @@ jobs:
               if (await Bun.file(path).exists()) throw new Error(`Unexpected runtime tool: ${path}`);
             }
           '
-      - name: Publish verified image
+      - name: Smoke chat runtime
+        run: |
+          set -euo pipefail
+          trap 'docker logs gate-chat-smoke; docker rm -f gate-chat-smoke' EXIT
+          docker run --detach --name gate-chat-smoke -p 127.0.0.1:38090:8080 \
+            -e WEBUI_AUTH=False -e WEBUI_SECRET_KEY=smoke-only-secret \
+            -e ENABLE_OLLAMA_API=False -e ENABLE_OPENAI_API=False \
+            -e OFFLINE_MODE=True -e DO_NOT_TRACK=True -e SCARF_NO_ANALYTICS=True \
+            -e VALIO_AIMO_RECIPE_PERMISSION=False "gate-chat-image:$SHA"
+          curl --fail --silent --show-error --retry 120 --retry-all-errors --retry-delay 2 --max-time 2 http://127.0.0.1:38090/health
+          docker exec gate-chat-smoke python -c '
+          import json, sys
+          from pathlib import Path
+          root = Path("/opt/trusted-trade/hosts/openwebui")
+          sys.path.insert(0, str(root / "scripts"))
+          import provision_agent, provision_buyer, provision_mcp
+          assert provision_agent.FILES == root
+          assert provision_agent.BASE == "http://127.0.0.1:8080"
+          for persona in ("restaurant", "bakery"):
+              assert provision_agent.system_prompt(persona)
+          json.loads((root / "agent/purchase-scenarios.json").read_text())
+          for path in (
+              root / "agent/restaurant.png", root / "agent/bakery.png", root / "agent/chef.png",
+              root / "scripts/migrate_auth.py", root / "scripts/tools/recipe_planner.py",
+              root / "scripts/tools/valio_recipes.py",
+              Path("/app/backend/open_webui/static/custom.css"),
+              Path("/app/backend/open_webui/static/acme/kitchen.jpg"),
+              Path("/app/backend/open_webui/static/acme/bakery.webp"),
+              Path("/app/backend/open_webui/static/acme/credits.html"),
+          ):
+              assert path.is_file() and path.stat().st_size, path
+          '
+      - name: Publish verified images
         id: publish
         env:
           REGISTRY_USER: ${{ github.actor }}
@@ -134,28 +180,34 @@ jobs:
           set -euo pipefail
           repository=jaahuo/junction-2026-trusted-trade-agents
           tag="$SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          image="ghcr.io/$repository:$tag"
+          chat_tag="$tag-chat"
           export DOCKER_CONFIG
           DOCKER_CONFIG=$(mktemp -d)
           trap 'rm -rf "$DOCKER_CONFIG"' EXIT
           printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
-          docker tag "gate-image:$SHA" "$image"
-          docker push "$image"
           token=$(curl --fail --silent --show-error --user "$REGISTRY_USER:$GH_TOKEN" \
             "https://ghcr.io/token?service=ghcr.io&scope=repository:$repository:pull" | jq -er .token)
-          curl --fail --silent --show-error -D /tmp/manifest-headers -o /tmp/manifest.json \
-            -H "Authorization: Bearer $token" \
-            -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
-            "https://ghcr.io/v2/$repository/manifests/$tag"
-          digest=$(awk 'BEGIN { IGNORECASE=1 } tolower($1) == "docker-content-digest:" { gsub("\r", "", $2); print $2 }' /tmp/manifest-headers)
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [ "sha256:$(sha256sum /tmp/manifest.json | cut -d ' ' -f 1)" = "$digest" ]
-          pushed=$(jq -er '.config.digest' /tmp/manifest.json)
-          expected=$(jq -er .imageId deployment-evidence/manifest.json)
-          [ "$pushed" = "$expected" ] || { echo "Pushed config digest $pushed does not match evidence $expected" >&2; exit 1; }
-          pinned="ghcr.io/$repository@$digest"
-          printf 'image=%s\n' "$pinned" >> "$GITHUB_OUTPUT"
-          printf 'image=%s\n' "$pinned" >> deployment-evidence/identity.txt
+          publish_image() {
+            local source=$1 tag=$2 field=$3 output=$4 identity=$5 image digest pushed expected pinned
+            image="ghcr.io/$repository:$tag"
+            docker tag "$source" "$image"
+            docker push "$image"
+            curl --fail --silent --show-error -D "$RUNNER_TEMP/manifest-headers" -o "$RUNNER_TEMP/manifest.json" \
+              -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/$repository/manifests/$tag"
+            digest=$(awk 'BEGIN { IGNORECASE=1 } tolower($1) == "docker-content-digest:" { gsub("\r", "", $2); print $2 }' "$RUNNER_TEMP/manifest-headers")
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            [ "sha256:$(sha256sum "$RUNNER_TEMP/manifest.json" | cut -d ' ' -f 1)" = "$digest" ]
+            pushed=$(jq -er '.config.digest' "$RUNNER_TEMP/manifest.json")
+            expected=$(jq -er --arg field "$field" '.[$field]' deployment-evidence/manifest.json)
+            [ "$pushed" = "$expected" ] || { echo "Pushed config digest $pushed does not match evidence $expected" >&2; exit 1; }
+            pinned="ghcr.io/$repository@$digest"
+            printf '%s=%s\n' "$output" "$pinned" >> "$GITHUB_OUTPUT"
+            printf '%s=%s\n' "$identity" "$pinned" >> deployment-evidence/identity.txt
+          }
+          publish_image "gate-image:$SHA" "$tag" imageId image image
+          publish_image "gate-chat-image:$SHA" "$chat_tag" chatImageId chat_image chatImage
       - name: Retain deployment evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -203,6 +255,7 @@ jobs:
           OPENWEBUI_ADMIN_EMAIL: ${{ secrets.OPENWEBUI_ADMIN_EMAIL }}
           OPENWEBUI_ADMIN_PASSWORD: ${{ secrets.OPENWEBUI_ADMIN_PASSWORD }}
           DEPLOY_IMAGE: ${{ needs.publish.outputs.image }}
+          DEPLOY_CHAT_IMAGE: ${{ needs.publish.outputs.chat_image }}
           DEPLOY_REGISTRY_USER: ${{ github.actor }}
           DEPLOY_REGISTRY_TOKEN: ${{ github.token }}
         run: |
@@ -225,12 +278,13 @@ jobs:
           RUN_ID: ${{ needs.target.outputs.run_id }}
           ATTEMPT: ${{ needs.target.outputs.attempt }}
           IMAGE: ${{ needs.publish.outputs.image }}
+          CHAT_IMAGE: ${{ needs.publish.outputs.chat_image }}
           OUTCOME: ${{ steps.deploy.outcome }}
           STATUS: ${{ steps.deploy.outputs.status }}
         run: |
           mkdir -p "$RUNNER_TEMP/deploy-result"
-          printf 'sourceSha=%s\ngateRunId=%s\ngateRunAttempt=%s\nimage=%s\nstepOutcome=%s\nstatus=%s\n' \
-            "$SHA" "$RUN_ID" "$ATTEMPT" "$IMAGE" "$OUTCOME" "${STATUS:-not-healthy}" > "$RUNNER_TEMP/deploy-result/result.txt"
+          printf 'sourceSha=%s\ngateRunId=%s\ngateRunAttempt=%s\nimage=%s\nchatImage=%s\nstepOutcome=%s\nstatus=%s\n' \
+            "$SHA" "$RUN_ID" "$ATTEMPT" "$IMAGE" "$CHAT_IMAGE" "$OUTCOME" "${STATUS:-not-healthy}" > "$RUNNER_TEMP/deploy-result/result.txt"
       - name: Retain deployment result
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -1,4 +1,5 @@
 import type { StoredMandate } from "@app/contract";
+import { ok } from "@app/kernel";
 import type { Db } from "@app/server-kit";
 import { and, eq, max, sql } from "drizzle-orm";
 import type { MandateOwner, MandateStore } from "../application/mandates.ts";
@@ -29,17 +30,19 @@ export const postgresMandateStore = (db: Db): MandateStore => ({
           .select()
           .from(mandates)
           .where(and(ownedBy(owner), eq(mandates.operationId, operationId)));
-        if (earlier !== undefined) return { stored: toStored(earlier), replayed: true };
+        if (earlier !== undefined) return ok({ stored: toStored(earlier), replayed: true });
       }
-      await tx
-        .update(mandates)
-        .set({ status: "revoked" })
-        .where(and(ownedBy(owner), eq(mandates.status, "active")));
       const [latest] = await tx
         .select({ version: max(mandates.version) })
         .from(mandates)
         .where(ownedBy(owner));
-      const { mandate, jws } = await next(latest?.version ?? 0);
+      const result = await next(latest?.version ?? 0);
+      if (!result.ok) return result;
+      const { mandate, jws } = result.value;
+      await tx
+        .update(mandates)
+        .set({ status: "revoked" })
+        .where(and(ownedBy(owner), eq(mandates.status, "active")));
       const [row] = await tx
         .insert(mandates)
         .values({
@@ -55,7 +58,7 @@ export const postgresMandateStore = (db: Db): MandateStore => ({
         })
         .returning();
       if (row === undefined) throw new Error("insert returned no row");
-      return { stored: toStored(row), replayed: false };
+      return ok({ stored: toStored(row), replayed: false });
     }),
   findActive: async (owner) => {
     const [row] = await db

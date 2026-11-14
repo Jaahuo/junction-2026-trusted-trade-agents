@@ -20,10 +20,11 @@ const demoMandateRequest: RegisterMandateRequest = {
 };
 
 export const seed = async (db: Db): Promise<void> => {
-  await registerMandate(
+  const result = await registerMandate(
     { store: postgresMandateStore(db), sign: buyerSigner() },
     DEMO_ACCOUNT,
     demoMandateRequest,
     new Date(),
   );
+  if (!result.ok) throw new Error("The demo mandate expiry is invalid.");
 };

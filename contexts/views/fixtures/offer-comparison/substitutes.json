@@ -1,0 +1,225 @@
+{
+  "offers": [
+    {
+      "offerId": "off_test_4",
+      "token": "test-offer-token-4",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_4",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_milk",
+        "quantity": {
+          "value": 64,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 1.2,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 76.8,
+          "gross": 87.55
+        },
+        "deliveryDate": "2026-11-19",
+        "requestedDate": "2026-11-20",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": {
+          "value": 16,
+          "unit": "LTR"
+        },
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test milk 1 l",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {}
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      },
+      "precheck": {
+        "decision": "auto",
+        "reasons": []
+      },
+      "rank": null,
+      "comparison": null
+    },
+    {
+      "offerId": "off_test_5",
+      "token": "test-offer-token-5",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_5",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_milk_b",
+        "quantity": {
+          "value": 16,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 1.3,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 20.8,
+          "gross": 23.71
+        },
+        "deliveryDate": "2026-11-19",
+        "requestedDate": "2026-11-20",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": "prod_test_milk",
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test farm milk 1 l",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.9,
+          "co2PerKg": 0.4,
+          "match": {}
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      },
+      "precheck": {
+        "decision": "needs_approval",
+        "reasons": ["SUBSTITUTION"]
+      },
+      "rank": "better",
+      "comparison": {
+        "replaces": "prod_test_milk",
+        "pricePerStdUnitDelta": 0.1,
+        "reliabilityDelta": null,
+        "originDiffers": false
+      }
+    },
+    {
+      "offerId": "off_test_6",
+      "token": "test-offer-token-6",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_6",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_milk_a",
+        "quantity": {
+          "value": 16,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 1.2,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 19.2,
+          "gross": 21.89
+        },
+        "deliveryDate": "2026-11-19",
+        "requestedDate": "2026-11-20",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": "prod_test_milk",
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test organic milk 1 l",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 1,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.95,
+          "co2PerKg": 0.4,
+          "match": {}
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      },
+      "precheck": {
+        "decision": "needs_approval",
+        "reasons": ["SUBSTITUTION"]
+      },
+      "rank": "best",
+      "comparison": {
+        "replaces": "prod_test_milk",
+        "pricePerStdUnitDelta": 0.0,
+        "reliabilityDelta": null,
+        "originDiffers": false
+      }
+    }
+  ],
+  "omitted": []
+}

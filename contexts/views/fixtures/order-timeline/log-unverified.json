@@ -1,0 +1,104 @@
+{
+  "orderId": "ord_placed",
+  "customer": "cust_invoice_01",
+  "agentId": "agent_demo",
+  "accountId": "acct_demo",
+  "offerIds": ["off_test_1"],
+  "lines": [
+    {
+      "offerId": "off_test_1",
+      "token": "test-offer-token",
+      "claims": {
+        "iss": "http://127.0.0.1:3000",
+        "offerId": "off_test_1",
+        "customer": "cust_invoice_01",
+        "agentId": "agent_demo",
+        "productId": "prod_test_oat_drink",
+        "quantity": {
+          "value": 4,
+          "unit": "CT"
+        },
+        "unitPrice": {
+          "net": 14.4,
+          "vatRate": 14,
+          "currency": "EUR"
+        },
+        "deposits": 0,
+        "total": {
+          "net": 57.6,
+          "gross": 65.66
+        },
+        "deliveryDate": "2026-11-19",
+        "requestedDate": "2026-11-20",
+        "nextDeliveryDate": "2026-11-20",
+        "stock": "confirmed",
+        "paymentTerms": "invoice",
+        "cutoffAt": "2026-11-17T10:00:00+02:00",
+        "replaces": null,
+        "shortfall": null,
+        "mandateId": "mnd_test_1",
+        "mandateVersion": 1,
+        "constraints": {
+          "hard": [
+            {
+              "attribute": "lactose",
+              "is": "free_from"
+            }
+          ],
+          "soft": [
+            {
+              "attribute": "countryOfOrigin",
+              "prefer": "fi"
+            }
+          ]
+        },
+        "product": {
+          "name": "Test oat drink 1 l",
+          "category": "test_dairy_alternatives",
+          "perSalesUnit": {
+            "value": 12,
+            "unit": "LTR"
+          },
+          "countryOfOrigin": "fi",
+          "deliveryReliability": 0.97,
+          "co2PerKg": 0.4,
+          "match": {
+            "lactose": "confirmed"
+          }
+        },
+        "iat": 1794900000,
+        "exp": 1794903600
+      }
+    }
+  ],
+  "alternatives": [],
+  "mandateId": "mnd_test_1",
+  "mandateVersion": 1,
+  "status": "placed",
+  "reasons": [],
+  "proposalVersion": 1,
+  "approvalUrl": null,
+  "paymentTerms": "invoice",
+  "total": {
+    "net": 57.6,
+    "gross": 65.66
+  },
+  "originalRequest": "40 litres of lactose-free oat drink by Friday",
+  "decision": null,
+  "requotes": [],
+  "nextDeliveryDate": null,
+  "audit": [
+    {
+      "at": "2026-11-14T10:05:00+00:00",
+      "actor": "agent",
+      "event": "order_requested"
+    },
+    {
+      "at": "2026-11-14T10:06:00+00:00",
+      "actor": "server",
+      "event": "placed"
+    }
+  ],
+  "createdAt": "2026-11-14T10:05:00+00:00",
+  "auditIntegrity": "unverified"
+}

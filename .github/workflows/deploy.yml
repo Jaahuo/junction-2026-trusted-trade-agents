@@ -10,44 +10,70 @@ concurrency:
   cancel-in-progress: false
 permissions:
   contents: read
+  actions: read
 jobs:
   deploy:
     name: deploy
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
     env:
-      DEPLOY_OUTPUTS: ${{ secrets.DEPLOY_OUTPUTS }}
-      DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
     steps:
-      - name: Skip until the deploy secrets exist
-        id: configured
+      # Deploy only the current main head, and only after its push gate passed:
+      # an older gate finishing late, a rerun or a manual run never rolls production back.
+      - name: Choose the gated main head
+        id: target
+        env:
+          CONFIGURED: ${{ secrets.DEPLOY_OUTPUTS != '' && secrets.DEPLOY_ENV != '' && secrets.DEPLOY_SSH_KEY != '' }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [ -z "$DEPLOY_OUTPUTS" ] || [ -z "$DEPLOY_ENV" ]; then
-            echo "Deploy secrets are not set; see docs/deploy.md." >> "$GITHUB_STEP_SUMMARY"
+          main_sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          sha=${TRIGGER_SHA:-$main_sha}
+          gated=$(gh api "repos/$REPO/actions/workflows/gate.yml/runs?head_sha=$sha&event=push&status=success&per_page=1" --jq .total_count)
+          if [ "$CONFIGURED" != "true" ]; then
+            reason="deploy secrets are not set; see docs/deploy.md"
+          elif [ "$sha" != "$main_sha" ]; then
+            reason="$sha is no longer the main head ($main_sha)"
+          elif [ "$gated" = "0" ]; then
+            reason="$sha has no successful push gate run"
+          fi
+          if [ -n "${reason:-}" ]; then
+            echo "Skipped: $reason." >> "$GITHUB_STEP_SUMMARY"
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
+            echo "Deploying $sha." >> "$GITHUB_STEP_SUMMARY"
             echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@v5
-        if: steps.configured.outputs.ready == 'true'
+        if: steps.target.outputs.ready == 'true'
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ steps.target.outputs.sha }}
       - uses: jdx/mise-action@v5
-        if: steps.configured.outputs.ready == 'true'
-      - if: steps.configured.outputs.ready == 'true'
+        if: steps.target.outputs.ready == 'true'
+      - if: steps.target.outputs.ready == 'true'
         run: bun install --frozen-lockfile
-      - name: SSH key and pinned host key
-        if: steps.configured.outputs.ready == 'true'
+      - name: Push to the hosted demo
+        if: steps.target.outputs.ready == 'true'
         env:
+          SHA: ${{ steps.target.outputs.sha }}
+          DEPLOY_OUTPUTS: ${{ secrets.DEPLOY_OUTPUTS }}
+          DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
+          if [ "$(gh api "repos/$REPO/commits/main" --jq .sha)" != "$SHA" ]; then
+            echo "Skipped: main moved past $SHA; the newer run deploys." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           install -d -m 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Push to the hosted demo
-        if: steps.configured.outputs.ready == 'true'
-        run: bun scripts/deploy.ts push
+          bun scripts/deploy.ts push

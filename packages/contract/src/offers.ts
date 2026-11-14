@@ -1,3 +1,4 @@
+import type { Result } from "@app/kernel";
 import { z } from "zod";
 import {
   DateSchema,
@@ -8,7 +9,7 @@ import {
   QuantitySchema,
   TimeSchema,
 } from "./common.ts";
-import { DecisionSchema, ReasonCodeSchema } from "./reasons.ts";
+import { EvaluationSchema } from "./reasons.ts";
 import { ConstraintsSchema, HardConstraintSchema, SoftConstraintSchema } from "./search.ts";
 import { PriceQuoteSchema, StockSchema } from "./wholesaler.ts";
 
@@ -75,11 +76,15 @@ export const OfferClaimsSchema = z.strictObject({
 });
 export type OfferClaims = z.infer<typeof OfferClaimsSchema>;
 
-export const PrecheckSchema = z.strictObject({
-  decision: DecisionSchema,
-  reasons: z.array(ReasonCodeSchema),
-});
+/** The pre-check has the same shape and rule as an evaluation (SPEC-009). */
+export const PrecheckSchema = EvaluationSchema;
 export type Precheck = z.infer<typeof PrecheckSchema>;
+
+/** The result of verifying an offer token (SPEC-006): its claims, or why it is not usable. */
+export type OfferVerification = Result<
+  OfferClaims,
+  { code: "OFFER_INVALID" } | { code: "OFFER_EXPIRED"; claims: OfferClaims }
+>;
 
 export const OmitReasonSchema = z.enum([
   "NO_PRICE",

@@ -68,8 +68,14 @@ export const GUARDRAILS = {
 } as const;
 
 export const DecisionSchema = z.enum(["auto", "needs_approval", "rejected"]);
-export const EvaluationSchema = z.strictObject({
-  decision: DecisionSchema,
-  reasons: z.array(ReasonCodeSchema),
-});
+/** The result of SPEC-009 steps 1-5 and of the offers pre-check: `auto` carries no reason. */
+export const EvaluationSchema = z
+  .strictObject({
+    decision: DecisionSchema,
+    reasons: z.array(ReasonCodeSchema),
+  })
+  .refine((evaluation) => evaluation.decision !== "auto" || evaluation.reasons.length === 0, {
+    message: "An auto decision carries no reasons.",
+    path: ["reasons"],
+  });
 export type Evaluation = z.infer<typeof EvaluationSchema>;

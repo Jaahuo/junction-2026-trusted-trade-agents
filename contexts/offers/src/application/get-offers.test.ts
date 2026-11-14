@@ -21,7 +21,7 @@ import {
   fakeProduct,
   type FakeLiveData,
 } from "./fakes.ts";
-import { getOffers, PRECHECK_CONCURRENCY } from "./get-offers.ts";
+import { getOffers, NO_LIVE_SOURCE_DETAIL, PRECHECK_CONCURRENCY } from "./get-offers.ts";
 import type { OfferSigner } from "./ports.ts";
 
 // Invented products only (team rules R-23).
@@ -210,6 +210,35 @@ describe("getOffers", () => {
     });
     expect(result.offers.map((offer) => offer.claims.productId)).toEqual([OAT]);
     expect(setup.signer.signed.map((entry) => entry.claims.productId)).toEqual([OAT]);
+  });
+
+  test("with no live wholesaler configured, every line is omitted NO_PRICE and nothing is signed", async () => {
+    const setup = fakeOffersDeps({
+      products: [fakeProduct(OAT), fakeProduct(RYE)],
+      live: quotedAll([OAT, RYE]),
+    });
+
+    const result = valueOf(
+      await getOffers(
+        { ...setup.deps, live: null },
+        principal,
+        request({ lines: [line(OAT), line(RYE), line("prod_test_unknown")] }),
+      ),
+    );
+
+    expect(result).toEqual({
+      offers: [],
+      omitted: [OAT, RYE, "prod_test_unknown"].map((productId) => ({
+        productId,
+        reason: "NO_PRICE",
+        detail: NO_LIVE_SOURCE_DETAIL,
+      })),
+    });
+    expect(OffersResultSchema.safeParse(result).success).toBe(true);
+    expect(setup.signer.signed).toEqual([]);
+    expect(setup.orders.calls).toEqual([]);
+    expect(setup.catalog.requests).toEqual([]);
+    expect(setup.live.calls).toEqual([]);
   });
 
   test("999999 gives stock unconfirmed", async () => {

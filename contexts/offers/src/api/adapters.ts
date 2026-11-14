@@ -4,25 +4,25 @@ import type { OffersDeps } from "../application/ports.ts";
 import { createQuoteCache } from "../application/quote-cache.ts";
 import { envOfferSigner } from "../infra/offer-signer.ts";
 import { peerAdapters } from "../infra/peers.ts";
-import { fixtureWholesaler } from "../infra/wholesaler-fixture.ts";
 import { mockWholesalerFromEnv } from "../infra/wholesaler-mock.ts";
 
-/** The only place that picks the wholesaler adapter; anything but a configured mock uses the fixture. */
+const NO_PRICE_EFFECT = "get_offers omits every line NO_PRICE and signs no offer.";
+
+/** The only place that picks the wholesaler adapter; null when no live price source is configured. */
 export const selectLive = (
   mode: string | undefined,
   mock: WholesalerLive | null,
   warn: (message: string) => void,
-): WholesalerLive => {
-  if (mode === undefined || mode === "fixture") return fixtureWholesaler();
+): WholesalerLive | null => {
   if (mode === "mock" && mock !== null) return mock;
-  if (mode === "mock") {
-    warn("offers: WHOLESALER_LIVE=mock has no API key; using the fixture wholesaler.");
-  } else if (mode === "json") {
-    warn("offers: WHOLESALER_LIVE=json is not built yet; using the fixture wholesaler.");
+  if (mode === undefined) {
+    warn(`offers: WHOLESALER_LIVE is not set; ${NO_PRICE_EFFECT}`);
+  } else if (mode === "mock") {
+    warn(`offers: WHOLESALER_LIVE=mock has no API key; ${NO_PRICE_EFFECT}`);
   } else {
-    warn(`offers: unknown WHOLESALER_LIVE mode "${mode}"; using the fixture wholesaler.`);
+    warn(`offers: WHOLESALER_LIVE="${mode}" is not a live price source; ${NO_PRICE_EFFECT}`);
   }
-  return fixtureWholesaler();
+  return null;
 };
 
 let memo: OffersDeps | undefined;

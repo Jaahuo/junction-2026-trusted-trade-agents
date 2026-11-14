@@ -57,6 +57,9 @@ const DETAIL: Record<OmitReason, string> = {
   CONSTRAINT_CONTRADICTED: "the product contradicts a hard constraint",
 };
 
+export const NO_LIVE_SOURCE_DETAIL =
+  "no live price source is configured, so this product cannot be offered or ordered";
+
 const upstream = (message: string): GetOffersError => ({ code: "UPSTREAM_FAILED", message });
 
 const unique = (ids: readonly string[]): string[] => [...new Set(ids)];
@@ -106,6 +109,18 @@ export async function getOffers(
     return err({
       code: "BAD_REQUEST",
       message: `paymentTerms must be ${principal.paymentTerms} for this account`,
+    });
+  }
+
+  const live = deps.live;
+  if (live === null) {
+    return ok({
+      offers: [],
+      omitted: req.lines.map((line) => ({
+        productId: line.productId,
+        reason: "NO_PRICE" as const,
+        detail: NO_LIVE_SOURCE_DETAIL,
+      })),
     });
   }
 
@@ -177,7 +192,7 @@ export async function getOffers(
 
   const availability = new Map<string, AvailabilityQuote>();
   for (const productIds of batchIds(misses)) {
-    const read = await deps.live.getAvailability({
+    const read = await live.getAvailability({
       customer,
       requestedDate: req.deliverBy,
       productIds,
@@ -211,7 +226,7 @@ export async function getOffers(
   const prices = new Map<string, PriceQuote>();
   for (const [requestedDate, ids] of missesByDate) {
     for (const productIds of batchIds(ids)) {
-      const read = await deps.live.getPrices({ customer, requestedDate, productIds });
+      const read = await live.getPrices({ customer, requestedDate, productIds });
       if (!read.ok) return err(upstream("prices could not be read"));
       for (const quote of read.value.quotes) prices.set(quote.productId, quote);
     }

@@ -14,40 +14,21 @@ const pick = (mode: string | undefined, adapter: WholesalerLive | null) => {
   return { live, warnings };
 };
 
-const isFixture = async (live: WholesalerLive): Promise<boolean> => {
-  const read = await live.getAvailability({
-    customer: "cust_test",
-    requestedDate: "2026-11-20",
-    productIds: ["prod_test_any"],
-  });
-  return read.ok && read.value.quotes.length === 1;
-};
+test("selectLive picks the mock for mode mock with an adapter without a warning", () => {
+  expect(pick("mock", mock)).toEqual({ live: mock, warnings: [] });
+});
 
-test("selectLive picks the mock for mode mock with an adapter, else the fixture; mock without an adapter, json and an unknown mode warn once; unset and fixture do not warn", async () => {
-  const chosen = pick("mock", mock);
-  expect(chosen.live).toBe(mock);
-  expect(chosen.warnings).toEqual([]);
-
-  for (const mode of [undefined, "fixture"]) {
-    const { live, warnings } = pick(mode, mock);
-    expect({ mode, fixture: await isFixture(live), warnings }).toEqual({
-      mode,
-      fixture: true,
-      warnings: [],
-    });
-  }
-
+test("selectLive gives no live source and one NO_PRICE warning when the mode is unset, mock without an adapter, fixture, json or unknown", () => {
   for (const [mode, adapter] of [
+    [undefined, mock],
     ["mock", null],
+    ["fixture", mock],
     ["json", mock],
     ["sandbox", mock],
   ] as const) {
     const { live, warnings } = pick(mode, adapter);
-    expect({ mode, fixture: await isFixture(live), warnings: warnings.length }).toEqual({
-      mode,
-      fixture: true,
-      warnings: 1,
-    });
+    expect({ mode, live, warnings: warnings.length }).toEqual({ mode, live: null, warnings: 1 });
+    expect(warnings[0]).toContain("NO_PRICE");
   }
   expect(pick("sandbox", mock).warnings[0]).toContain("sandbox");
 });

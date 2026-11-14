@@ -44,7 +44,8 @@ export interface QuoteCache {
   ): void;
 }
 export interface OffersDeps {
-  live: WholesalerLive;
+  /** null: no live price source is configured, so no line can be priced. */
+  live: WholesalerLive | null;
   catalog: CatalogFacts;
   mandates: CurrentMandate;
   orders: Prechecker;

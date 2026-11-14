@@ -16,6 +16,7 @@ import {
   fakeProduct,
   type FakeOffers,
 } from "../application/fakes.ts";
+import { NO_LIVE_SOURCE_DETAIL } from "../application/get-offers.ts";
 import { envOfferSigner } from "../infra/offer-signer.ts";
 import { peerAdapters } from "../infra/peers.ts";
 import { defaultOffersDeps } from "./adapters.ts";
@@ -123,6 +124,19 @@ describe("POST /offers", () => {
     expect(fake.orders.calls).toHaveLength(1);
   });
 
+  test("with no live wholesaler configured, POST /offers answers 200, omits every line NO_PRICE and signs nothing", async () => {
+    const fake = offers();
+    const response = await post(createApi({ ...fake.deps, live: null }), request());
+    expect(response.status).toBe(200);
+    expect(OffersResultSchema.parse(await response.json())).toEqual({
+      offers: [],
+      omitted: [{ productId: OAT, reason: "NO_PRICE", detail: NO_LIVE_SOURCE_DETAIL }],
+    });
+    expect(fake.signer.signed).toEqual([]);
+    expect(fake.orders.calls).toEqual([]);
+    expect(fake.live.calls).toEqual([]);
+  });
+
   test("requote and validate still answer 501 NOT_IMPLEMENTED", async () => {
     const app = createApi(offers().deps);
     for (const path of ["requote", "validate"]) {
@@ -188,7 +202,8 @@ describe("context wiring", () => {
   test("with the default adapters and no reachable peers, POST /offers answers 502 with the error envelope", async () => {
     // Only the peer base URL is injected, so the test does not depend on PORT or a running server.
     const unreachable = peerAdapters({ baseUrl: () => "http://127.0.0.1:1" });
-    const app = createApi({ ...defaultOffersDeps(), ...unreachable });
+    // A fake live source keeps the case independent of WHOLESALER_LIVE in the environment.
+    const app = createApi({ ...defaultOffersDeps(), ...unreachable, live: offers().deps.live });
     const response = await post(app, request());
     const { status, body } = await errorOf(response);
     expect({ status, code: body.error.code }).toEqual({ status: 502, code: "UPSTREAM_FAILED" });

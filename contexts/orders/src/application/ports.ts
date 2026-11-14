@@ -23,6 +23,14 @@ type VerifiedOffer = Result<
 /** Verifies an offer token's signature, alg, typ and kid; an expired offer comes back with its claims. */
 export type OfferVerifier = (token: string, now: Date) => Promise<VerifiedOffer>;
 
+export interface IssuedOfferPort {
+  /**
+   * The unexpired tokens the offers service issued to the principal for these offer IDs
+   * (SPEC-006 `issued`), by offer ID; an unknown ID has no entry.
+   */
+  issued(offerIds: string[]): Promise<Result<Map<string, string>, "UPSTREAM_FAILED">>;
+}
+
 export interface MandatePort {
   /** The current mandate of the agent; null when the agent has none. */
   current(agentId: string): Promise<Result<Mandate | null, "UPSTREAM_FAILED">>;

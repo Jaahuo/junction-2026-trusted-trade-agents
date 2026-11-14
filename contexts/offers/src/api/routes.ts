@@ -1,5 +1,7 @@
 import {
   ErrorEnvelopeSchema,
+  IssuedOffersRequestSchema,
+  IssuedOffersSchema,
   OffersRequestSchema,
   OffersResultSchema,
   RequoteRequestSchema,
@@ -57,6 +59,13 @@ export const createApi = (deps: OffersDeps) =>
           ? status(400, { error: { code, message } })
           : status(502, { error: { code, message } });
       },
+    )
+    .post(
+      "/issued",
+      { body: IssuedOffersRequestSchema, response: { 200: IssuedOffersSchema } },
+      async ({ body, request }) => ({
+        offers: deps.issued.find(await principalFrom(request), body.offerIds, deps.now()),
+      }),
     )
     // Typed stub of SPEC-003 until its issue builds it.
     .post(

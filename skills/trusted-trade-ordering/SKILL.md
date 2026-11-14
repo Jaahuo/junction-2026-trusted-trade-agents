@@ -22,8 +22,8 @@ When the user asks you to order, use the quiet tools `find_products` and `quote_
 3. **Request offers.** Call `quote_offers` (or `get_offers` when the user asks to compare offers) for the shortlist only. Done when every candidate is an offer or is listed in `omitted` with a reason.
    - Read `precheck` on each offer. It is guidance: `place_order` runs the checks again.
    - Read `claims.deliveryDate`, `claims.shortfall` and `claims.replaces`. A later date or a shortfall adds `AVAILABILITY_DIFFERS`. A substitute names the product it replaces.
-4. **Choose.** Among the offers that meet the user's need, prefer one whose `precheck.decision` is `auto`. When none is `auto`, take the best offer that meets the need: the human then decides. Done when you hold one offer token per line. Keep the unchosen offers: pass them as `alternatives`.
-5. **Place the order.** Call `place_order` with `offers` (tokens), optional `alternatives`, `originalRequest`, and a new `idempotencyKey`. After a timeout or a lost reply, send the same tokens with the same key: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
+4. **Choose.** Among the offers that meet the user's need, prefer one whose `precheck.decision` is `auto`. When none is `auto`, take the best offer that meets the need: the human then decides. Done when you hold one `offerId` (`off_…`) per line. Keep the unchosen offers: pass them as `alternatives`.
+5. **Place the order.** Call `place_order` with `offers` (the chosen `offerId` values, not the long tokens), optional `alternatives` (their `offerId` values), `originalRequest`, and a new `idempotencyKey`. After a timeout or a lost reply, send the same ids with the same key: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
 6. **Act on the status.**
 
 | Status                                       | Action                                                                                                                                    |

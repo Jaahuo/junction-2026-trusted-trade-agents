@@ -21,6 +21,7 @@ import {
 } from "../domain/evaluate.ts";
 import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
 import type {
+  IssuedOfferPort,
   MandatePort,
   OfferVerifier,
   OrderStore,
@@ -33,6 +34,7 @@ import type {
 export interface OrderDeps {
   store: OrderStore;
   verifyOffer: OfferVerifier;
+  issuedOffers: IssuedOfferPort;
   mandates: MandatePort;
   payment: PaymentPort;
   signReceipt: ReceiptSigner;
@@ -58,6 +60,33 @@ interface Checked {
   mandate: Mandate | null;
 }
 
+/** An offer reference is an offer ID (`off_…`); anything else is treated as a token. */
+const isOfferId = (ref: string): boolean => /^off_[\w-]+$/.test(ref);
+
+/**
+ * Replaces each offer ID with the token issued for it (SPEC-009 R3). An ID the offers service does not
+ * know for the principal, including an expired or another customer's offer, is OFFER_INVALID.
+ */
+const resolveRefs = async (
+  issuedOffers: IssuedOfferPort,
+  refs: string[],
+): Promise<Result<string[], Refusal>> => {
+  const ids = refs.filter(isOfferId);
+  if (ids.length === 0) return ok(refs);
+  const issued = await issuedOffers.issued([...new Set(ids)]);
+  if (!issued.ok) return err(refusal("UPSTREAM_FAILED", "The offers could not be looked up."));
+  const tokens: string[] = [];
+  for (const ref of refs) {
+    const token = isOfferId(ref) ? issued.value.get(ref) : ref;
+    if (token === undefined)
+      return err(
+        refusal("OFFER_INVALID", `Offer ${ref} is unknown or expired; request new offers.`),
+      );
+    tokens.push(token);
+  }
+  return ok(tokens);
+};
+
 const verifyAll = async (
   verifyOffer: OfferVerifier,
   tokens: string[],
@@ -75,6 +104,15 @@ const verifyAll = async (
   return ok(lines);
 };
 
+const verifyRefs = async (
+  deps: OrderDeps,
+  refs: string[],
+  now: Date,
+): Promise<Result<OrderLine[], Refusal>> => {
+  const tokens = await resolveRefs(deps.issuedOffers, refs);
+  return tokens.ok ? verifyAll(deps.verifyOffer, tokens.value, now) : tokens;
+};
+
 /** SPEC-009 R3-R5, plus the payment terms of SPEC-002. Neither precheck nor place_order goes past a refusal. */
 const checkTokens = async (
   deps: OrderDeps,
@@ -85,10 +123,10 @@ const checkTokens = async (
 ): Promise<Result<Checked, Refusal>> => {
   const all = [...offers, ...alternatives];
   if (new Set(all).size !== all.length)
-    return err(refusal("OFFER_INVALID", "The request repeats an offer token."));
-  const lines = await verifyAll(deps.verifyOffer, offers, now);
+    return err(refusal("OFFER_INVALID", "The request repeats an offer."));
+  const lines = await verifyRefs(deps, offers, now);
   if (!lines.ok) return lines;
-  const alternativeLines = await verifyAll(deps.verifyOffer, alternatives, now);
+  const alternativeLines = await verifyRefs(deps, alternatives, now);
   if (!alternativeLines.ok) return alternativeLines;
 
   const claims = [...lines.value, ...alternativeLines.value].map((line) => line.claims);

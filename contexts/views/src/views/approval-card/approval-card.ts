@@ -11,6 +11,7 @@ import chevronDown from "../../shared/icons/chevron-down.svg?raw";
 import clock16 from "../../shared/icons/clock-16.svg?raw";
 import clockIcon from "../../shared/icons/clock.svg?raw";
 import attention from "../../shared/icons/attention.svg?raw";
+import agent16 from "../../shared/icons/agent-16.svg?raw";
 import bin from "../../shared/icons/bin.svg?raw";
 import bullet from "../../shared/icons/bullet.svg?raw";
 import minus16 from "../../shared/icons/minus-16.svg?raw";
@@ -188,7 +189,7 @@ export class ApprovalCard extends LitElement {
         flex-direction: column;
         gap: var(--spacing-md);
         padding: var(--spacing-lg);
-        background: var(--color-yellow-aimo);
+        background: var(--color-bg-attention);
       }
       .todo-title {
         display: flex;
@@ -581,6 +582,11 @@ export class ApprovalCard extends LitElement {
         flex-wrap: wrap;
         gap: var(--spacing-sm);
       }
+      .chips .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
       .details {
         border-top: 1px solid var(--color-border);
         background: var(--color-light-purple-aimo);
@@ -820,7 +826,9 @@ export class ApprovalCard extends LitElement {
   private agentHelp(label: string, prompt: string, chips: string[]) {
     if (!this.canAsk) return nothing;
     return html`<div class="agent-help" part="agent-help">
-      <button type="button" class="btn secondary" @click=${() => this.ask(prompt)}>${label}</button>
+      <button type="button" class="btn secondary" @click=${() => this.ask(prompt)}>
+        ${icon(agent16)}${label}
+      </button>
       ${
         chips.length === 0
           ? nothing
@@ -833,7 +841,7 @@ export class ApprovalCard extends LitElement {
                       class="chip"
                       @click=${() => this.ask(`${prompt} ${chip}.`)}
                     >
-                      ${chip}
+                      ${icon(agent16)}${chip}
                     </button>`,
                 )}
               </div>`
@@ -1173,10 +1181,6 @@ export class ApprovalCard extends LitElement {
     };
     return html`${gettingOffer} ${this.todoBox(order)} ${this.totalBlock(order)}
       ${this.products(order)} ${this.orderedFor(order)}
-      <p class="total-row">
-        <span>Order total</span
-        ><span class="value" aria-live="polite">${money(this.total(order, "net"))}</span>
-      </p>
       ${
         changed
           ? html`<p class="body-small">
@@ -1184,13 +1188,16 @@ export class ApprovalCard extends LitElement {
             </p>`
           : nothing
       }
+      <p class="total-row">
+        <span>Order total</span
+        ><span class="value" aria-live="polite">${money(this.total(order, "net"))}</span>
+      </p>
       <div class="actions" part="actions">
         <button
           part="button approve"
           class="btn primary"
-          ?disabled=${this.busy}
           aria-busy=${this.busy ? "true" : "false"}
-          @click=${confirm}
+          @click=${() => (this.busy ? undefined : confirm())}
         >
           ${
             this.busy && !this.requoting
@@ -1201,7 +1208,7 @@ export class ApprovalCard extends LitElement {
         </button>
         <button
           part="button reject"
-          class="btn ghost"
+          class="btn brand"
           ?disabled=${this.busy}
           @click=${() =>
             // Just reject: no reason form yet, and the agent does not try again.
@@ -1218,11 +1225,11 @@ export class ApprovalCard extends LitElement {
         this.canAsk
           ? html`<button
               type="button"
-              class="btn ghost talk"
+              class="btn secondary talk"
               part="button talk"
               @click=${() => this.ask(`About order ${order.orderId}:`, "tt-talk")}
             >
-              Discuss order with agent
+              ${icon(agent16)}Discuss order with agent
             </button>`
           : nothing
       }`;
@@ -1424,6 +1431,7 @@ export class ApprovalCard extends LitElement {
             ${
               order.status === "placed"
                 ? rows([
+                    ["Order no.", order.orderId],
                     ["Delivery", earliest === undefined ? null : day(earliest)],
                     ["Total", money(order.total.net)],
                     ["Confirmed by", decision === null ? null : "You"],
@@ -1488,17 +1496,6 @@ export class ApprovalCard extends LitElement {
         </section>
         <p class="details-links body-small">
           ${log === null ? nothing : html`<a href=${log} target="_blank" rel="noreferrer">View full log</a>`}
-          ${
-            order.status === "pending_approval" && order.approvalUrl !== null
-              ? html`<a
-                  part="approval-link"
-                  href=${order.approvalUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  >Open the approval page</a
-                >`
-              : nothing
-          }
         </p>
       </div>
     </aside>`;

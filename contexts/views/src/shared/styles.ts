@@ -14,6 +14,7 @@ const tokens = css`
     --color-button-text: #003747;
     --color-light-purple-aimo: #eee8f5;
     --color-yellow-aimo: #fddb32;
+    --color-bg-attention: #fff3b0;
     --color-text: #23282d;
     --color-text-secondary: #555759;
     --color-text-on-brand: #ffffff;
@@ -123,7 +124,7 @@ export const base = css`
     outline-offset: 2px;
   }
   /* Outranks the variant colours; the card keeps a busy primary button lime. */
-  .btn:is(.primary, .secondary, .ghost):disabled,
+  .btn:is(.primary, .secondary, .ghost, .brand):disabled,
   .btn:disabled {
     border-color: transparent;
     background: var(--color-bg-subtle);
@@ -142,6 +143,12 @@ export const base = css`
   }
   .btn.ghost {
     color: var(--color-text-brand);
+  }
+  /* Filled petrol, square like the primary (Figma v17 Reject). */
+  .btn.brand {
+    border-radius: 0;
+    background: var(--color-bg-brand);
+    color: var(--color-text-on-brand);
   }
   .chip {
     padding: var(--spacing-sm) var(--spacing-md);

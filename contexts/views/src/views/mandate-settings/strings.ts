@@ -74,6 +74,8 @@ const en = {
     `Compared with version ${version}, which is in force now. A changed term shows the value in force under it.`,
   draftNoCurrent:
     "No mandate is in force now. The agent cannot place orders until you register limits.",
+  draftUnknownCurrent:
+    "The view cannot tell which limits are in force now. Ask the agent to read the mandate.",
   proposedLimits: "Proposed limits",
   inForce: (value: string) => `In force now: ${value}`,
   register: "Register limits",
@@ -161,6 +163,8 @@ const fi: typeof en = {
     `Verrattu versioon ${version}, joka on nyt voimassa. Muuttuneen kohdan alla näkyy voimassa oleva arvo.`,
   draftNoCurrent:
     "Mikään valtuutus ei ole nyt voimassa. Agentti ei voi tehdä tilauksia ennen kuin rekisteröit rajat.",
+  draftUnknownCurrent:
+    "Näkymä ei tiedä, mitkä rajat ovat nyt voimassa. Pyydä agenttia lukemaan valtuutus.",
   proposedLimits: "Ehdotetut rajat",
   inForce: (value) => `Nyt voimassa: ${value}`,
   register: "Rekisteröi rajat",

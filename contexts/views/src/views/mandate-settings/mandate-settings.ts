@@ -46,6 +46,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     ...ViewElement.properties,
     registering: { state: true },
     registerError: { state: true },
+    currentUnknown: { state: true },
   };
 
   static override styles = [
@@ -157,6 +158,8 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
   declare private registering: boolean;
   /** Why the last Register failed, shown next to the button; `unconfirmed` when the outcome is unknown. */
   declare private registerError: { message: string; unconfirmed: boolean } | null;
+  /** True after a Register whose outcome no check settled: the view cannot tell which limits are in force. */
+  declare private currentUnknown: boolean;
   /** Created at the first Register of a draft and kept, so a retry is a replay (SPEC-008). */
   private operationId: string | null = null;
 
@@ -164,6 +167,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     super();
     this.registering = false;
     this.registerError = null;
+    this.currentUnknown = false;
   }
 
   override connectedCallback() {
@@ -216,18 +220,25 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     if (check.kind === "done" && registersDraft(check.data, draft))
       return this.registered(source, check.data);
     this.registering = false;
-    const known =
-      check.kind === "done" ||
-      (check.kind === "error" &&
-        (check.message.startsWith("NOT_FOUND:") || isNoCurrentMandate(new Error(check.message))));
+    const none =
+      check.kind === "error" &&
+      (check.message.startsWith("NOT_FOUND:") || isNoCurrentMandate(new Error(check.message)));
+    // The check is the latest word on the mandate in force; without one, nothing is claimed.
+    if (check.kind === "done" || none)
+      this.state = {
+        kind: "done",
+        data: { ...draft, current: check.kind === "done" ? check.data : null },
+      };
+    this.currentUnknown = check.kind !== "done" && !none;
     this.registerError = {
       message: result.kind === "error" ? result.message : "",
-      unconfirmed: !known,
+      unconfirmed: this.currentUnknown,
     };
   }
 
   private registered(source: Source, stored: StoredMandate) {
     this.registering = false;
+    this.currentUnknown = false;
     this.state = { kind: "done", data: stored };
     void source.context?.(registeredContext(stored));
   }
@@ -285,8 +296,9 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
 
   private renderDraft(record: MandateDraft) {
     const text = pick(MANDATE);
-    const current = inForce(record);
-    this.renderedStatus = record.current === null ? null : effectiveStatus(record.current);
+    const current = this.currentUnknown ? null : inForce(record);
+    this.renderedStatus =
+      record.current === null || this.currentUnknown ? null : effectiveStatus(record.current);
     return html`<article class="card" part="draft">
       ${this.header()}
       <div class="body">
@@ -297,7 +309,13 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
         <section>
           <h3>${text.proposedLimits}</h3>
           <p class="secondary">
-            ${current === null ? text.draftNoCurrent : text.draftCompare(current.mandate.version)}
+            ${
+              this.currentUnknown
+                ? text.draftUnknownCurrent
+                : current === null
+                  ? text.draftNoCurrent
+                  : text.draftCompare(current.mandate.version)
+            }
           </p>
           <dl>
             ${draftRows({ ...record, current }).map(

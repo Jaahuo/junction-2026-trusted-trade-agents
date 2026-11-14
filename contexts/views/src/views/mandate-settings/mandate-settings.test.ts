@@ -119,6 +119,10 @@ const lost = async () => {
   throw new Error("UPSTREAM_FAILED: register answered a response that cannot be read.");
 };
 
+const unreachable = async () => {
+  throw new Error("The host did not answer.");
+};
+
 test("a refused Register keeps the draft, says it failed and retries with the same operationId", async () => {
   setLang("fi");
   const { view, calls, context, press } = setup([
@@ -162,7 +166,47 @@ test("a lost answer that get_mandate cannot settle says the registration is not 
   const text = textOf(view.render());
   expect(text).toContain("Registration is not confirmed");
   expect(text).not.toContain("The limits were not registered");
+  expect(text).toContain("The view cannot tell which limits are in force now.");
+  expect(text).not.toContain("In force now:");
+  expect(text).not.toContain("Compared with version");
   expect(context).toEqual([]);
+});
+
+test("after an unsettled check, a retry with the same operationId shows the registered mandate", async () => {
+  const { view, calls, press } = setup([lost, unreachable, async () => registered]);
+  await press();
+  await press();
+  expect(calls[2]?.args["operationId"]).toBe(calls[0]?.args["operationId"]);
+  expect(view.current()).toEqual({ kind: "done", data: registered });
+  expect(textOf(view.render())).not.toContain("cannot tell which limits");
+});
+
+test("a failed check that finds another mandate shows that mandate as the one in force", async () => {
+  setLang("en");
+  const other: StoredMandate = {
+    ...fixtures.storedMandate,
+    mandate: {
+      ...fixtures.storedMandate.mandate,
+      mandateId: "mnd_test_3",
+      version: 3,
+      limits: {
+        ...fixtures.storedMandate.mandate.limits,
+        maxOrderTotal: { value: 750, currency: "EUR", basis: "gross" },
+      },
+    },
+  };
+  const { view, press } = setup([lost, async () => other]);
+  await press();
+  expect(view.current()).toEqual({
+    kind: "done",
+    data: { ...fixtures.mandateDraft, current: other },
+  });
+  const text = textOf(view.render());
+  expect(text).toContain("Compared with version 3");
+  expect(text).not.toContain("Compared with version 1");
+  expect(text).toMatch(/In force now: \D*750\D00/);
+  expect(text).not.toMatch(/In force now: \D*1\D000/);
+  expect(text).toContain("The limits were not registered");
 });
 
 test("a lost answer with no current mandate says the limits were not registered", async () => {
@@ -173,7 +217,14 @@ test("a lost answer with no current mandate says the limits were not registered"
     },
   ]);
   await press();
-  expect(textOf(view.render())).toContain("The limits were not registered");
+  expect(view.current()).toEqual({
+    kind: "done",
+    data: { ...fixtures.mandateDraft, current: null },
+  });
+  const text = textOf(view.render());
+  expect(text).toContain("The limits were not registered");
+  expect(text).toContain("No mandate is in force now.");
+  expect(text).not.toContain("In force now:");
 });
 
 test("a replay that returns a revoked mandate does not tell the model it is in force", async () => {

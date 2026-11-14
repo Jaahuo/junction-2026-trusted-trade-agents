@@ -18,7 +18,7 @@ const tokens = css`
     --color-lilac-aimo: #e2daf5;
     --color-lilac-aimo-strong: #d9d2f5;
     --color-pink-soft: #efd4f2;
-    --color-silver: #f2f2f6;
+    --color-silver: #e9e6f2;
     --color-text: #23282d;
     --color-text-secondary: #555759;
     --color-text-on-brand: #ffffff;

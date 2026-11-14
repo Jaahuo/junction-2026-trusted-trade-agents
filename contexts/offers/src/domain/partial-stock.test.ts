@@ -112,6 +112,39 @@ describe("partial stock quantities", () => {
       quantityForShortfall({ value: Infinity, unit: "CASE" }, noConversion, product()),
     ).toBeNull();
   });
+  test("normalizes arithmetic noise at lot boundaries without ignoring genuine excess", () => {
+    const original = product({ perSalesUnit: { value: 0.1, unit: "LTR" } });
+    const planned = planOriginalQuantity({ value: 4, unit: "CASE" }, original, {
+      stock: "confirmed",
+      amount: 1,
+    });
+    expect(planned.ok).toBe(true);
+    if (!planned.ok || planned.value.shortfall === null) throw new Error("Expected shortfall");
+    const substitute = product({ perSalesUnit: { value: 0.1, unit: "LTR" } });
+    expect(quantityForShortfall(planned.value.shortfall, original, substitute)).toEqual({
+      value: 3,
+      unit: "CASE",
+    });
+    const fractional = product({
+      salesUnit: "PACK",
+      allowedLotSize: 0.5,
+      perSalesUnit: { value: 0.2, unit: "LTR" },
+    });
+    expect(quantityForShortfall(planned.value.shortfall, original, fractional)).toEqual({
+      value: 1.5,
+      unit: "PACK",
+    });
+    expect(quantityForShortfall({ value: 0.3, unit: "LTR" }, original, fractional)).toEqual({
+      value: 1.5,
+      unit: "PACK",
+    });
+    expect(quantityForShortfall({ value: 0.3 + 1e-12, unit: "LTR" }, original, fractional)).toEqual(
+      { value: 2, unit: "PACK" },
+    );
+    expect(
+      quantityForShortfall({ value: Number.MAX_SAFE_INTEGER, unit: "LTR" }, original, fractional),
+    ).toBeNull();
+  });
 });
 
 describe("substitute ranking", () => {
@@ -138,6 +171,27 @@ describe("substitute ranking", () => {
       "low-co2",
       "a",
     ]);
+  });
+  test("ranks known category preferences before price while unsupported facts remain unknown", () => {
+    const original = quoted("original", 2);
+    const candidates = [
+      quoted("cheap-a", 1, { category: "bread", countryOfOrigin: null }),
+      quoted("cheap-b", 2, { category: "bread" }),
+      quoted("cheap-c", 3, { category: "bread" }),
+      quoted("category-match", 10, { category: "Dairy" }),
+    ];
+    expect(
+      rankSubstitutes(original, candidates, [
+        { attribute: "category", prefer: "dAiRy" },
+        { attribute: "organic", prefer: "yes" },
+      ]).map((item) => item.productId),
+    ).toEqual(["category-match", "cheap-a", "cheap-b"]);
+    expect(
+      rankSubstitutes(original, candidates, [
+        { attribute: "organic", prefer: "yes" },
+        { attribute: "countryOfOrigin", prefer: "unknown" },
+      ]).map((item) => item.productId),
+    ).toEqual(["cheap-a", "cheap-b", "cheap-c"]);
   });
   test("zero is known, null sorts last, and deltas require comparable facts", () => {
     const original = quoted("original", 0, { deliveryReliability: 0, countryOfOrigin: null });

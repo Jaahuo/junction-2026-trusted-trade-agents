@@ -270,10 +270,35 @@ export async function getOffers(
   }
   if (!(await loadPrices(dated))) return err(upstream("prices could not be read"));
 
+  const eligible: Signable[] = [];
+  const eligibilityTime = deps.now();
+  for (const line of dated) {
+    const price = prices.get(line.product.productId);
+    if (price === undefined) {
+      omit(line, "NO_PRICE");
+      continue;
+    }
+    const expired = expiredAt(price, line.availability, eligibilityTime);
+    if (expired !== null) {
+      omit(line, expired, EXPIRED_DETAIL[expired]);
+      continue;
+    }
+    const { total, deposits } = lineTotal(price.unitPrice, price.deposit, line.quantity.value);
+    if (![total.net, total.gross, deposits].every(Number.isFinite)) {
+      omit(
+        line,
+        "INVALID_QUANTITY",
+        "the line total is too large to price; order a smaller quantity",
+      );
+      continue;
+    }
+    eligible.push({ ...line, price, total, deposits });
+  }
+
   const substituteOrigins =
     current?.limits.substitutions === "never"
       ? []
-      : dated.filter((original) => original.shortfall !== null);
+      : eligible.filter((original) => original.shortfall !== null);
   const substituteIds = unique(
     substituteOrigins.flatMap((original) => original.product.substitutes),
   ).filter((id) => !factsById.has(id) && !unknown.has(id));
@@ -325,27 +350,10 @@ export async function getOffers(
 
   const now = deps.now();
   const signable: Signable[] = [];
-  for (const line of dated) {
-    const price = prices.get(line.product.productId);
-    if (price === undefined) {
-      omit(line, "NO_PRICE");
-      continue;
-    }
-    const expired = expiredAt(price, line.availability, now);
-    if (expired !== null) {
-      omit(line, expired, EXPIRED_DETAIL[expired]);
-      continue;
-    }
-    const { total, deposits } = lineTotal(price.unitPrice, price.deposit, line.quantity.value);
-    if (![total.net, total.gross, deposits].every(Number.isFinite)) {
-      omit(
-        line,
-        "INVALID_QUANTITY",
-        "the line total is too large to price; order a smaller quantity",
-      );
-      continue;
-    }
-    signable.push({ ...line, price, total, deposits });
+  for (const original of eligible) {
+    const expired = expiredAt(original.price, original.availability, now);
+    if (expired !== null) omit(original, expired, EXPIRED_DETAIL[expired]);
+    else signable.push(original);
   }
   const originals = [...signable];
   for (const original of originals) {
@@ -423,6 +431,8 @@ export async function getOffers(
       .map(({ offer }) => offer.index),
   );
   const offers: OfferLine[] = [];
+  const ranks = ["best", "better", "good"] as const;
+  const survivingRanks = new Map<number, number>();
   for (const { offer, minted, precheck } of prechecked) {
     if (minted.claims.exp <= returnedAt) {
       if (offer.replaces === null) {
@@ -439,12 +449,14 @@ export async function getOffers(
         new Date(offer.price.validTo),
       );
     }
+    const rankIndex = survivingRanks.get(offer.index) ?? 0;
+    if (offer.replaces !== null) survivingRanks.set(offer.index, rankIndex + 1);
     offers.push({
       offerId: minted.claims.offerId,
       token: minted.token,
       claims: minted.claims,
       precheck,
-      rank: offer.rank,
+      rank: offer.replaces === null ? null : (ranks[rankIndex] ?? "good"),
       comparison: offer.comparison,
     });
   }

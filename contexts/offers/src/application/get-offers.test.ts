@@ -222,6 +222,107 @@ describe("getOffers", () => {
     ).toBe(4);
   });
 
+  test("invalid partial originals do not trigger substitute lookups for healthy lines", async () => {
+    const sub = "prod_test_unused_sub";
+    const expired = "prod_test_expired";
+    const huge = "prod_test_huge_partial";
+    const perSalesUnit = { value: 1, unit: "LTR" };
+    const setup = fakeOffersDeps({
+      products: [
+        ...[OAT, expired, huge].map((id) => fakeProduct(id, { perSalesUnit, substitutes: [sub] })),
+        fakeProduct(RYE),
+        fakeProduct(sub, { perSalesUnit }),
+      ],
+      live: {
+        ...quoted(OAT, { amount: 2 }, null),
+        ...quoted(expired, { amount: 2 }, { validTo: "2026-11-14T10:00:00Z" }),
+        ...quoted(huge, { amount: 2 }, { unitPrice: { net: 1e308, vatRate: 14, currency: "EUR" } }),
+        ...quoted(RYE),
+      },
+    });
+    const result = valueOf(
+      await getOffers(
+        setup.deps,
+        principal,
+        request({ lines: [line(OAT), line(expired), line(huge), line(RYE)] }),
+      ),
+    );
+
+    expect(reasons(result.omitted)).toEqual({
+      [OAT]: "NO_PRICE",
+      [expired]: "NO_PRICE",
+      [huge]: "INVALID_QUANTITY",
+    });
+    expect(result.offers.map((offer) => offer.claims.productId)).toEqual([RYE]);
+    expect(setup.catalog.requests.map((query) => query.productIds)).toEqual([
+      [OAT, expired, huge, RYE],
+    ]);
+    expect(setup.live.calls.every((call) => !call.query.productIds.includes(sub))).toBe(true);
+    expect(setup.signer.signed.map((entry) => entry.claims.productId)).toEqual([RYE]);
+  });
+
+  test("surviving substitutes are reranked separately for each occurrence after precheck", async () => {
+    const best = "prod_test_expiring_best";
+    const shared = "prod_test_shared_survivor";
+    const perSalesUnit = { value: 1, unit: "LTR" };
+    const setup = fakeOffersDeps({
+      products: [
+        fakeProduct(OAT, { perSalesUnit, substitutes: [best, shared] }),
+        fakeProduct(RYE, { perSalesUnit, substitutes: [shared] }),
+        fakeProduct(best, { perSalesUnit }),
+        fakeProduct(shared, { perSalesUnit }),
+      ],
+      live: {
+        ...quoted(OAT, { amount: 2 }),
+        ...quoted(RYE, { amount: 3 }),
+        ...quoted(
+          best,
+          { cutoffAt: "2026-11-14T10:00:05Z" },
+          { unitPrice: { net: 1, vatRate: 14, currency: "EUR" } },
+        ),
+        ...quoted(shared, {}, { unitPrice: { net: 2, vatRate: 14, currency: "EUR" } }),
+      },
+    });
+    const orders = {
+      async precheck(token: string) {
+        setup.clock.set("2026-11-14T10:00:05Z");
+        return setup.orders.precheck(token);
+      },
+    };
+    const result = valueOf(
+      await getOffers(
+        { ...setup.deps, orders },
+        principal,
+        request({ lines: [line(OAT, 4), line(OAT, 5), line(RYE, 4)] }),
+      ),
+    );
+    const substitutes = result.offers.filter((offer) => offer.claims.replaces !== null);
+    expect(
+      substitutes.map((offer) => [
+        offer.claims.productId,
+        offer.claims.replaces,
+        offer.claims.quantity.value,
+        offer.rank,
+      ]),
+    ).toEqual([
+      [shared, OAT, 2, "best"],
+      [shared, OAT, 3, "best"],
+      [shared, RYE, 1, "best"],
+    ]);
+    expect(setup.signer.signed.map((entry) => entry.claims.productId)).toEqual([
+      OAT,
+      OAT,
+      RYE,
+      best,
+      shared,
+      best,
+      shared,
+      shared,
+    ]);
+    expect(setup.signer.signed.filter((entry) => entry.claims.productId === best)).toHaveLength(2);
+    expect(substitutes.every((offer) => offer.comparison !== null)).toBe(true);
+  });
+
   test("an original expiring during signing cannot leave an orphan or have its omission overwritten", async () => {
     const sub = "prod_test_sub";
     const perSalesUnit = { value: 1, unit: "LTR" };

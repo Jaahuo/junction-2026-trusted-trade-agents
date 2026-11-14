@@ -84,10 +84,12 @@ export function quantityForShortfall(
   }
   const lots = units / substitute.allowedLotSize;
   if (!positive(units) || !positive(lots)) return null;
-  const count = Math.ceil(lots);
+  const nearest = Math.round(lots);
+  const tolerance = Math.min(1e-9, 4 * Number.EPSILON * Math.max(1, lots));
+  const count = nearest > 0 && Math.abs(lots - nearest) <= tolerance ? nearest : Math.ceil(lots);
   if (!Number.isSafeInteger(count)) return null;
   const value = count * substitute.allowedLotSize;
-  if (!positive(value) || value < units) return null;
+  if (!positive(value) || lots - count > tolerance) return null;
   return { value, unit: substitute.salesUnit };
 }
 
@@ -135,12 +137,15 @@ export function rankSubstitutes(
   const originalPrice = pricePerStdUnit(original.price.unitPrice, original.product.perSalesUnit);
   const scored = candidates.map(({ product, price }) => {
     const standardPrice = pricePerStdUnit(price.unitPrice, product.perSalesUnit);
-    const softMatches = soft.filter(
-      (constraint) =>
-        constraint.attribute === "countryOfOrigin" &&
-        product.countryOfOrigin !== null &&
-        product.countryOfOrigin.toLowerCase() === constraint.prefer.toLowerCase(),
-    ).length;
+    const softMatches = soft.filter(({ attribute, prefer }) => {
+      const fact =
+        attribute === "countryOfOrigin"
+          ? product.countryOfOrigin
+          : attribute === "category"
+            ? product.category
+            : null;
+      return fact != null && fact.toLowerCase() === prefer.toLowerCase();
+    }).length;
     const reliability = numeric(product.deliveryReliability);
     const originalReliability = numeric(original.product.deliveryReliability);
     const priceDelta =

@@ -104,7 +104,9 @@ const madeUnderOtherMandate = (order: StoredOrder, mandate: Mandate): boolean =>
 /**
  * Approve: re-checks the order against the current mandate of its agent and the offers' expiry,
  * then places it through commitPlacement, which runs the credit and payment steps (SPEC-010,
- * SPEC-011). Without re-quote, a differing mandate or an expired offer leaves the order pending.
+ * SPEC-011). An order whose offers were already stale when the decision arrived went through
+ * approveWithRequote instead; offers that turn stale between that check and the lock leave the
+ * order pending with 409, and the approver approves again.
  */
 const approve = async (
   deps: OrderDeps,
@@ -472,15 +474,20 @@ const change = (previous: OfferClaims, current: OfferClaims): string => {
   return `${name}: ${amount}${date}${price}`;
 };
 
+/** Who changed the lines: the approver's edit or pick, or the server's re-quote at approval. */
+type ChangedBy = "approver" | "requote";
+
 /**
  * The revised proposal: the new lines, every reason of the new check, `proposalVersion` + 1, one
  * `Requote` per replaced line (it keeps the replaced offer ID consumed, SPEC-009) and an `edited`
- * event per change, then the check events.
+ * event per change by the approver, or a `requoted` event per line re-quoted by the server, then
+ * the check events.
  */
 const revision = (input: {
   principal: Principal;
   order: StoredOrder;
-  request: Revision;
+  action: Revision["decision"] | "approve";
+  changedBy: ChangedBy;
   pairs: Pair[];
   lines: OrderLine[];
   alternatives: Kept;
@@ -488,7 +495,7 @@ const revision = (input: {
   evaluated: Evaluated;
   now: Date;
 }): { order: StoredOrder; events: AuditEvent[] } => {
-  const { principal, order, request, pairs, lines, mandate, evaluated, now } = input;
+  const { principal, order, action, changedBy, pairs, lines, mandate, evaluated, now } = input;
   const { evaluation, byProduct } = evaluated;
   const at = now.toISOString();
   const requotes: Requote[] = pairs.flatMap(({ previous, current }) =>
@@ -496,14 +503,15 @@ const revision = (input: {
       ? []
       : [{ at, previous: previous.claims, current: current.claims, reasons: evaluation.reasons }],
   );
-  const edits = pairs.map(({ previous, current }) =>
-    approverEvent(at, "edited", {
-      detail:
-        previous === null
-          ? `${current.claims.product.name}: added`
-          : change(previous.claims, current.claims),
-    }),
-  );
+  const edits = pairs.map(({ previous, current }): AuditEvent => {
+    const detail =
+      previous === null
+        ? `${current.claims.product.name}: added`
+        : change(previous.claims, current.claims);
+    return changedBy === "approver"
+      ? approverEvent(at, "edited", { detail })
+      : { at, actor: "server", event: "requoted", detail };
+  });
   const { kept, dropped } = input.alternatives;
   const drops: AuditEvent[] =
     dropped === 0
@@ -536,7 +544,7 @@ const revision = (input: {
     decision:
       evaluation.decision === "needs_approval"
         ? null
-        : { action: request.decision, next: null, note: null, by: principal.accountId, at },
+        : { action, next: null, note: null, by: principal.accountId, at },
     requotes: [...order.requotes, ...requotes],
   };
   // The events are appended to the hash-chained audit by the caller (appendOrderAudit).
@@ -635,7 +643,8 @@ const revise = async (
     const proposed = revision({
       principal,
       order,
-      request,
+      action: request.decision,
+      changedBy: "approver",
       pairs,
       lines: checked.value.lines,
       alternatives,
@@ -651,6 +660,108 @@ const revise = async (
       const placed = await commitPlacement({
         tx,
         order: revised.value,
+        creditLimit: principal.creditLimit,
+        payment: deps.payment,
+        signReceipt: deps.signReceipt,
+        now,
+      });
+      if (!placed.ok) return failure("UPSTREAM_FAILED", "The order could not be finalized.");
+      final = placed.value;
+    }
+    await guardedWrite(tx, final, request.proposalVersion);
+    return ok(final);
+  });
+};
+
+/** An approval whose offers expired or were made under another mandate needs a re-quote first. */
+const needsRequote = (order: StoredOrder, mandate: Mandate, now: Date): boolean =>
+  madeUnderOtherMandate(order, mandate) || isExpired(order.lines, now);
+
+/**
+ * Approve with re-quote (SPEC-011): every line gets a new offer under the current mandate through
+ * `requote`, and the new lines run every check of SPEC-009 again. The same or a lower price and no
+ * reason the approver has not seen replace the lines (`requoted`), and the order is approved and
+ * placed. Otherwise the order stays pending as the next proposal, with PRICE_CHANGED or the new
+ * reason, a `Requote` per line and `proposalVersion` + 1, so the approver decides on the new terms.
+ */
+const approveWithRequote = async (
+  deps: ApprovalDeps,
+  principal: Principal,
+  known: StoredOrder,
+  request: Extract<DecideApprovalRequest, { decision: "approve" }>,
+): Promise<Result<StoredOrder, DecisionError>> => {
+  if (termsChanged(principal, known.lines))
+    return failure(
+      "CONFLICT",
+      "The account's payment terms changed since the offers were made. Reject the order and ask the agent for new offers.",
+    );
+  const proposal = await edited(deps.offers, known, []);
+  if (!proposal.ok) return proposal;
+  const tokens = proposal.value.map((line) => line.token);
+  const now = deps.now();
+  const checked = await checkTokens(deps, principal, tokens, [], now);
+  if (!checked.ok)
+    return checked.error.code === "OFFER_INVALID"
+      ? upstream(known.orderId, "A re-quoted offer failed verification.", {
+          message: checked.error.message,
+        })
+      : failure(checked.error.code, checked.error.message);
+  if (isExpired(checked.value.lines, now))
+    return upstream(known.orderId, "The re-quote returned an offer that has already expired.");
+  const alternatives = pickable(known.alternatives, checked.value.mandate, now);
+  const pairs = pairsOf(proposal.value, checked.value.lines);
+  const evaluated = withPriceChanged(
+    await evaluateChecked(deps, principal, checked.value, now),
+    pricedUp(pairs),
+  );
+  const { evaluation } = evaluated;
+  // The approver approved the reasons they saw; a reason they have not seen needs them again.
+  const approvable =
+    evaluation.decision !== "rejected" &&
+    evaluation.reasons.every((reason) => known.reasons.includes(reason));
+
+  return underLock(deps, principal.customer, async (tx) => {
+    const order = await tx.find(principal.customer, known.orderId);
+    if (order === null) return failure("NOT_FOUND", "No such order.");
+    if (!isOpen(order, request.proposalVersion)) return changed();
+    const cutoff = await expireCutoff(tx, order, deps.now());
+    if (cutoff === "audit_invalid")
+      return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+    if (cutoff === "expired") return changed();
+    const added = checked.value.lines
+      .map((line) => line.offerId)
+      .filter((offerId) => !order.offerIds.includes(offerId));
+    if (await tx.hasUsedOffers(principal.customer, added))
+      return failure("OFFER_INVALID", "An offer has already been used in an order.");
+    const proposed = revision({
+      principal,
+      order,
+      action: "approve",
+      changedBy: "requote",
+      pairs,
+      lines: checked.value.lines,
+      alternatives,
+      mandate: checked.value.mandate,
+      evaluated,
+      now,
+    });
+    const requoted = await appendOrderAudit(proposed.order, proposed.events);
+    if (!requoted.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+    let final = requoted.value;
+    if (approvable) {
+      const at = now.toISOString();
+      const approved = await appendOrderAudit(
+        {
+          ...requoted.value,
+          decision: { action: "approve", next: null, note: null, by: principal.accountId, at },
+        },
+        [approverEvent(at, "approved")],
+      );
+      if (!approved.ok)
+        return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+      const placed = await commitPlacement({
+        tx,
+        order: approved.value,
         creditLimit: principal.creditLimit,
         payment: deps.payment,
         signReceipt: deps.signReceipt,
@@ -688,6 +799,8 @@ export const decide = async (
     const current = await deps.mandates.current(known.agentId);
     if (!current.ok) return failure("UPSTREAM_FAILED", "The mandate could not be read.");
     mandate = current.value;
+    if (mandate !== null && needsRequote(known, mandate, deps.now()))
+      return approveWithRequote(deps, principal, known, request);
   }
 
   const now = deps.now();

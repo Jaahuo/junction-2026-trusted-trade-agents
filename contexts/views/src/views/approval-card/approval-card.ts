@@ -8,7 +8,7 @@ import {
   type SubstitutionRule,
 } from "@app/contract";
 import { brand } from "@app/ui/brand";
-import { formatOrderNumber, ORDER_WORDING } from "@app/ui/format";
+import { formatOrderNumber } from "@app/ui/format";
 import { css, html, LitElement, nothing, type PropertyValues } from "lit";
 import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
@@ -22,7 +22,7 @@ import plus16 from "../../shared/icons/plus-16.svg?raw";
 import search from "../../shared/icons/search.svg?raw";
 import warning16 from "../../shared/icons/warning-16.svg?raw";
 import xCircle from "../../shared/icons/x-circle.svg?raw";
-import { intlLocale, lang, LocaleController, pick } from "../../shared/locale.ts";
+import { intlLocale, LocaleController, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import {
   allergenChips,
@@ -43,19 +43,18 @@ import {
   statusWords,
 } from "../offer-comparison/model.ts";
 import { CARD } from "./card-strings.ts";
-import { productImage } from "./images.ts";
 import {
   amount,
-  brandHeader,
   cardStyles,
   day,
-  fact,
   icon,
   money,
   number,
-  orderName,
+  orderHeader,
+  orderStateLabel,
   rows,
   stdUnits,
+  thumb,
   timeOnly,
   unit,
   vat,
@@ -319,13 +318,6 @@ const dayTime = (at: string) =>
   }).format(new Date(at));
 /** The element id of a product line, the target of its to-do. */
 const lineId = (c: OfferClaims) => `line-${c.offerId}`;
-/** A product's 48 px (or 40 px in a choice) image tile; nothing when it has no image. */
-const thumb = (name: string, size: "line" | "small" = "line") => {
-  const src = productImage(name);
-  return src === null
-    ? nothing
-    : html`<span class="thumb ${size}"><img src=${src} alt="" /></span>`;
-};
 /** Products shown before "Show N more products". */
 const SHOWN = 3;
 const round = (value: number) => Math.round(value * 100) / 100;
@@ -371,13 +363,6 @@ export class ApprovalCard extends LitElement {
     cardStyles,
     trustStyles,
     css`
-      .section-title {
-        color: var(--color-heading);
-        font-family: var(--font-family-condensed);
-        font-size: 20px;
-        font-weight: 700;
-        line-height: 1.1;
-      }
       /* v17 "Needs your approval": one to-do per thing that needs the approver. */
       .todo {
         display: flex;
@@ -699,28 +684,10 @@ export class ApprovalCard extends LitElement {
         gap: var(--spacing-xs);
         min-width: 0;
       }
-      .thumb {
-        flex-shrink: 0;
-        width: 48px;
-        height: 48px;
-        overflow: hidden;
-        border-radius: 6px;
-      }
-      .thumb.small {
-        width: 40px;
-        height: 40px;
-      }
       @container (max-width: 479px) {
         .choice .thumb {
           display: none;
         }
-      }
-      .thumb img {
-        display: block;
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        transform: scale(1.5);
       }
       .limit-rows {
         display: flex;
@@ -1059,33 +1026,19 @@ export class ApprovalCard extends LitElement {
   }
 
   private eyebrow(order: Order) {
-    const text = pick(CARD);
-    if (order.status === "placed") return text.approved;
-    if (order.status === "awaiting_payment") return text.approvedWaiting;
-    if (order.status !== "pending_approval") return ORDER_WORDING[lang()].statuses[order.status];
-    if (this.busy && this.requoting) return text.gettingOffer;
+    if (order.status !== "pending_approval") return orderStateLabel(order);
+    if (this.busy && this.requoting) return pick(CARD).gettingOffer;
     // Nothing left to approve after changing amounts (prototype A2): the logo only.
-    return this.todos(order).length > 0 ? text.approvalRequired : "";
+    return this.todos(order).length > 0 ? orderStateLabel(order) : "";
   }
 
   /** v16: an order of products, named by its delivery day, with order number and count. */
   private header(order: Order) {
-    const text = pick(CARD);
-    const title = html`<div class="headline">
-      <h2 class="name">${orderName(order)}</h2>
-      <p aria-live="polite">
-        ${money(this.total(order, "net"))}<span class="vat">${vat("net")}</span>
-      </p>
-    </div>`;
-    const facts = html`<dl class="facts">
-      ${fact(text.orderNo, formatOrderNumber(order.orderId))}
-      ${fact(text.products, String(order.lines.length))}
-    </dl>`;
     const pill =
       order.status === "pending_approval" &&
       !(this.busy && this.requoting) &&
       this.todos(order).length > 0;
-    return brandHeader(this.eyebrow(order), title, facts, pill);
+    return orderHeader(order, this.eyebrow(order), this.total(order, "net"), pill);
   }
 
   /** v17 to-dos: one per thing the approver should look at, linked to where it is. */

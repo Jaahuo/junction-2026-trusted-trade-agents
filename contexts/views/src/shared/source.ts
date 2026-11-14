@@ -16,6 +16,9 @@ function bridgeSource(view: ViewName): Source {
     onToolResult: (listener) => {
       app.ontoolresult = (params) => listener(params.structuredContent);
     },
+    onToolInput: (listener) => {
+      app.ontoolinput = (params) => listener(params.arguments ?? {});
+    },
     callServerTool: async (request) => {
       await ready;
       const result = await app.callServerTool(request);

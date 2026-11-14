@@ -45,6 +45,8 @@ export type Source = {
   message?: (text: string) => Promise<void>;
   /** Tells the model something without a chat message (MCP Apps updateModelContext). */
   context?: (text: string) => Promise<void>;
+  /** The tool's arguments, which a host sends before the result (MCP Apps ontoolinput). */
+  input?: Promise<Record<string, unknown>>;
 };
 
 /** The part of the MCP Apps bridge (`App` of ext-apps) a view uses. */
@@ -58,6 +60,8 @@ export type Host = {
   sendMessage: (text: string) => Promise<boolean>;
   /** Updates what the model knows about the view, without a chat message. */
   updateModelContext: (text: string) => Promise<void>;
+  /** Receives the tool's arguments, before the result. */
+  onToolInput?: (listener: (args: Record<string, unknown>) => void) => void;
 };
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -72,7 +76,11 @@ export function viewEntry<V extends ViewName>(view: V) {
 /** Host mode: the tool result arrives through the bridge, actions are server-tool calls. */
 export function hostSource(host: Host): Source {
   const result = new Promise<unknown>((resolve) => host.onToolResult(resolve));
+  const onToolInput = host.onToolInput;
   return {
+    ...(onToolInput === undefined
+      ? {}
+      : { input: new Promise<Record<string, unknown>>((resolve) => onToolInput(resolve)) }),
     load: () => result,
     call: async (name, args) => {
       const response = await host.callServerTool({ name, arguments: args });

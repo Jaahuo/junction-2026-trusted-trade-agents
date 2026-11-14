@@ -1,10 +1,10 @@
 {
   "mandate": {
-    "iss": "cust_invoice_01",
-    "mandateId": "mnd_test_1",
+    "iss": "cust_fixture_all",
+    "mandateId": "mnd_fixture_all",
     "version": 1,
-    "agent": "agent_demo",
-    "signedBy": "acct_demo",
+    "agent": "agent_fixture_buyer",
+    "signedBy": "acct_fixture_owner",
     "limits": {
       "maxOrderTotal": {
         "value": 1000,
@@ -39,10 +39,10 @@
         }
       ]
     },
-    "iat": 1794800000,
-    "exp": 1826336000
+    "iat": 1794650400,
+    "exp": 4102444800
   },
-  "jws": "test-mandate-jws",
+  "jws": "fixture-mandate-jws",
   "status": "active",
   "registeredAt": "2026-11-14T10:00:00+00:00"
 }

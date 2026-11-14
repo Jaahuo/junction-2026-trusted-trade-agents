@@ -85,7 +85,7 @@ jobs:
           status=$?
           set -e
           bun scripts/ci-audit.ts reports/bun-audit.json "$status"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
           name: audit-report-${{ github.run_id }}-${{ github.run_attempt }}
@@ -149,14 +149,14 @@ jobs:
           jq -n --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg image "$image_id" --arg lock "$lock_hash" --arg scanner "$version" \
             '{schemaVersion: 1, sourceSha: $sha, gateRunId: $run, gateRunAttempt: $attempt, imageId: $image, lockfileSha256: $lock, scannerVersion: $scanner}' > evidence/manifest.json
           (cd evidence && sha256sum image.tar sbom.cdx.json image-scan.json manifest.json > SHA256SUMS)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: delivery-${{ github.sha }}-${{ github.run_attempt }}
           path: evidence/
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
           name: image-reports-${{ github.run_id }}-${{ github.run_attempt }}

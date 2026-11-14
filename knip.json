@@ -3,7 +3,8 @@
   "ignoreUnresolved": ["scripts/.+\\.ts", "apps/api/src/main\\.ts"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts", ".omp/hooks/*/*.ts"]
+      "entry": ["scripts/*.ts", ".omp/hooks/*/*.ts"],
+      "ignoreDependencies": ["@app/contract"]
     },
     "apps/api": {
       "entry": ["src/main.ts!", "src/server.ts!"]

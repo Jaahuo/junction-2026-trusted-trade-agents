@@ -348,6 +348,90 @@ describe("price mapping", () => {
   });
 });
 
+describe("live format", () => {
+  test("a live-format response with +HHMM offsets and validTo 9999 maps to a quote (availability)", async () => {
+    const { live } = harness(({ body }) =>
+      json(
+        body.requestedDate === "2026-11-16"
+          ? {
+              timeNow: "2026-11-14T13:29:56+0200",
+              requestedDate: "2026-11-16T00:00:00+0200",
+              products: [
+                {
+                  productId: "p-live",
+                  closingTime: "2026-11-15T17:00:00+0200",
+                  salesBlock: false,
+                  logisticModel: "Stock",
+                  scheduleLines: [
+                    {
+                      salesBlock: false,
+                      availableAmount: 9999999999.0,
+                      availableDate: "2026-11-16",
+                      salesUnit: "ST",
+                    },
+                  ],
+                },
+              ],
+            }
+          : availabilityBody([]),
+      ),
+    );
+    const value = await availabilityOf(live, query(["p-live"]));
+    expect(value.missing).toEqual([]);
+    expect(value.quotes).toEqual([
+      {
+        productId: "p-live",
+        amount: 9999999999,
+        availableDate: "2026-11-16",
+        nextDeliveryDate: null,
+        cutoffAt: "2026-11-15T17:00:00+02:00",
+        salesBlocked: false,
+        stock: "confirmed",
+      },
+    ]);
+  });
+
+  test("a live-format response with +HHMM offsets and validTo 9999 maps to a quote (price)", async () => {
+    const window = {
+      validFrom: "2026-09-01T00:00:00+0300",
+      validTo: "9999-12-31T00:00:00+0200",
+      currency: "EUR",
+    };
+    const { live } = harness(() =>
+      json({
+        customerId: "cust_test",
+        currency: "EUR",
+        pricingDate: "2026-11-16T00:00:00+0200",
+        products: [
+          {
+            productId: "p-live",
+            quantity: 1.0,
+            catalogPrice: { value: 1.56, valueWithTax: 1.77, ...window },
+            priceWithTax: { value: 1.77, ...window },
+            comparisonPrice: { value: 1.56, valueWithTax: 1.77, ...window },
+            comparisonUnit: "L",
+            tax: { taxRate: 13.5, taxValue: 0.21 },
+            listPrice: { value: 1.56, valueWithTax: 1.77, ...window },
+            netPriceFound: false,
+            error: false,
+          },
+        ],
+      }),
+    );
+    const value = await pricesOf(live, query(["p-live"]));
+    expect(value.missing).toEqual([]);
+    expect(value.quotes).toEqual([
+      {
+        productId: "p-live",
+        unitPrice: { net: 1.56, vatRate: 13.5, currency: "EUR" },
+        deposit: 0,
+        comparisonPrice: { value: 1.56, unit: "LTR" },
+        validTo: "9999-12-31T00:00:00+02:00",
+      },
+    ]);
+  });
+});
+
 describe("transport", () => {
   test("a transport error, a non-2xx answer or a body that fails the schema gives UPSTREAM_FAILED", async () => {
     const failing: [string, Responder][] = [

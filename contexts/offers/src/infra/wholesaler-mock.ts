@@ -89,7 +89,7 @@ const helsinkiOffset = (localMs: number): string => {
 };
 
 const TIME_PATTERN =
-  /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2})(?::(\d{2}(?:\.\d+)?))?(Z|[+-]\d{2}:\d{2})?)?$/;
+  /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2})(?::(\d{2}(?:\.\d+)?))?(Z|[+-]\d{2}:?\d{2})?)?$/;
 
 /** ISO 8601 with offset, or null. A time with no offset is Europe/Helsinki local time; `dateOnly` is the time of a bare date. */
 const toHelsinkiTime = (value: string, dateOnly: string | null): string | null => {
@@ -100,7 +100,8 @@ const toHelsinkiTime = (value: string, dateOnly: string | null): string | null =
   if (hm === undefined && dateOnly === null) return null;
   const time = hm === undefined ? (dateOnly ?? "") : `${hm}:${match?.[3] ?? "00"}`;
   const withSeconds = time.length === 5 ? `${time}:00` : time;
-  const offset = hm === undefined ? undefined : match?.[4];
+  const offset =
+    hm === undefined ? undefined : match?.[4]?.replace(/^([+-]\d{2})(\d{2})$/, "$1:$2");
   const local = `${date}T${withSeconds}`;
   const localMs = Date.parse(`${local}Z`);
   if (Number.isNaN(localMs)) return null;

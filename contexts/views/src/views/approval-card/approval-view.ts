@@ -45,6 +45,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         gap: var(--spacing-xs);
       }
       .header .skeleton {
+        --shimmer-base: color-mix(in srgb, var(--color-text-on-brand) 18%, transparent);
+        --shimmer-sweep: color-mix(in srgb, var(--color-text-on-brand) 35%, transparent);
         height: 18px;
       }
       .w-60 {

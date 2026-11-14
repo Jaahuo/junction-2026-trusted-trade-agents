@@ -21,6 +21,15 @@ import warning16 from "../../shared/icons/warning-16.svg?raw";
 import xCircle from "../../shared/icons/x-circle.svg?raw";
 import { intlLocale, LocaleController, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
+import {
+  allergenChips,
+  allergenText,
+  brokenRule,
+  seal,
+  sortAllergens,
+  statusDisc,
+  trustStyles,
+} from "../../shared/trust.ts";
 import { CARD } from "./card-strings.ts";
 import { productImage } from "./images.ts";
 import {
@@ -161,6 +170,21 @@ export function reasonSummaries(order: Order): string[] {
     return named.length === 0 ? title : `${title}: ${named.join(", ")}`;
   });
 }
+/** The order line (with the agent's rationale and allergens) that carries these claims. */
+const lineOf = (order: Order, c: OfferClaims) =>
+  [...order.lines, ...order.alternatives].find((l) => l.offerId === c.offerId);
+/** A ✦ line written by the agent. */
+const agentLine = (text: string, extra = "") =>
+  html`<p class="agent-line body-small ${extra}">${icon(agent16)}<span>${text}</span></p>`;
+/** "Mon 16 Nov, 15:30". */
+const dayTime = (at: string) =>
+  new Intl.DateTimeFormat(intlLocale(), {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(at));
 /** The element id of a product line, the target of its to-do. */
 const lineId = (c: OfferClaims) => `line-${c.offerId}`;
 /** A product's 48 px (or 40 px in a choice) image tile; nothing when it has no image. */
@@ -206,6 +230,7 @@ export class ApprovalCard extends LitElement {
   static override styles = [
     base,
     cardStyles,
+    trustStyles,
     css`
       .section-title {
         color: var(--color-heading);
@@ -683,6 +708,43 @@ export class ApprovalCard extends LitElement {
       .details-body.open {
         display: flex;
       }
+      /* #74: the agent's ✦ lines (purpose, per-line rationale) and a broken rule on a line. */
+      .agent-line {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--spacing-xs);
+      }
+      .agent-line .icon {
+        color: var(--color-text-brand);
+      }
+      .rationale {
+        color: var(--color-text-secondary);
+      }
+      .line-trust {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        padding-top: var(--spacing-xs);
+      }
+      .constraint {
+        padding: 6px var(--spacing-sm);
+        border-radius: var(--border-radius-md);
+        background: var(--color-bg-danger);
+        color: var(--color-text-danger);
+        font-weight: 600;
+      }
+      .result.sent {
+        align-items: center;
+        padding: 0;
+        background: none;
+      }
+      .result.sent .disc svg {
+        width: 24px;
+        height: 24px;
+      }
+      .receipt .row dt {
+        width: 140px;
+      }
     `,
   ];
 
@@ -785,7 +847,24 @@ export class ApprovalCard extends LitElement {
   /** v17 to-dos: one per thing the approver should look at, linked to where it is. */
   private todos(order: Order): Todo[] {
     const lines = order.lines.map((l) => l.claims);
-    return this.reasonTodos(order, lines);
+    return [...this.allergenTodos(order), ...this.reasonTodos(order, lines)];
+  }
+
+  /** A broken hard rule or a trace risk against one, per line still in the order (#74). */
+  private allergenTodos(order: Order): Todo[] {
+    const text = pick(CARD);
+    return order.lines.flatMap(({ claims: c, allergens = [] }) =>
+      this.quantity(c) === 0
+        ? []
+        : sortAllergens(allergens)
+            .filter((a) => a.status !== "default")
+            .map((a) => ({
+              where: c.product.name,
+              target: lineId(c),
+              reason: allergenText(a),
+              action: a.status === "error" ? brokenRule(a) : text.checkAllergenRule(a.allergen),
+            })),
+    );
   }
 
   private reasonTodos(order: Order, lines: OfferClaims[]): Todo[] {
@@ -1167,6 +1246,7 @@ export class ApprovalCard extends LitElement {
                     </div>`
                   : amounts
               }
+              ${this.lineTrust(order, head)}
             </div>
           </div>`;
     return html`<li
@@ -1176,6 +1256,21 @@ export class ApprovalCard extends LitElement {
     >
       ${summary} ${flagged ? this.lineDecision(order, c) : nothing}
     </li>`;
+  }
+
+  /** The agent's reason for a product, its allergen chips and a broken rule (#74). */
+  private lineTrust(order: Order, c: OfferClaims) {
+    const line = lineOf(order, c);
+    const rationale = line?.rationale;
+    const allergens = line?.allergens ?? [];
+    if (rationale === undefined && allergens.length === 0) return nothing;
+    return html`<div class="line-trust">
+      ${rationale === undefined ? nothing : agentLine(rationale, "rationale")}
+      ${allergenChips(allergens)}
+      ${allergens
+        .filter((a) => a.status === "error")
+        .map((a) => html`<p class="constraint">${brokenRule(a)}</p>`)}
+    </div>`;
   }
 
   /** v17 products: flagged lines first and always shown; ready lines collapse after three. */
@@ -1190,10 +1285,14 @@ export class ApprovalCard extends LitElement {
     const replaced = new Set(all.map((c) => (isFlagged(c) ? c.replaces : null)));
     const kept = (c: OfferClaims) => this.quantity(c) > 0;
     const flagged = all.filter((c) => isFlagged(c) && kept(c));
-    // A new product leads the ready lines (MVP: a normal line with a tag).
+    // A line against an allergen rule, then a new product, leads the ready lines (MVP: a
+    // normal line with a tag), so neither hides behind "Show N more".
+    const lead = (c: OfferClaims) =>
+      (lineOf(order, c)?.allergens?.some((a) => a.status !== "default") ? 2 : 0) +
+      Number(news.includes(c));
     const ready = all
       .filter((c) => !isFlagged(c) && !replaced.has(c.productId) && kept(c))
-      .toSorted((a, b) => Number(news.includes(b)) - Number(news.includes(a)));
+      .toSorted((a, b) => lead(b) - lead(a));
     const removed = all.filter((c) => !kept(c));
     const visible = this.allProducts ? ready : ready.slice(0, SHOWN);
     const hidden = ready.length - SHOWN;
@@ -1258,7 +1357,14 @@ export class ApprovalCard extends LitElement {
         "tt-confirm-changes",
       );
     };
-    return html`${gettingOffer} ${this.todoBox(order)} ${this.totalBlock(order)}
+    const purpose =
+      order.purpose === undefined || order.purpose === ""
+        ? nothing
+        : html`<section class="group" part="purpose">
+            <h3 class="section-title">${text.purpose}</h3>
+            ${agentLine(order.purpose)}
+          </section>`;
+    return html`${gettingOffer} ${purpose} ${this.todoBox(order)} ${this.totalBlock(order)}
       ${this.products(order)}
       ${changed ? html`<p class="body-small">${text.changedAmounts}</p>` : nothing}
       <p class="total-row">
@@ -1455,42 +1561,35 @@ export class ApprovalCard extends LitElement {
         ? null
         : `${decision.by === "approver" ? text.you : decision.by}, ${when(new Date(decision.at)).replace(text.todayStart, text.todayMid)}`;
     const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
-    const delivery = earliest === undefined ? "" : text.deliveryOn(day(earliest));
+    if (order.status === "placed") return this.receipt(order, earliest);
     const result =
-      order.status === "placed"
+      order.status === "awaiting_payment"
         ? {
-            tone: "success",
-            svg: checkCircle,
-            title: text.sentTitle(brand.name),
-            text: text.sentText(delivery),
+            tone: "",
+            svg: clockIcon,
+            title: text.waitingTitle,
+            text: text.waitingText,
           }
-        : order.status === "awaiting_payment"
+        : decision?.next === "alternatives"
           ? {
               tone: "",
-              svg: clockIcon,
-              title: text.waitingTitle,
-              text: text.waitingText,
+              svg: search,
+              title: text.alternativesTitle,
+              text: text.alternativesText,
             }
-          : decision?.next === "alternatives"
+          : decision?.next === "stop"
             ? {
                 tone: "",
-                svg: search,
-                title: text.alternativesTitle,
-                text: text.alternativesText,
+                svg: xCircle,
+                title: text.stopTitle,
+                text: text.stopText,
               }
-            : decision?.next === "stop"
-              ? {
-                  tone: "",
-                  svg: xCircle,
-                  title: text.stopTitle,
-                  text: text.stopText,
-                }
-              : {
-                  tone: "danger",
-                  svg: xCircle,
-                  title: text.rejected,
-                  text: order.reasons.map((r) => text.reason[r]).join(" "),
-                };
+            : {
+                tone: "danger",
+                svg: xCircle,
+                title: text.rejected,
+                text: order.reasons.map((r) => text.reason[r]).join(" "),
+              };
     const note = decision?.note ?? "";
     return html`<div class="result ${result.tone}" part="result" role="status" tabindex="-1">
         ${icon(result.svg)}
@@ -1501,30 +1600,79 @@ export class ApprovalCard extends LitElement {
       </div>
       ${
         isApproved(order)
-          ? html`${
-              order.status === "awaiting_payment"
-                ? rows([
-                    [text.approvedBy, by],
-                    [text.payment, text.prepayment],
-                  ])
-                : nothing
-            }
-            ${
-              order.status === "placed"
-                ? rows([
-                    [text.orderNo, order.orderId],
-                    [text.delivery, earliest === undefined ? null : day(earliest)],
-                    [text.total, money(order.total.net)],
-                    [text.confirmedBy, decision === null ? null : text.you],
-                    [text.confirmedAt, decision === null ? null : timeOnly(new Date(decision.at))],
-                  ])
-                : nothing
-            }
+          ? html`${rows([
+              [text.approvedBy, by],
+              [text.payment, text.prepayment],
+            ])}
             ${this.changeUntil(order)} ${this.products(order)}`
           : decision?.next === "stop"
             ? nothing
             : rows([[text.yourNote, note === "" ? null : `“${note}”`]])
       }`;
+  }
+
+  /**
+   * P7/A6 signed receipt: "Order sent", the order rows, the wholesaler's signature on the
+   * confirmation when the order has one, and the link to the order log.
+   */
+  private receipt(order: Order, earliest: string | undefined) {
+    const text = pick(CARD);
+    const decision = order.decision;
+    const log = logUrl(order);
+    return html`<div class="result sent" part="result" role="status" tabindex="-1">
+        ${statusDisc("success")}
+        <h3 class="section-title">${text.orderSent}</h3>
+      </div>
+      <div class="receipt">
+        ${rows([
+          [text.orderNo, order.orderId],
+          [text.delivery, earliest === undefined ? null : day(earliest)],
+          [text.total, text.exclVat(money(order.total.net))],
+          [
+            text.confirmedBy,
+            decision === null ? null : text.youAt(timeOnly(new Date(decision.at))),
+          ],
+        ])}
+      </div>
+      ${this.receiptSeal(order)}
+      ${log === null ? nothing : html`<a class="body-small" href=${log} target="_blank" rel="noreferrer">${text.viewOrderLog}</a>`}
+      ${this.changeUntil(order)} ${this.products(order)}`;
+  }
+
+  private receiptSeal(order: Order) {
+    const text = pick(CARD);
+    const signature = order.receiptSignature;
+    if (signature === undefined) return nothing;
+    if (signature.state === "verified") {
+      const at = signature.signedAt === null ? null : timeOnly(new Date(signature.signedAt));
+      return seal(
+        "success",
+        text.receiptSigned(brand.name),
+        text.receiptSignedText(brand.name, order.orderId, at),
+      );
+    }
+    if (signature.state === "pending")
+      return seal("warning", text.receiptPending, text.receiptPendingText(brand.name));
+    return seal("danger", text.receiptMismatch, text.receiptMismatchText(brand.name));
+  }
+
+  /** The offer's signature seal in More details; the plain row when the order has no check. */
+  private offerSeal(order: Order) {
+    const text = pick(CARD);
+    const signature = order.offerSignature;
+    if (signature === undefined) {
+      const verified = order.audit.some((e) => e.event === "offer_verified");
+      return rows([[text.signature, verified ? text.verified(brand.name) : text.notVerified]]);
+    }
+    if (signature.state === "verified")
+      return seal(
+        "success",
+        text.signedOffer(brand.name),
+        text.signedOfferText(dayTime(signature.validUntil)),
+      );
+    if (signature.state === "expired")
+      return seal("warning", text.offerExpired, text.offerExpiredText);
+    return seal("danger", text.offerMismatch, text.offerMismatchText(brand.name));
   }
 
   /** Prototype P7: "You can still change or cancel it until … on the approval page." */
@@ -1542,12 +1690,8 @@ export class ApprovalCard extends LitElement {
   /** v17 "More details": a disclosure at the bottom of every card, collapsed by default. */
   private details(order: Order) {
     const text = pick(CARD);
-    const verified = order.audit.some((e) => e.event === "offer_verified");
     const open = this.detailsOpen;
-    const log =
-      order.approvalUrl === null
-        ? null
-        : `${new URL(order.approvalUrl).origin}/views/order-timeline?order=${encodeURIComponent(order.orderId)}`;
+    const log = logUrl(order);
     return html`<aside class="details" part="details">
       <button
         class="toggle body-small"
@@ -1569,10 +1713,7 @@ export class ApprovalCard extends LitElement {
         </section>
         <section class="group">
           <h3 class="section-title">${text.offer}</h3>
-          ${rows([
-            [text.offerNo, order.offerIds.join(", ")],
-            [text.signature, verified ? text.verified(brand.name) : text.notVerified],
-          ])}
+          ${rows([[text.offerNo, order.offerIds.join(", ")]])} ${this.offerSeal(order)}
         </section>
         <p class="details-links body-small">
           ${log === null ? nothing : html`<a href=${log} target="_blank" rel="noreferrer">${text.viewFullLog}</a>`}
@@ -1598,6 +1739,12 @@ export class ApprovalCard extends LitElement {
     </article>`;
   }
 }
+
+/** The order log page, on the server of the approval page; null without its URL. */
+const logUrl = (order: Order) =>
+  order.approvalUrl === null
+    ? null
+    : `${new URL(order.approvalUrl).origin}/views/order-timeline?order=${encodeURIComponent(order.orderId)}`;
 
 /** Registers `<tt-approval-card>`; safe to call more than once. */
 export function defineApprovalCard() {

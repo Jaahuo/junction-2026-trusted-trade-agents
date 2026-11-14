@@ -10,10 +10,11 @@ import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
 import clock16 from "../../shared/icons/clock-16.svg?raw";
 import clockIcon from "../../shared/icons/clock.svg?raw";
+import attention from "../../shared/icons/attention.svg?raw";
+import bullet from "../../shared/icons/bullet.svg?raw";
+import info16Warning from "../../shared/icons/info-16-warning.svg?raw";
 import info16 from "../../shared/icons/info-16.svg?raw";
-import info from "../../shared/icons/info.svg?raw";
 import search from "../../shared/icons/search.svg?raw";
-import warning from "../../shared/icons/warning.svg?raw";
 import xCircle from "../../shared/icons/x-circle.svg?raw";
 import { base } from "../../shared/styles.ts";
 import {
@@ -30,13 +31,16 @@ import {
   when,
 } from "./parts.ts";
 
-// Figma: Junction 2026 › Screens › "Approval request — v16 (multi-product orders)", with
-// the v11–v15 style. Every approval is an order of products. Single column (chat) below
-// 760px, two columns (desktop) from 760px. Fields the order does not carry (order limit,
+// Figma: Junction 2026 › Screens › "Approval request — v17 (reasons on to-dos)", with the
+// v11–v16 style. Every approval is an order of products, in one column at any width.
+// Fields the order does not carry (order limit,
 // kitchen, on behalf of) and per-product actions (replace, ask the agent, edit products)
 // are left out until the contract has them.
 
 type Reason = { title: string; detail: string | null; tone: "warning" | "info" };
+
+/** One v17 to-do: where (a product or area, scrolled to on click), what happened, what to do. */
+type Todo = { where: string; target: string; reason: string; action: string };
 
 const warn = (title: string, detail: string | null = null): Reason => ({
   title,
@@ -116,6 +120,8 @@ const daysBetween = (from: string, to: string) =>
   Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000);
 const dayShift = (days: number) =>
   `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ${days > 0 ? "later" : "earlier"}`;
+/** The element id of a product line, the target of its to-do. */
+const lineId = (c: OfferClaims) => `line-${c.offerId}`;
 /** Products shown before "Show N more products". */
 const SHOWN = 3;
 
@@ -138,10 +144,6 @@ export class ApprovalCard extends LitElement {
     base,
     cardStyles,
     css`
-      .columns {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-      }
       .section-title {
         color: var(--color-heading);
         font-family: var(--font-family-condensed);
@@ -149,21 +151,45 @@ export class ApprovalCard extends LitElement {
         font-weight: 700;
         line-height: 1.1;
       }
-      .banner {
+      /* v17 "Needs your approval": one to-do per thing that needs the approver. */
+      .todo {
         display: flex;
         flex-direction: column;
+        gap: var(--spacing-md);
+        padding: var(--spacing-lg);
+        background: var(--color-yellow-aimo);
+      }
+      .todo-title {
+        display: flex;
+        align-items: center;
         gap: var(--spacing-sm);
+        font-family: var(--font-family-condensed);
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.1;
+      }
+      .todo-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-md);
         padding: 0;
         list-style: none;
       }
-      .banner li {
+      .todo-list li {
         display: flex;
         align-items: flex-start;
         gap: var(--spacing-sm);
-        color: var(--color-text-warning);
       }
-      .banner li.info {
-        color: var(--color-heading);
+      .where {
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--color-link);
+        font: inherit;
+        font-weight: 600;
+        text-align: left;
+        text-decoration: underline;
+        cursor: pointer;
       }
       .changes {
         display: flex;
@@ -172,8 +198,14 @@ export class ApprovalCard extends LitElement {
       }
       .change {
         display: grid;
-        grid-template-columns: 90px 1fr auto;
+        grid-template-columns: 96px 1fr auto;
         gap: var(--spacing-md);
+        padding: var(--spacing-md) 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+      .change .now,
+      .change .delta {
+        font-weight: 600;
       }
       .change .delta {
         color: var(--color-text-warning);
@@ -207,9 +239,13 @@ export class ApprovalCard extends LitElement {
       .product-note {
         display: flex;
         align-items: center;
-        gap: var(--spacing-xs);
+        gap: var(--spacing-sm);
+        padding-top: var(--spacing-xs);
         color: var(--color-heading);
-        font-size: var(--font-size-2xs);
+        font-size: var(--font-size-xs);
+      }
+      .product-note.warning {
+        color: var(--color-text-warning);
       }
       .more-products {
         display: flex;
@@ -319,22 +355,6 @@ export class ApprovalCard extends LitElement {
       .details-body.open {
         display: flex;
       }
-      @container (min-width: 760px) {
-        .columns {
-          grid-template-columns: 520px minmax(0, 1fr);
-        }
-        .details {
-          border-top: 0;
-          border-left: 1px solid var(--color-border);
-        }
-        .toggle {
-          display: none;
-        }
-        .details-body {
-          display: flex;
-          padding: var(--spacing-xl);
-        }
-      }
     `,
   ];
 
@@ -377,8 +397,7 @@ export class ApprovalCard extends LitElement {
     if (order.status === "awaiting_payment") return "Approved · waiting for payment";
     if (order.status !== "pending_approval") return "Rejected";
     if (this.rejecting) return "Rejecting";
-    if (order.reasons.some((r) => REQUOTE.has(r))) return "Offer changed · needs your approval";
-    return "Needs your approval";
+    return "Approval required";
   }
 
   /** v16: an order of products, named by its delivery day, with order number and count. */
@@ -391,7 +410,8 @@ export class ApprovalCard extends LitElement {
     const facts = html`<dl class="facts">
       ${fact("Order no.", order.orderId)} ${fact("Products", String(order.lines.length))}
     </dl>`;
-    return brandHeader(this.eyebrow(order), title, facts);
+    const pill = order.status === "pending_approval" && !this.rejecting;
+    return brandHeader(this.eyebrow(order), title, facts, pill);
   }
 
   /** The requote, if any: the summed change of total and delivery. */
@@ -409,66 +429,128 @@ export class ApprovalCard extends LitElement {
     };
   }
 
-  /** Order-level reasons as "Title: detail" lines (v16 "Approval reasons"). */
-  private banner(order: Order) {
-    const claims = order.lines[0]?.claims;
-    const change = this.change(order);
-    const items: Reason[] = order.reasons
-      .filter((r) => !REQUOTE.has(r))
-      .map((r) => reasonCopy(r, order, claims));
-    if (order.reasons.some((r) => REQUOTE.has(r)))
-      items.unshift({
-        title: "Price and delivery changed",
-        detail:
-          change === null
-            ? null
-            : [
-                change.total === change.before ? null : signed(change.total - change.before),
-                change.days === 0 ? null : `delivery ${dayShift(change.days)}`,
-              ]
-                .filter(Boolean)
-                .join(", "),
-        tone: "warning",
-      });
-    if (items.length === 0) return nothing;
-    return html`<ul class="banner" part="reason">
-      ${items.map(
-        (r) =>
-          html`<li class=${r.tone}>
-            ${icon(r.tone === "info" ? info : warning)}
-            <p>
-              <span class="strong">${r.title}${r.detail ? ":" : ""}</span>${
-                r.detail ? ` ${r.detail}` : nothing
-              }
-            </p>
-          </li>`,
-      )}
-    </ul>`;
+  /** v17 to-dos: one per thing the approver should look at, linked to where it is. */
+  private todos(order: Order): Todo[] {
+    const lines = order.lines.map((l) => l.claims);
+    return order.reasons.flatMap((r): Todo[] => {
+      switch (r) {
+        case "SPEND_OVER_LIMIT":
+          return [
+            {
+              where: "Order total",
+              target: "products",
+              reason: "Order total is over your order limit",
+              action: "Approve it as it is, or reject it",
+            },
+          ];
+        case "SUBSTITUTION":
+          return lines
+            .filter((c) => c.replaces !== null)
+            .map((c) => ({
+              where: c.product.name,
+              target: lineId(c),
+              reason: "Out of stock, a substitute is proposed",
+              action: "Check the replacement",
+            }));
+        case "PRICE_CHANGED":
+          return order.requotes.map((q) => ({
+            where: q.current.product.name,
+            target: lineId(q.current),
+            reason: "Price changed after the offer was made",
+            action: "Check the new price",
+          }));
+        case "AVAILABILITY_DIFFERS":
+          return [
+            {
+              where: "Delivery date",
+              target: "what-changed",
+              reason: "Delivery date changed after the offer was made",
+              action: "Check the new date",
+            },
+          ];
+        case "UNCONFIRMED_STOCK": {
+          const c = lines.find((l) => l.shortfall !== null || l.stock === "unconfirmed");
+          return [
+            {
+              where: c?.product.name ?? "Stock",
+              target: c === undefined ? "products" : lineId(c),
+              reason:
+                c?.shortfall == null
+                  ? "Stock is not confirmed"
+                  : `${amount(c.shortfall)} short for this delivery`,
+              action: "Check the amount",
+            },
+          ];
+        }
+        default:
+          return [
+            {
+              where: reasonCopy(r, order, lines[0]).title,
+              target: "products",
+              reason: REASON_TEXT[r],
+              action: "Check the products",
+            },
+          ];
+      }
+    });
   }
 
-  /** One sentence on what approving means for the first reason. */
+  /** Scrolls to a to-do's product or section, showing hidden products first, and focuses it. */
+  private async goTo(order: Order, target: string) {
+    const index = order.lines.findIndex((l) => `line-${l.offerId}` === target);
+    if (index >= SHOWN) this.allProducts = true;
+    await this.updateComplete;
+    const element = this.renderRoot.querySelector<HTMLElement>(`#${CSS.escape(target)}`);
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    element?.focus({ preventScroll: true });
+  }
+
+  private todoBox(order: Order) {
+    const items = this.todos(order);
+    if (items.length === 0) return nothing;
+    return html`<section class="todo" part="reason" aria-labelledby="todo-title">
+      <h3 id="todo-title" class="todo-title">${icon(attention)}Needs your approval</h3>
+      <ul class="todo-list">
+        ${items.map(
+          (t) =>
+            html`<li>
+              ${icon(bullet)}
+              <div>
+                <button
+                  class="where"
+                  aria-label="${t.where}, ${t.action.toLowerCase()}"
+                  @click=${() => this.goTo(order, t.target)}
+                >
+                  ${t.where}
+                </button>
+                <p>${t.reason}</p>
+                <p>${t.action}</p>
+              </div>
+            </li>`,
+        )}
+      </ul>
+    </section>`;
+  }
+
+  /** For an order over the limit, one sentence on what approving means. */
   private guidance(order: Order) {
-    const reasons = order.reasons;
-    const text = reasons.includes("SUBSTITUTION")
-      ? "Confirm the order to accept the substitute, or reject it."
-      : reasons.includes("NEW_PRODUCT")
-        ? "Confirm the order to include the new product, or reject it."
-        : reasons.includes("SPEND_OVER_LIMIT")
-          ? "Approve the order as it is, or reject it so the agent can change it."
-          : null;
-    return text === null ? nothing : html`<p class="body-small">${text}</p>`;
+    return order.reasons.includes("SPEND_OVER_LIMIT")
+      ? html`<p class="body-small">
+          Approve the order as it is, or reject it so the agent can change it.
+        </p>`
+      : nothing;
   }
 
   /** v16 "What changed" for a re-quoted order: total and delivery, then and now. */
   private whatChanged(order: Order) {
     const c = this.change(order);
     if (c === null) return nothing;
-    return html`<section class="changes">
+    return html`<section class="changes" id="what-changed" tabindex="-1">
       <h3 class="section-title">What changed</h3>
       <div class="change">
         <span>Total</span>
         <span
-          >${money(c.total)}<br /><span class="body-small secondary"
+          ><span class="now">${money(c.total)}</span><br /><span class="body-small"
             >was ${money(c.before)}</span
           ></span
         >
@@ -477,7 +559,7 @@ export class ApprovalCard extends LitElement {
       <div class="change">
         <span>Delivery</span>
         <span
-          >${day(c.deliveryNow)}<br /><span class="body-small secondary"
+          ><span class="now">${day(c.deliveryNow)}</span><br /><span class="body-small"
             >was ${day(c.deliveryBefore)}</span
           ></span
         >
@@ -486,15 +568,22 @@ export class ApprovalCard extends LitElement {
     </section>`;
   }
 
-  /** The note under a product that something applies to (v16 product line states). */
-  private lineNote(order: Order, c: OfferClaims): string | null {
-    if (c.replaces !== null) return `Substitute proposed · replaces ${c.replaces}`;
+  /** The note under a product that something applies to; a price change is a warning (v17). */
+  private lineNote(order: Order, c: OfferClaims): { text: string; warning: boolean } | null {
+    if (c.replaces !== null)
+      return { text: `Substitute proposed · replaces ${c.replaces}`, warning: false };
     const requote = order.requotes.find((r) => r.current.offerId === c.offerId);
     if (requote !== undefined)
-      return `Price changed · was ${money(requote.previous.total.net)} (${signed(c.total.net - requote.previous.total.net)})`;
+      return {
+        text: `Price changed · was ${money(requote.previous.total.net)} (${signed(c.total.net - requote.previous.total.net)})`,
+        warning: true,
+      };
     if (c.shortfall !== null)
-      return `${amount(c.shortfall)} short${c.nextDeliveryDate === null ? "" : ` · rest from ${day(c.nextDeliveryDate)}`}`;
-    if (c.stock === "unconfirmed") return "Stock not confirmed";
+      return {
+        text: `${amount(c.shortfall)} short${c.nextDeliveryDate === null ? "" : ` · rest from ${day(c.nextDeliveryDate)}`}`,
+        warning: true,
+      };
+    if (c.stock === "unconfirmed") return { text: "Stock not confirmed", warning: true };
     return null;
   }
 
@@ -502,13 +591,13 @@ export class ApprovalCard extends LitElement {
     const all = order.lines.map((l) => l.claims);
     const visible = this.allProducts ? all : all.slice(0, SHOWN);
     const hidden = all.length - SHOWN;
-    return html`<section part="products">
+    return html`<section part="products" id="products" tabindex="-1">
       <h3 class="section-title">Products</h3>
       <ul class="product-list">
         ${visible.map((c) => {
           const note = this.lineNote(order, c);
           const pack = c.product.perSalesUnit;
-          return html`<li class="product">
+          return html`<li class="product" id="line-${c.offerId}" tabindex="-1">
             <p class="product-top">
               <span class="product-name">${c.product.name}</span><span>${money(c.total.net)}</span>
             </p>
@@ -522,7 +611,13 @@ export class ApprovalCard extends LitElement {
                     >`
               }
             </p>
-            ${note === null ? nothing : html`<p class="product-note">${icon(info16)}${note}</p>`}
+            ${
+              note === null
+                ? nothing
+                : html`<p class="product-note ${note.warning ? "warning" : ""}">
+                    ${icon(note.warning ? info16Warning : info16)}${note.text}
+                  </p>`
+            }
           </li>`;
         })}
       </ul>
@@ -571,7 +666,7 @@ export class ApprovalCard extends LitElement {
   }
 
   private pendingBody(order: Order) {
-    return html`${this.banner(order)} ${this.guidance(order)} ${this.whatChanged(order)}
+    return html`${this.todoBox(order)} ${this.guidance(order)} ${this.whatChanged(order)}
       ${this.products(order)} ${this.orderedFor(order)} ${this.openUntil(order)}
       <div class="actions" part="actions">
         <button
@@ -773,13 +868,9 @@ export class ApprovalCard extends LitElement {
           ? this.rejectBody(order)
           : this.pendingBody(order);
     return html`<article class="card" part="card">
-      <div class="columns">
-        <div>
-          ${this.header(order)}
-          <div class="body">${body}</div>
-        </div>
-        ${this.details(order)}
-      </div>
+      ${this.header(order)}
+      <div class="body">${body}</div>
+      ${this.details(order)}
     </article>`;
   }
 }

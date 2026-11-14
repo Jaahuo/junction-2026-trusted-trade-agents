@@ -13,6 +13,7 @@ const tokens = css`
     --color-button: #c0e021;
     --color-button-text: #003747;
     --color-light-purple-aimo: #eee8f5;
+    --color-yellow-aimo: #fddb32;
     --color-text: #23282d;
     --color-text-secondary: #555759;
     --color-text-on-brand: #ffffff;

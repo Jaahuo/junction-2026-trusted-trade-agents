@@ -337,7 +337,7 @@ const weekday = (date: string) =>
 const typed = (e: Event) => (e.target instanceof HTMLInputElement ? Number(e.target.value) : NaN);
 
 /**
- * One order for a human decision. Framework-agnostic: set `order`, `busy`, `canAsk` and
+ * One order for a human decision. Framework-agnostic: set `order`, `busy`, `locked`, `canAsk` and
  * `orderLimit`, listen for `tt-decide` (detail: DecideApprovalRequest), `tt-confirm-changes`
  * (an edit to approve with its new quote), `tt-ask-agent` (detail: the message for the agent,
  * who then updates the order), `tt-talk` (a message that starts a conversation) and
@@ -349,6 +349,7 @@ export class ApprovalCard extends LitElement {
   static override properties = {
     order: { attribute: false },
     busy: { type: Boolean },
+    locked: { type: Boolean },
     canAsk: { type: Boolean, attribute: "can-ask" },
     handling: { state: true },
     detailsOpen: { state: true },
@@ -820,6 +821,10 @@ export class ApprovalCard extends LitElement {
         background: var(--color-bg-brand-subtle);
         color: var(--color-heading);
       }
+      /* Locked while the order's current state is unknown. */
+      .actions[inert] {
+        opacity: 0.5;
+      }
       /* "Sending": the busy primary button stays solid; only the others fade. */
       .btn.primary[aria-busy="true"]:disabled {
         background: var(--color-button);
@@ -973,6 +978,8 @@ export class ApprovalCard extends LitElement {
 
   declare order: Order | null;
   declare busy: boolean;
+  /** True while the view could not read the order's current state: Approve and Reject are off. */
+  declare locked: boolean;
   /** True in a chat, where the agent help can message the agent. */
   declare canAsk: boolean;
   /** The picked handling of each short or late line by offer id; none keeps the recommended. */
@@ -1009,6 +1016,7 @@ export class ApprovalCard extends LitElement {
     super();
     this.order = null;
     this.busy = false;
+    this.locked = false;
     this.canAsk = false;
     this.handling = {};
     this.detailsOpen = false;
@@ -1802,12 +1810,12 @@ export class ApprovalCard extends LitElement {
   private actions(order: Order, confirm: () => void) {
     const text = pick(CARD);
     const rejecting = this.busy && this.rejecting;
-    return html`<div class="actions" part="actions">
+    return html`<div class="actions" part="actions" ?inert=${this.locked}>
       <button
         part="button approve"
         class="btn primary"
         aria-busy=${this.busy && !this.rejecting ? "true" : "false"}
-        @click=${() => (this.busy ? undefined : confirm())}
+        @click=${() => (this.busy || this.locked ? undefined : confirm())}
       >
         ${this.approveLabel(order)}
       </button>
@@ -1816,7 +1824,7 @@ export class ApprovalCard extends LitElement {
         class="btn brand"
         aria-busy=${rejecting ? "true" : "false"}
         @click=${() => {
-          if (this.busy) return;
+          if (this.busy || this.locked) return;
           this.rejecting = true;
           this.decide({ decision: "reject", next: "stop", proposalVersion: order.proposalVersion });
         }}

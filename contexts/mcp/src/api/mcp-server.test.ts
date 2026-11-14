@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import type { TradeRest, ViewName, ViewPages } from "../application/tools.ts";
 import { createRoot } from "./index.ts";
-import { type McpDeps, viewToolsMode } from "./mcp-server.ts";
+import { type McpDeps, VIEWS_NOT_IN_CHAT, viewToolsMode } from "./mcp-server.ts";
 
 const placed: Order = { ...fixtures.order, status: "placed", approvalUrl: null };
 
@@ -151,17 +151,18 @@ describe("tools/list", () => {
     }
   });
 
-  test("each tool in VIEWS declares the view's ui:// resource", async () => {
+  test("each tool in VIEWS declares the view's ui:// resource, except views not in the chat", async () => {
     const tools = await mcp().listTools();
     for (const view of VIEWS) {
       for (const name of view.tools) {
         const tool = tools.find((entry) => entry.name === name);
         expect({ name, uri: tool === undefined ? undefined : uiOf(tool)?.resourceUri }).toEqual({
           name,
-          uri: view.uri,
+          uri: VIEWS_NOT_IN_CHAT.has(view.view) ? undefined : view.uri,
         });
       }
     }
+    expect(VIEWS_NOT_IN_CHAT.has("offer-comparison")).toBe(true);
   });
 });
 

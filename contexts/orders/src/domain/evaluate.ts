@@ -165,6 +165,30 @@ export const nextDeliveryDateAfterCutoff = (claims: OfferClaims[], now: Date): s
     .flatMap((claim) => (claim.nextDeliveryDate === null ? [] : [claim.nextDeliveryDate]))
     .toSorted()[0] ?? null;
 
+/** Reasons about the order as a whole, even when a line raises them. */
+const ORDER_LEVEL: ReadonlySet<ReasonCode> = new Set(["PAYMENT_TERMS"]);
+
+/**
+ * The buyer-limit reasons each product raises, so the audit can name the product a check
+ * failed for (a new product, CO₂ above the maximum …). Order-level reasons are left out.
+ */
+export const reasonsByProduct = (
+  claims: OfferClaims[],
+  mandate: Mandate | null,
+  history: HistoryRow[],
+): Map<string, ReasonCode[]> => {
+  const byProduct = new Map<string, ReasonCode[]>();
+  if (mandate === null) return byProduct;
+  const historyOf = (productId: string) => history.filter((row) => row.productId === productId);
+  for (const claim of claims) {
+    const reasons = buyerLimitReasons(claim, mandate, historyOf).filter(
+      (reason) => !ORDER_LEVEL.has(reason),
+    );
+    byProduct.set(claim.productId, [...(byProduct.get(claim.productId) ?? []), ...reasons]);
+  }
+  return byProduct;
+};
+
 const isReject = (reason: ReasonCode): boolean =>
   REJECT_REASONS.some((rejectReason) => rejectReason === reason);
 

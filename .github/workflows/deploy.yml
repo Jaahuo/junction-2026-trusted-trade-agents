@@ -7,7 +7,7 @@ permissions: {}
 jobs:
   api:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -62,7 +62,7 @@ jobs:
 
   chat:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -118,7 +118,7 @@ jobs:
 
   turn:
     needs: [api, chat]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 60
     permissions:
       contents: read
@@ -143,7 +143,7 @@ jobs:
     concurrency:
       group: deploy-production
       cancel-in-progress: false
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 15
     environment: production
     outputs:
@@ -159,10 +159,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: Skip when a later main pipeline reached its deploy
         id: fresh
@@ -196,6 +192,9 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           bun scripts/deploy.ts push
           echo 'status=healthy' >> "$GITHUB_OUTPUT"
+      - name: Remove the deployment key from the runner
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
       - name: Record deployment result
         if: always()
         env:
@@ -218,8 +217,8 @@ jobs:
 
   smoke-api:
     needs: [api, deploy]
-    if: needs.deploy.outputs.status == 'healthy'
-    runs-on: ubuntu-24.04
+    if: vars.DEPLOY_SMOKE == 'true' && needs.deploy.outputs.status == 'healthy'
+    runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 15
     services:
       postgres:
@@ -231,10 +230,11 @@ jobs:
         ports:
           - 5432:5432
         options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
           --health-cmd "pg_isready -U postgres -d image_smoke"
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 30
     permissions:
       contents: read
       packages: read
@@ -246,10 +246,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5
-      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: Log in to the registry
         env:
@@ -292,8 +288,8 @@ jobs:
 
   smoke-chat:
     needs: [chat, deploy]
-    if: needs.deploy.outputs.status == 'healthy'
-    runs-on: ubuntu-24.04
+    if: vars.DEPLOY_SMOKE == 'true' && needs.deploy.outputs.status == 'healthy'
+    runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 15
     permissions:
       contents: read

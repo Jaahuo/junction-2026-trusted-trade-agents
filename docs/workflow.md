@@ -55,24 +55,22 @@ Claude resolves the active worktree from the hook input's `cwd`, even when the s
 
 ## CI stages and security evidence
 
-The `gate` workflow runs on pull requests, nightly and by hand. It keeps one aggregate `gate` check for required-check consumers. Each required job must succeed. Failure, cancellation or an unexpected skip fails the aggregate. A new PR head cancels the older gate run of that PR. A push to main does not run the gate: it starts the `deploy` workflow.
+The `gate` workflow runs on pull requests only. It is one job named `gate`, the check that `ship` requires. The job runs the secret scan, the quality checks and the tests in sequence, so one failure or a cancellation fails the check. A new PR head cancels the older gate run of that PR. Nothing gates main: a push to main starts the `deploy` workflow.
 
-| Stage   | Workflow | Responsibility                                                              |
-| ------- | -------- | --------------------------------------------------------------------------- |
-| Quality | gate     | Types, formatting, lint, unused code, duplication and migration consistency |
-| Tests   | gate     | Full test suite against disposable PostgreSQL                               |
-| Secrets | gate     | Gitleaks scan of Git history                                                |
-| Gate    | gate     | Require quality, tests and secrets to succeed                               |
-| Build   | deploy   | Build, push and verify the API and chat images in two parallel jobs         |
-| Turn    | deploy   | Wait until every earlier main pipeline has finished                         |
-| Deploy  | deploy   | Deploy both digests with production-only credentials and verify health      |
-| Smoke   | deploy   | Run each deployed image on the runner and check its runtime                 |
+| Stage  | Workflow | Responsibility                                                                         |
+| ------ | -------- | -------------------------------------------------------------------------------------- |
+| Gate   | gate     | Gitleaks scan of Git history, types, format, lint, unused code, duplication, migration |
+|        |          | consistency and the full test suite against disposable PostgreSQL                      |
+| Build  | deploy   | Build, push and verify the API and chat images in two parallel jobs                    |
+| Turn   | deploy   | Wait until every earlier main pipeline has finished                                    |
+| Deploy | deploy   | Deploy both digests with production-only credentials and verify health                 |
+| Smoke  | deploy   | Run each deployed image on the runner and check its runtime; off by default            |
 
-All jobs use GitHub-hosted `ubuntu-24.04` runners. Gates run code checks without production credentials and never deploy. Every push to main builds and deploys without a gate on the merged commit. The PR gate, the nightly gate on main and the post-deploy smoke jobs are the remaining checks.
+All jobs run on the self-hosted Vultr runners with the labels `self-hosted`, `linux`, `x64` and `junction-ci`, because the account has no GitHub-hosted minutes left. The runners are persistent and privileged: a pull request from any collaborator runs on the same machines as the deployment job. The deployment job removes its SSH key when it ends. Gates never deploy. Every push to main builds and deploys without a gate on the merged commit. The PR gate is the only code check.
 
 ### Caches
 
-Quality caches Bun package downloads at `~/.bun/install/cache`. Tests and the smoke job restore that cache. The deploy job restores and saves it, so main keeps a cache without a main gate. Keys include the runner OS, architecture, pinned tools and lockfile. Every install still uses `--frozen-lockfile`; the cache does not replace installation or checks. GitHub isolates PR caches from the main branch.
+Each runner keeps Bun package downloads and pinned tools in its home volume between jobs, so the workflows use no cache action for them. Every install still uses `--frozen-lockfile`. Each runner pulls the PostgreSQL and BuildKit images when it starts. The PostgreSQL service keeps its data in memory.
 
 Deployment builds use the GitHub Actions Docker layer cache under `production-image` and `production-chat-image`. Only the two build jobs request cache-write access. They build the pushed main SHA from the checkout, not from PR artifacts. Docker validates layer reuse against build inputs; source changes can still invalidate dependency layers because the Dockerfile copies source before installation.
 
@@ -80,7 +78,7 @@ Deployment builds use the GitHub Actions Docker layer cache under `production-im
 
 Issue #233 records the owner's temporary pause of Bun dependency audits, image vulnerability scans and SBOM generation. Those jobs do not run, and the aggregate gate does not claim they passed. Image builds run only in the deploy workflow.
 
-The image smoke tests run after deployment, so they report a bad image but do not stop it from reaching production. `deploy.ts push` still requires API health and the selected image ID on the host. The smoke jobs check health, a catalogue search, runtime UID and the absence of common shells and package managers. They do not detect vulnerable dependencies or replace an SBOM.
+The image smoke jobs are the last stage and are off: they run only when the repository variable `DEPLOY_SMOKE` is `true`. When on, they report a bad image after it reaches production; they do not stop it. `deploy.ts push` still requires API health and the selected image ID on the host. The smoke jobs check health, a catalogue search, runtime UID and the absence of common shells and package managers. They do not detect vulnerable dependencies or replace an SBOM.
 
 To restore the previous security gates, revert the scoped #233 implementation commit through a PR. Restore audit and image scanning together with the deployment artifact contract and aggregate gate requirements. Review the current workflow before reverting if later changes touch it.
 
@@ -117,7 +115,7 @@ Assess actual blast radius and reversibility rather than choosing based on file 
 
 `ship --merge` waits for a running gate and checks the exact head and the required gate. How it treats a branch that is behind `origin/main` depends on risk:
 
-- An `ordinary` PR merges while behind when GitHub reports no conflicts. Main moves every few minutes and the gate takes about two, so requiring current main stalls merges. Main has no gate of its own, so a merge that breaks only in combination with newer main deploys unchecked. The nightly gate and the smoke jobs report it afterward: fix or revert a red main before shipping anything else.
+- An `ordinary` PR merges while behind when GitHub reports no conflicts. Main moves every few minutes and the gate takes about two, so requiring current main stalls merges. Main has no gate of its own, so a merge that breaks only in combination with newer main deploys unchecked. Nothing reports it until the next PR gate that includes it fails: fix or revert a broken main before shipping anything else.
 - An `impact` or `lock-in` PR must include current main. Ship merges `origin/main` into the branch with a merge commit (no rebase, no force-push), pushes, waits for the new gate and retries up to six times. On a conflict it aborts the merge and stops.
 - A review or approval of an earlier head, for impact and lock-in alike, still counts when that head is an ancestor of the current head and the PR's own change is identical: the exact diff from where it meets main, ignoring only blob ids and hunk line numbers. Whitespace, context lines, binary content and file modes count. A merge that resolves conflicts, a main change next to the PR's lines or any edit to the PR's own lines requires a new review. `--review-file` accepts a report for such an earlier head too.
 - Carried-over review does not cover a main change elsewhere that alters what the PR's code means; the gate catches build and test breakage, not every semantic change.

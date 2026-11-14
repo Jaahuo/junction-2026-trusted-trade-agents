@@ -54,7 +54,9 @@ export function checkQuantity(
     return "INVALID_QUANTITY";
   const lots = value / facts.allowedLotSize;
   const whole = Math.round(lots);
-  return whole >= 1 && Math.abs(lots - whole) <= LOT_TOLERANCE * Math.max(1, whole)
+  return whole >= 1 &&
+    Number.isSafeInteger(whole) &&
+    Math.abs(lots - whole) <= LOT_TOLERANCE * Math.max(1, whole)
     ? null
     : "INVALID_QUANTITY";
 }

@@ -89,6 +89,13 @@ describe("quantity", () => {
     expect(checkQuantity({ value: 111913.185, unit: "KGM" }, facts)).toBe("INVALID_QUANTITY");
   });
 
+  test("INVALID_QUANTITY regression: 1e308 is refused", () => {
+    const facts = { salesUnit: "PCE", allowedLotSize: 1 };
+    expect(checkQuantity({ value: 1e308, unit: "PCE" }, facts)).toBe("INVALID_QUANTITY");
+    expect(checkQuantity({ value: 2 ** 53, unit: "PCE" }, facts)).toBe("INVALID_QUANTITY");
+    expect(checkQuantity({ value: Number.MAX_SAFE_INTEGER, unit: "PCE" }, facts)).toBeNull();
+  });
+
   test("INVALID_QUANTITY regression: 0.3 with lot size 0.1 is valid", () => {
     expect(
       checkQuantity({ value: 0.3, unit: "KGM" }, { salesUnit: "KGM", allowedLotSize: 0.1 }),

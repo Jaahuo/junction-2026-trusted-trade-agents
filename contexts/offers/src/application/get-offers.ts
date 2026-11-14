@@ -45,6 +45,8 @@ interface Dated extends Candidate {
 
 interface Signable extends Dated {
   price: PriceQuote;
+  total: { net: number; gross: number };
+  deposits: number;
 }
 
 const DETAIL: Record<OmitReason, string> = {
@@ -247,14 +249,22 @@ export async function getOffers(
       omit(line, expired, EXPIRED_DETAIL[expired]);
       continue;
     }
-    signable.push({ ...line, price });
+    const { total, deposits } = lineTotal(price.unitPrice, price.deposit, line.line.quantity.value);
+    if (![total.net, total.gross, deposits].every(Number.isFinite)) {
+      omit(
+        line,
+        "INVALID_QUANTITY",
+        "the line total is too large to price; order a smaller quantity",
+      );
+      continue;
+    }
+    signable.push({ ...line, price, total, deposits });
   }
 
   const issuer = deps.issuer();
   const signed = await Promise.all(
     signable.map(async (offer) => {
-      const { line, product, price, availability: quote } = offer;
-      const { total, deposits } = lineTotal(price.unitPrice, price.deposit, line.quantity.value);
+      const { line, product, price, availability: quote, total, deposits } = offer;
       const claims: Omit<OfferClaims, "iat" | "exp"> = {
         iss: issuer,
         offerId: deps.newOfferId(),

@@ -449,6 +449,31 @@ describe("getOffers", () => {
     expect(OffersResultSchema.safeParse(result).success).toBe(true);
   });
 
+  test("a line whose totals overflow is omitted INVALID_QUANTITY and the other lines still return", async () => {
+    const HUGE = "prod_test_huge";
+    const setup = fakeOffersDeps({
+      products: [fakeProduct(HUGE), fakeProduct(OAT)],
+      live: {
+        ...quoted(
+          HUGE,
+          { amount: 999_999, stock: "unconfirmed" },
+          { unitPrice: { net: 1e300, vatRate: 14, currency: "EUR" } },
+        ),
+        ...quoted(OAT),
+      },
+    });
+
+    const result = valueOf(
+      await getOffers(setup.deps, principal, request({ lines: [line(HUGE, 1e15), line(OAT)] })),
+    );
+
+    expect(reasons(result.omitted)).toEqual({ [HUGE]: "INVALID_QUANTITY" });
+    expect(result.omitted[0]?.detail).toContain("too large");
+    expect(result.offers.map((offer) => offer.claims.productId)).toEqual([OAT]);
+    expect(setup.signer.signed.map((entry) => entry.claims.productId)).toEqual([OAT]);
+    expect(OffersResultSchema.safeParse(result).success).toBe(true);
+  });
+
   test("a quote that expires at or before now is omitted, not signed", async () => {
     const CUT = "prod_test_cut";
     const STALE = "prod_test_stale";

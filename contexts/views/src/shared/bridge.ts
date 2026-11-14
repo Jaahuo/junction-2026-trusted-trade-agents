@@ -1,4 +1,22 @@
-import { ROUTES, TOOL_OUTPUT, type ToolName, VIEWS } from "@app/contract";
+import {
+  DecideApprovalInputSchema,
+  type Order,
+  OrderSchema,
+  PendingListSchema,
+  ROUTES,
+  TOOL_OUTPUT,
+  type ToolName,
+  VIEWS,
+} from "@app/contract";
+import { harnessDecide } from "./harness-decide.ts";
+
+/** The orders in a loaded tool result: a pending list or one order. */
+const ordersIn = (raw: unknown): Order[] => {
+  const list = PendingListSchema.safeParse(raw);
+  if (list.success) return list.data.orders;
+  const one = OrderSchema.safeParse(raw);
+  return one.success ? [one.data] : [];
+};
 
 // The view loader (SPEC-013), free of the DOM so tests can inject a fake host or fetch.
 // A source delivers the tool result and calls action tools; the loader parses every
@@ -121,15 +139,26 @@ export function plainSource(
 }
 
 /** Harness mode: the API injects `{ state: "loading" }` or `{ result }` into the built view. */
-export function fixtureSource(fixture: unknown): Source {
+export function fixtureSource(fixture: unknown, now = () => new Date().toISOString()): Source {
   const result =
     typeof fixture === "object" && fixture !== null && "result" in fixture
       ? Promise.resolve(fixture.result)
       : new Promise<never>(() => {});
+  // The orders as decided so far, so a second decision builds on the first.
+  const orders = new Map<string, Order>();
   return {
     load: () => result,
-    call: async (tool) => {
-      throw new Error(`The harness has no server to call ${tool}.`);
+    call: async (tool, args) => {
+      const input = DecideApprovalInputSchema.safeParse(args);
+      if (tool !== "decide_approval" || !input.success)
+        throw new Error(`The harness has no server to call ${tool}.`);
+      const order =
+        orders.get(input.data.orderId) ??
+        ordersIn(await result).find((o) => o.orderId === input.data.orderId);
+      if (order === undefined) throw new Error(`The harness has no order ${input.data.orderId}.`);
+      const updated = harnessDecide(order, input.data, now());
+      orders.set(updated.orderId, updated);
+      return updated;
     },
     // The harness shows the chat states, so messages are accepted and dropped.
     message: async () => {},

@@ -430,15 +430,19 @@ export type Evaluate = (input: { claims: OfferClaims[]; mandate: Mandate | null;
 
 `NOT_AUTHENTICATED` is not produced in the first build. `OFFER_INVALID` is a refusal (400), never a stored reason; it stays in the list because the PRD names it.
 
-Precedence for `place_order` (one list; the first matching step R1-R6 ends the request):
+Precedence for `place_order` (one list; the first matching step R1-R7 ends the request):
 
 - R1. The body fails its schema, or holds 0 or more than 20 tokens → `400 BAD_REQUEST`. No record.
 - R2. The idempotency key is known: same tokens → `200` with the stored order; other tokens → `409 CONFLICT`.
-- R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token → `400 OFFER_INVALID`.
+- R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
 - R4. Tokens differ in `customer` or `paymentTerms`, or the customer is not the principal's → `400 BAD_REQUEST`.
 - R5. A current mandate exists and a token's `agentId`, `mandateId` or `mandateVersion` differs from it → `409 STALE_OFFER` ("request new offers").
 - R6. `validate` reports a live amount below the summed quantity of a product → `409 STALE_OFFER` (live-amount rule, SPEC-006).
-- R3-R6 store no order and write one audit record `order_refused` with no order id and the code in `detail`.
+- R7. After validation and the transactional idempotency-key recheck, a selected offer ID already belongs to an order for this customer → `400 OFFER_INVALID`. This check runs under the customer's placement lock, before placement side effects.
+- A selected offer ID is permanently consumed by an order in any status, including `rejected` and `declined`. Existing stored orders also consume their selected offer IDs; no backfill is required.
+- Alternatives alone do not consume offer IDs. A previously consumed offer ID can appear as an alternative.
+- Future edit and requote operations must retain consumed IDs if they change the selected lines.
+- R3-R7 store no order and write one audit record `order_refused` with no order id and the code in `detail`.
 
 Quantities: the quantities of lines for the same product are summed. Every quantity rule (`QUANTITY_UNUSUAL`, `UNCONFIRMED_STOCK`) and every limit applies to the sum per product and to the whole order.
 
@@ -451,7 +455,7 @@ Then the order is stored with every reason collected:
 5. Result: any reject reason → `rejected`; else any approval reason → `pending_approval`; else `commitPlacement` (SPEC-010), which checks credit.
 
 - Invariant: an order with any hard-constraint match that is not `confirmed` is never placed automatically, except an `unknown` match under `allergenData.ifNoData: auto`.
-- Steps 1-5 are `evaluate`, a pure function. `precheck` runs R1, R3-R5 (same errors, but no `order_refused` record) and `evaluate`, and returns the decision and reasons. It never calls `commitPlacement`, writes nothing and does not check credit. Only `place_order` and approval call `commitPlacement`.
+- Steps 1-5 are `evaluate`, a pure function. `precheck` runs R1, R3-R5 (same errors, but no `order_refused` record) and `evaluate`, and returns the decision and reasons. It does not check historical offer consumption, so its result is advisory. It never calls `commitPlacement`, writes nothing and does not check credit. Only `place_order` and approval call `commitPlacement`.
 
 Verification: one rule test per reason; a test that all reasons are listed; one test per R step; a test that `precheck` leaves orders, credit and audit unchanged; a test that an offer whose hard-constraint match is `unknown` is never placed automatically unless the mandate allows it (`allergenData.ifNoData: auto`).
 

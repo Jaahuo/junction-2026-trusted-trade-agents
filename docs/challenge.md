@@ -113,7 +113,7 @@ Get the resource portal password and mock API key from the challenge organizers.
 
 The resource portal contains downloadable datasets, API documentation and instructions for accessing the mock backend systems.
 
-**Local API reference:** [OpenAPI specification](../data/open_api.json). It defines endpoints, request/response schemas and authentication through the `X-API-Key` header. See the [repository resource guide](../README.md#challenge-data) for local datasets.
+**Local API reference:** [OpenAPI specification](open_api.json). It defines endpoints, request/response schemas and authentication through the `X-API-Key` header. See the [repository resource guide](../README.md#challenge-data) for local datasets.
 
 **Webshop test accounts:** Test credentials and access instructions will be shared separately once available.
 

@@ -30,6 +30,7 @@ export default defineConfig({
       ".agents/skills/elysiajs/**",
       "skills-lock.json",
       "data/**",
+      "docs/open_api.json",
     ],
   },
   lint: {

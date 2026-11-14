@@ -14,16 +14,16 @@ The [living PRD](docs/prd.md) owns product scope, behavior, acceptance criteria 
 
 Read the [challenge brief](docs/challenge.md) for requirements, scope and judging criteria. It replaces the original PDF.
 
-Use the supplied [OpenAPI specification](data/open_api.json) for mock API endpoints, request/response schemas and `X-API-Key` authentication. Use the [resource portal](https://junction26.valioaimo.fi/) for access instructions and updates. Keep credentials in ignored `.env`, not in documentation.
+Use the supplied [OpenAPI specification](docs/open_api.json) for mock API endpoints, request/response schemas and `X-API-Key` authentication. Use the [resource portal](https://junction26.valioaimo.fi/) for access instructions and updates. Keep credentials in ignored `.env`, not in documentation.
 
-The `data/` directory contains the API specification and four original datasets:
+The API specification is `docs/open_api.json`. The `data/` directory contains four original datasets:
 
 - [Delivery reliability](data/valio_aimo_junction26_delivery_reliability.csv)
 - [Carbon footprint](data/valio_aimo_junction26_carbon_footprint.csv)
 - [Product data schema](data/valio_aimo_junction26_product_data_schema.json)
 - [Product data](data/valio_aimo_junction26_product_data.json)
 
-The four dataset files remain byte-for-byte unchanged. Formatting excludes `data/` to preserve the source files. The product dataset contains 17,546 records. Narrow the product selection with static data before querying dynamic prices and availability; do not repeatedly query the full catalog. The template's MIT license and attribution remain unchanged; this project does not assign that license to the supplied challenge resources.
+The four dataset files remain byte-for-byte unchanged. Formatting excludes `data/` and `docs/open_api.json` to preserve the source files. The product dataset contains 17,546 records. Narrow the product selection with static data before querying dynamic prices and availability; do not repeatedly query the full catalog. The template's MIT license and attribution remain unchanged; this project does not assign that license to the supplied challenge resources.
 
 ## Commands
 

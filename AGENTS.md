@@ -1,6 +1,6 @@
 # Agent rules
 
-Use GitHub Issues and the project board for task state. A person assigns the task owner. Each independently committing task has one owner and worktree; helpers have disjoint writable paths and no independent Git, push, PR or merge authority. See [workflow](docs/workflow.md). No cross-project memory or shared project token.
+Use GitHub Issues and the project board for task state. Issues are created unassigned. A person assigns the task owner, or an agent assigns an unassigned issue to the person it works for with `gh issue edit <n> --add-assignee <login>` when that person tells it to take that issue or lane. Each independently committing task has one owner and worktree; helpers have disjoint writable paths and no independent Git, push, PR or merge authority. See [workflow](docs/workflow.md) and [team rules](docs/team-rules.md). No cross-project memory or shared project token.
 
 Before creating any task or exploration worktree, fetch its upstream and use the freshly fetched remote branch as the base, never a stale local branch. For this repository, run `git fetch origin main` and create from `origin/main`. Before exploring an existing worktree, fetch again and compare its HEAD with upstream; distinguish local changes from current upstream behavior. Do not reset or rebase another owner's work.
 
@@ -22,20 +22,20 @@ Before creating any task or exploration worktree, fetch its upstream and use the
 
 Feature code belongs in `contexts/<name>/src/`. Stay within the task's agreed writable scope.
 
-| Layer          | Holds                                | May import                                      |
-| -------------- | ------------------------------------ | ----------------------------------------------- |
-| `domain/`      | Types and pure rules                 | `@app/kernel`, `domain/`                        |
-| `application/` | Use cases and ports                  | `domain/`, `@app/kernel`                        |
-| `infra/`       | Port implementations and `schema.ts` | `application/`, `domain/`, `drizzle-orm`        |
-| `api/`         | Elysia routes and wiring             | All server layers                               |
-| `ui/`          | React screen                         | `domain/`, API types, `@app/ui`, `@app/web-kit` |
+| Layer          | Holds                                | May import                                                                        |
+| -------------- | ------------------------------------ | --------------------------------------------------------------------------------- |
+| `domain/`      | Types and pure rules                 | `@app/kernel`, `@app/contract`, `domain/`                                         |
+| `application/` | Use cases and ports                  | `domain/`, `@app/kernel`, `@app/contract`                                         |
+| `infra/`       | Port implementations and `schema.ts` | `application/`, `domain/`, `drizzle-orm`, `@app/contract`, `@app/contract/server` |
+| `api/`         | Elysia routes and wiring             | All server layers                                                                 |
+| `ui/`          | React screen                         | `domain/`, API types, `@app/contract`, `@app/ui`, `@app/web-kit`                  |
 
 `contexts/notes` is the reference. API routes and screens are discovered by folder, without registration.
 
 ## Rules
 
 1. Feature work stays in its context. Explain and coordinate any needed changes to `apps/`, `packages/`, `scripts/` or root config. Agree writable scopes and assess cross-area impact. Shared paths alone do not imply high risk.
-2. Do not import another context's files. Call its HTTP API through `import type { Api } from "@ctx/<name>/api"`.
+2. Do not import another context's files. Call its HTTP API through `import type { Api } from "@ctx/<name>/api"` and an Eden client with `parseDate: false`. Where that import would create a workspace cycle, use `callRoute` from `@app/contract/server` (docs/specs.md SPEC-001).
 3. Return expected failures as `Result` from `@app/kernel`; throw only for bugs.
 4. Prefix each table with its context name, for example `notes_notes`.
 5. After changing `schema.ts`, run `bun run db:generate` and commit the migration.
@@ -51,6 +51,7 @@ Feature code belongs in `contexts/<name>/src/`. Stay within the task's agreed wr
 15. If a component, variant or token is missing, coordinate the shared change, update `packages/ui` and `DESIGN.md` together, and assess its cross-area impact.
 16. Export demo `seed` from `api/seed.ts` and pass it in `context`. Reset should leave a state worth showing.
 17. Resolve lockfile conflicts deliberately and regenerate the lockfile as needed; do not discard a teammate's dependency changes.
+18. The contract lives in [specs](docs/specs.md) and `@app/contract`. Change it only as [team rules](docs/team-rules.md) R-08 says.
 
 ## Stack
 

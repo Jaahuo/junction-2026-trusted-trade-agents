@@ -1,6 +1,9 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   closeDb,
   type ContextModule,
+  contextsDir,
   type Db,
   discoverContexts,
   env,
@@ -10,28 +13,40 @@ import {
 
 const quote = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 
-const ownedByContext = (names: readonly string[]) => (object: string) =>
-  names.some((name) => object.startsWith(`${name.replaceAll("-", "_")}_`));
+const list = (objects: readonly string[]): string =>
+  objects.map((object) => `public.${quote(object)}`).join(", ");
+
+const CREATED = /CREATE (TABLE|TYPE) (?:IF NOT EXISTS )?(?:"public"\.)?"([^"]+)"/g;
+
+/** The tables and types that a context's own migrations create: the exact set a reset may drop. */
+export const migrationManifest = async (
+  name: string,
+): Promise<{ tables: string[]; types: string[] }> => {
+  const dir = resolve(contextsDir, name, "migrations");
+  const tables: string[] = [];
+  const types: string[] = [];
+  if (!existsSync(dir)) return { tables, types };
+  for (const file of [...new Bun.Glob("*.sql").scanSync(dir)].toSorted())
+    for (const [, kind, object] of (await Bun.file(resolve(dir, file)).text()).matchAll(CREATED))
+      if (object !== undefined) (kind === "TABLE" ? tables : types).push(object);
+  return { tables, types };
+};
 
 /**
- * Drops only the tables, enum types and migration records of the given contexts.
- * A hosted database keeps objects that are not ours in `public`, such as the TimescaleDB extension.
+ * Drops only what the contexts' migrations created, without CASCADE, in one transaction.
+ * A hosted database keeps objects that are not ours in `public`, such as the TimescaleDB extension;
+ * a foreign object that depends on ours aborts the reset before anything is dropped.
  */
 const dropContextObjects = async (db: Db, names: readonly string[]): Promise<void> => {
-  const ours = ownedByContext(names);
-  const tables: { name: string }[] = await db.$client`
-    SELECT tablename AS name FROM pg_tables
-    WHERE schemaname = 'public' AND tableowner = current_user`;
-  const types: { name: string }[] = await db.$client`
-    SELECT t.typname AS name FROM pg_type t
-    JOIN pg_namespace n ON n.oid = t.typnamespace
-    WHERE n.nspname = 'public' AND t.typtype = 'e' AND pg_get_userbyid(t.typowner) = current_user`;
-  for (const table of tables.map(({ name }) => name).filter(ours))
-    await db.$client.unsafe(`DROP TABLE IF EXISTS public.${quote(table)} CASCADE`);
-  for (const type of types.map(({ name }) => name).filter(ours))
-    await db.$client.unsafe(`DROP TYPE IF EXISTS public.${quote(type)} CASCADE`);
-  for (const name of names)
-    await db.$client.unsafe(`DROP TABLE IF EXISTS drizzle.${quote(`__migrations_${name}`)}`);
+  const manifests = await Promise.all(names.map(migrationManifest));
+  const tables = manifests.flatMap((manifest) => manifest.tables);
+  const types = manifests.flatMap((manifest) => manifest.types);
+  await db.$client.begin(async (tx) => {
+    if (tables.length > 0) await tx.unsafe(`DROP TABLE IF EXISTS ${list(tables)}`);
+    if (types.length > 0) await tx.unsafe(`DROP TYPE IF EXISTS ${list(types)}`);
+    for (const name of names)
+      await tx.unsafe(`DROP TABLE IF EXISTS drizzle.${quote(`__migrations_${name}`)}`);
+  });
 };
 
 export const resetContexts = async (db: Db, contexts: readonly ContextModule[]): Promise<void> => {

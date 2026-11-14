@@ -34,7 +34,7 @@ bun scripts/deploy.ts push
 
 `push` builds the web app and the views locally, waits for cloud-init, copies the worktree with rsync (without `.git`, `node_modules`, `.env*` and `infra/`), writes `/etc/trusted-trade.env` and the Caddyfile, installs dependencies, restarts the service and waits for `/api/health`. The server runs from source with `bun apps/api/src/main.ts` and migrates on start.
 
-`reset --yes` replaces the hosted demo data. It drops only the tables, enum types and migration records of our contexts, because the TimescaleDB extension lives in the hosted `public` schema; then it migrates and seeds like `bun run db:reset`.
+`reset --yes` replaces the hosted demo data. It drops only the tables and types that each context's migrations create, and their migration records, because the TimescaleDB extension lives in the hosted `public` schema. It uses no CASCADE and runs in one transaction, so a foreign object that depends on ours aborts the reset before anything is dropped. Then it migrates and seeds like `bun run db:reset`, with the keys from `.env.deploy`, so the seeded mandate verifies on the host.
 
 The URL is `tofu -chdir=infra output -raw public_base_url`: `https://<ip>.sslip.io`, or `https://<domain>` with `TF_VAR_domain` and a DNS A record to `public_ip`. Connect the host to `<url>/mcp`.
 

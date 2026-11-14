@@ -28,14 +28,17 @@ export const parseEnv = (text: string): Map<string, string> =>
       }),
   );
 
-/** A systemd EnvironmentFile; single quotes keep JSON keys literal. */
-export const renderEnvFile = (outputs: Outputs, secrets: ReadonlyMap<string, string>): string => {
+/** The hosted environment: the signing keys and settings that both the server and a reset use. */
+export const deployEnv = (
+  outputs: Outputs,
+  secrets: ReadonlyMap<string, string>,
+): Map<string, string> => {
   const missing = SECRET_NAMES.filter((name) => !secrets.has(name));
   if (missing.length > 0)
     throw new Error(
       `${SECRETS_FILE} lacks ${missing.join(", ")}. Run: bun scripts/generate-keys.ts > ${SECRETS_FILE}`,
     );
-  const values = new Map<string, string>([
+  return new Map<string, string>([
     ...secrets,
     ["NODE_ENV", "production"],
     ["PORT", String(outputs.app_port)],
@@ -44,6 +47,10 @@ export const renderEnvFile = (outputs: Outputs, secrets: ReadonlyMap<string, str
     ["PUBLIC_BASE_URL", outputs.public_base_url],
     ["DATABASE_URL", outputs.database_url],
   ]);
+};
+
+/** A systemd EnvironmentFile; single quotes keep JSON keys literal. */
+export const renderEnvFile = (values: ReadonlyMap<string, string>): string => {
   return `${[...values]
     .map(([name, value]) => {
       if (/['\n]/.test(value)) throw new Error(`${name} contains a quote or a newline`);
@@ -97,10 +104,25 @@ const waitForHealth = async (url: string): Promise<void> => {
   throw new Error(`${url}/api/health did not answer 200 within two minutes`);
 };
 
-const push = async (outputs: Outputs): Promise<void> => {
+const loadDeployEnv = async (outputs: Outputs): Promise<Map<string, string>> => {
   if (!existsSync(SECRETS_FILE))
     throw new Error(`Create ${SECRETS_FILE}: bun scripts/generate-keys.ts > ${SECRETS_FILE}`);
-  const envFile = renderEnvFile(outputs, parseEnv(await Bun.file(SECRETS_FILE).text()));
+  return deployEnv(outputs, parseEnv(await Bun.file(SECRETS_FILE).text()));
+};
+
+/** A reset runs here, with the hosted keys, against the checkout's own contexts. */
+export const resetEnv = (
+  hosted: ReadonlyMap<string, string>,
+  local: Readonly<Record<string, string | undefined>>,
+  checkout: string,
+): Record<string, string | undefined> => ({
+  ...local,
+  ...Object.fromEntries(hosted),
+  APP_ROOT: checkout,
+});
+
+const push = async (outputs: Outputs): Promise<void> => {
+  const envFile = renderEnvFile(await loadDeployEnv(outputs));
   const host = `root@${outputs.public_ip}`;
   await $`bun scripts/production.ts --build-only`;
   await $`ssh ${SSH} ${host} cloud-init status --wait`.quiet();
@@ -114,10 +136,8 @@ const push = async (outputs: Outputs): Promise<void> => {
 const reset = async (outputs: Outputs): Promise<void> => {
   if (!process.argv.includes("--yes"))
     throw new Error("reset replaces the hosted demo data. Re-run with reset --yes.");
-  await $`bun apps/api/src/remote-reset.ts --yes`.env({
-    ...process.env,
-    DATABASE_URL: outputs.database_url,
-  });
+  const hosted = await loadDeployEnv(outputs);
+  await $`bun apps/api/src/remote-reset.ts --yes`.env(resetEnv(hosted, process.env, process.cwd()));
 };
 
 if (import.meta.main) {

@@ -11,10 +11,12 @@ import { badRequestEnvelope, type ContextModule, type Db } from "@app/server-kit
 import { Elysia } from "elysia";
 import {
   currentMandate,
+  type MandateSigner,
   type MandateStore,
   registerMandate,
   revokeMandate,
 } from "../application/mandates.ts";
+import { buyerSigner } from "../infra/buyer-key.ts";
 import { postgresMandateStore } from "../infra/mandate-store.ts";
 import { seed } from "./seed.ts";
 
@@ -28,7 +30,11 @@ const notFound = (message: string) => ({ error: { code: "NOT_FOUND" as const, me
 
 const found = { 200: StoredMandateSchema, 404: ErrorEnvelopeSchema };
 
-export const createApi = (db: Db, now: () => Date = () => new Date()) => {
+export const createApi = (
+  db: Db,
+  now: () => Date = () => new Date(),
+  sign: MandateSigner = buyerSigner(),
+) => {
   const store: MandateStore = postgresMandateStore(db);
   return new Elysia({ prefix: "/mandates" })
     .use(badRequestEnvelope())
@@ -38,9 +44,19 @@ export const createApi = (db: Db, now: () => Date = () => new Date()) => {
     })
     .post(
       "/",
-      { body: RegisterMandateRequestSchema, response: { 201: StoredMandateSchema } },
-      async ({ body, request, status }) =>
-        status(201, await registerMandate(store, await principalFrom(request), body, now())),
+      {
+        body: RegisterMandateRequestSchema,
+        response: { 200: StoredMandateSchema, 201: StoredMandateSchema },
+      },
+      async ({ body, request, status }) => {
+        const { stored, replayed } = await registerMandate(
+          { store, sign },
+          await principalFrom(request),
+          body,
+          now(),
+        );
+        return replayed ? stored : status(201, stored);
+      },
     )
     .post(
       "/:mandateId/revoke",

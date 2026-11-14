@@ -1,8 +1,10 @@
 import { SQL } from "bun";
 import { expect, test } from "bun:test";
 import { DEMO_ACCOUNT, fixtures, type StoredMandate, StoredMandateSchema } from "@app/contract";
+import { verifyMandate } from "@app/contract/server";
 import { closeDb, type Db, env, mountContext, openDb } from "@app/server-kit";
 import type { AnyElysia } from "elysia";
+import { buyerSigner } from "../infra/buyer-key.ts";
 import { context, createApi } from "./index.ts";
 
 const withDatabase = async (run: (db: Db) => Promise<void>): Promise<void> => {
@@ -32,11 +34,28 @@ const withDatabase = async (run: (db: Db) => Promise<void>): Promise<void> => {
   }
 };
 
-/** Mounts the context with migrations and a clock the test moves. */
+const buyerKey: JsonWebKey = {
+  ...(await crypto.subtle.exportKey(
+    "jwk",
+    (
+      await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+        "sign",
+        "verify",
+      ])
+    ).privateKey,
+  )),
+  alg: "ES256",
+};
+
+/** The register fixture without an operationId, so each register stores a new mandate. */
+const { operationId: _operationId, ...request } = fixtures.registerMandateRequest;
+
+/** Mounts the context with migrations, a clock the test moves and a test buyer key. */
 const mount = async (db: Db) => {
   await mountContext(db, context);
   const clock = { now: new Date("2026-11-14T10:00:00Z") };
-  return { app: createApi(db, () => clock.now), clock };
+  const sign = buyerSigner(async () => buyerKey);
+  return { app: createApi(db, () => clock.now, sign), clock };
 };
 
 const call = (app: AnyElysia, method: string, path: string, body?: object) =>
@@ -49,7 +68,7 @@ const call = (app: AnyElysia, method: string, path: string, body?: object) =>
     }),
   );
 
-const register = async (app: AnyElysia, body: object = fixtures.registerMandateRequest) => {
+const register = async (app: AnyElysia, body: object = request) => {
   const response = await call(app, "POST", "", body);
   expect(response.status).toBe(201);
   return StoredMandateSchema.parse(await response.json());
@@ -74,7 +93,7 @@ test("register revokes the previous mandate, gives version + 1 and a new mandate
       signedBy: DEMO_ACCOUNT.accountId,
     });
     expect(second.mandate.mandateId).not.toBe(first.mandate.mandateId);
-    expect(second).toMatchObject({ status: "active", jws: null });
+    expect(second.status).toBe("active");
     expect(await current(app)).toEqual(second);
     const revoked = await call(app, "POST", `/${first.mandate.mandateId}/revoke`);
     expect(await revoked.json()).toMatchObject({ status: "revoked" });
@@ -84,8 +103,8 @@ test("two parallel registers leave one active mandate", async () =>
   withDatabase(async (db) => {
     const { app } = await mount(db);
     const responses = await Promise.all([
-      call(app, "POST", "", fixtures.registerMandateRequest),
-      call(app, "POST", "", fixtures.registerMandateRequest),
+      call(app, "POST", "", request),
+      call(app, "POST", "", request),
     ]);
     expect(responses.map((response) => response.status)).toEqual([201, 201]);
     const stored = await Promise.all(
@@ -108,7 +127,7 @@ test("after revoke, GET current gives 404; an expired mandate is not current", a
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
 
-    const second = await register(app, { ...fixtures.registerMandateRequest, exp: undefined });
+    const second = await register(app, { ...request, exp: undefined });
     expect(second.mandate.version).toBe(2);
     expect(await current(app)).toEqual(second);
     clock.now = new Date(second.mandate.exp * 1000);
@@ -142,7 +161,7 @@ test("a body with iss, agent, signedBy, mandateId, version, iat or customer give
     const { app } = await mount(db);
     for (const [key, value] of Object.entries(forbidden)) {
       const response = await call(app, "POST", "", {
-        ...fixtures.registerMandateRequest,
+        ...request,
         [key]: value,
       });
       expect({ key, status: response.status, body: await response.json() }).toEqual({
@@ -169,4 +188,80 @@ test("seed registers the demo mandate as version 1 of the demo agent", async () 
         limits: { maxOrderTotal: { value: 1000, currency: "EUR", basis: "gross" } },
       },
     });
+  }));
+
+const payloadOf = (jws: string): unknown => {
+  const [, payload] = jws.split(".");
+  return JSON.parse(Buffer.from(payload ?? "", "base64url").toString());
+};
+
+test("register stores a jws that decodes to exactly the stored mandate, including the server-set mandateId, version and iat", async () =>
+  withDatabase(async (db) => {
+    const { app } = await mount(db);
+    await register(app);
+    const stored = await register(app);
+    if (stored.jws === null) throw new Error("expected a jws");
+    expect(payloadOf(stored.jws)).toEqual(stored.mandate);
+    expect(stored.mandate.version).toBe(2);
+    expect(await current(app)).toEqual(stored);
+  }));
+
+test("verifyMandate of the stored jws succeeds; a tampered stored jws fails", async () =>
+  withDatabase(async (db) => {
+    const { app } = await mount(db);
+    const { jws, mandate } = await register(app);
+    if (jws === null) throw new Error("expected a jws");
+    const { d: _d, ...publicKey } = buyerKey;
+    expect(await verifyMandate(jws, publicKey)).toEqual({ ok: true, value: mandate });
+    const [header, , signature] = jws.split(".");
+    const raised = {
+      ...mandate,
+      limits: { ...mandate.limits, maxOrderTotal: { ...mandate.limits.maxOrderTotal, value: 1e6 } },
+    };
+    const tampered = `${header}.${Buffer.from(JSON.stringify(raised)).toString("base64url")}.${signature}`;
+    expect(await verifyMandate(tampered, publicKey)).toEqual({
+      ok: false,
+      error: "MANDATE_INVALID",
+    });
+  }));
+
+test("two registers with one operationId store one mandate and return it twice, the second with 200", async () =>
+  withDatabase(async (db) => {
+    const { app } = await mount(db);
+    const body = { ...request, operationId: "op_once" };
+    const first = await call(app, "POST", "", body);
+    expect(first.status).toBe(201);
+    const stored = StoredMandateSchema.parse(await first.json());
+    const again = await call(app, "POST", "", {
+      ...body,
+      limits: { ...request.limits, newProducts: "auto" },
+    });
+    expect(again.status).toBe(200);
+    expect(StoredMandateSchema.parse(await again.json())).toEqual(stored);
+    expect(await current(app)).toEqual(stored);
+    const rows = await db.$client`select count(*)::int as n from mandates_mandates`;
+    expect(rows).toEqual([{ n: 1 }]);
+  }));
+
+test("parallel registers with one operationId store one mandate", async () =>
+  withDatabase(async (db) => {
+    const { app } = await mount(db);
+    const body = { ...request, operationId: "op_parallel" };
+    const responses = await Promise.all([call(app, "POST", "", body), call(app, "POST", "", body)]);
+    expect(responses.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
+      200, 201,
+    ]);
+    const bodies = await Promise.all(responses.map(async (response) => response.json()));
+    expect(bodies[0]).toEqual(bodies[1]);
+    const rows = await db.$client`select count(*)::int as n from mandates_mandates`;
+    expect(rows).toEqual([{ n: 1 }]);
+  }));
+
+test("a body with a jws field gives 400", async () =>
+  withDatabase(async (db) => {
+    const { app } = await mount(db);
+    const response = await call(app, "POST", "", { ...request, jws: "a.b.c" });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    expect(await current(app)).toBe(404);
   }));

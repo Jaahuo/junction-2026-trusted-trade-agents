@@ -1,6 +1,7 @@
 import { DEMO_ACCOUNT, type RegisterMandateRequest } from "@app/contract";
 import type { Db } from "@app/server-kit";
 import { registerMandate } from "../application/mandates.ts";
+import { buyerSigner } from "../infra/buyer-key.ts";
 import { postgresMandateStore } from "../infra/mandate-store.ts";
 
 /** The demo mandate of SPEC-015. */
@@ -19,5 +20,10 @@ const demoMandateRequest: RegisterMandateRequest = {
 };
 
 export const seed = async (db: Db): Promise<void> => {
-  await registerMandate(postgresMandateStore(db), DEMO_ACCOUNT, demoMandateRequest, new Date());
+  await registerMandate(
+    { store: postgresMandateStore(db), sign: buyerSigner() },
+    DEMO_ACCOUNT,
+    demoMandateRequest,
+    new Date(),
+  );
 };

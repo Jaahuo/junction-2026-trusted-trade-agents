@@ -16,6 +16,16 @@ import {
   Th,
   toast,
 } from "@app/ui";
+import {
+  ORDER_ACTIONS,
+  ORDER_OUTCOMES,
+  ORDER_STATUS_LABELS,
+  ORDER_TERMS,
+  formatDeliveryDate,
+  formatMoney,
+  formatOrderNumber,
+  formatQuantity,
+} from "@app/ui/format";
 import { apiUrl, type Screen } from "@app/web-kit";
 import { treaty } from "@elysia/eden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -33,29 +43,25 @@ const failures: Record<string, string> = {
 };
 const explain = (code: string): string => failures[code] ?? "The decision could not be saved.";
 
-const euro = (value: number): string =>
-  new Intl.NumberFormat("en-FI", { style: "currency", currency: "EUR" }).format(value);
-
 const pageOf = (orderId: string): string => `/approvals?order=${encodeURIComponent(orderId)}`;
 
 const statusBadge: Record<
   Order["status"],
   { tone: "info" | "success" | "warning" | "danger"; text: string }
 > = {
-  pending_approval: { tone: "warning", text: "Waiting for approval" },
-  awaiting_payment: { tone: "info", text: "Awaiting payment" },
-  placed: { tone: "success", text: "Placed" },
-  rejected: { tone: "danger", text: "Rejected" },
-  declined: { tone: "danger", text: "Declined" },
+  pending_approval: { tone: "warning", text: ORDER_STATUS_LABELS.pending_approval },
+  awaiting_payment: { tone: "info", text: ORDER_STATUS_LABELS.awaiting_payment },
+  placed: { tone: "success", text: ORDER_STATUS_LABELS.placed },
+  rejected: { tone: "danger", text: ORDER_STATUS_LABELS.rejected },
+  declined: { tone: "danger", text: ORDER_STATUS_LABELS.declined },
 };
 
 function Reasons({ order }: { order: Order }) {
   return (
     <ul className="flex flex-col gap-2">
       {order.reasons.map((reason) => (
-        <li key={reason} className="flex flex-col gap-0.5">
+        <li key={reason} className="flex flex-col gap-0.5" title={reason}>
           <span className="font-medium">{REASON_TEXT[reason]}</span>
-          <span className="text-sm text-muted">{reason}</span>
         </li>
       ))}
     </ul>
@@ -77,11 +83,9 @@ function Lines({ order }: { order: Order }) {
         {order.lines.map(({ offerId, claims }) => (
           <tr key={offerId}>
             <Td>{claims.product.name}</Td>
-            <Td>
-              {claims.quantity.value} {claims.quantity.unit}
-            </Td>
-            <Td>{claims.deliveryDate}</Td>
-            <Td>{euro(claims.total.gross)}</Td>
+            <Td title={claims.quantity.unit}>{formatQuantity(claims.quantity)}</Td>
+            <Td>{formatDeliveryDate(claims.deliveryDate)}</Td>
+            <Td>{formatMoney(claims.total.gross, claims.unitPrice.currency, "gross")}</Td>
           </tr>
         ))}
       </tbody>
@@ -92,23 +96,25 @@ function Lines({ order }: { order: Order }) {
 function Outcome({ order }: { order: Order }) {
   if (order.status === "placed")
     return (
-      <Alert tone="success" title="Approved and placed">
-        The order is placed at the offered price and delivery date.
+      <Alert tone="success" title={ORDER_STATUS_LABELS.placed}>
+        {ORDER_OUTCOMES.placed}
       </Alert>
     );
   if (order.status === "declined")
     return (
       <Alert tone="warning" title="Declined">
         {order.decision?.next === "alternatives"
-          ? "The agent may look for alternatives."
-          : "The agent stops and tells the buyer."}
+          ? ORDER_OUTCOMES.alternatives
+          : ORDER_OUTCOMES.stop}
         {order.decision?.note ? ` Note: ${order.decision.note}` : ""}
       </Alert>
     );
   if (order.status === "rejected")
     return (
       <Alert tone="danger" title="Rejected">
-        {order.reasons.map((reason) => REASON_TEXT[reason]).join(" ")}
+        <span title={order.reasons.join(", ")}>
+          {order.reasons.map((reason) => REASON_TEXT[reason]).join(" ")}
+        </span>
       </Alert>
     );
   return null;
@@ -127,7 +133,10 @@ function OrderReview({ orderId }: { orderId: string }) {
     queryKey,
     queryFn: async () => {
       const { data, error } = await api.orders({ orderId }).get();
-      if (error) return null;
+      if (error) {
+        if (error.status === 404) return null;
+        throw new Error("Unable to load the order.");
+      }
       return data;
     },
   });
@@ -151,6 +160,12 @@ function OrderReview({ orderId }: { orderId: string }) {
   });
 
   if (order.isPending) return <Spinner />;
+  if (order.isError)
+    return (
+      <Alert tone="danger" title="Could not load order">
+        Please try again later.
+      </Alert>
+    );
   const current = order.data;
   if (!current)
     return (
@@ -182,8 +197,8 @@ function OrderReview({ orderId }: { orderId: string }) {
           <Badge tone={badge.tone}>{badge.text}</Badge>
         </div>
         <p className="text-sm text-muted">
-          {euro(current.total.gross)} incl. VAT ·{" "}
-          {current.paymentTerms === "invoice" ? "Invoice" : "Pay on order"}
+          {formatMoney(current.total.gross, "EUR", "gross")} ·{" "}
+          {current.paymentTerms === "invoice" ? "Invoice" : ORDER_TERMS.paymentOnOrder}
         </p>
       </Card>
       <Outcome order={current} />
@@ -215,7 +230,7 @@ function OrderReview({ orderId }: { orderId: string }) {
                   setConfirmStop(true);
                 }}
               >
-                Reject and stop
+                {ORDER_ACTIONS.rejectStop}
               </Button>
               <Button
                 variant="secondary"
@@ -224,7 +239,7 @@ function OrderReview({ orderId }: { orderId: string }) {
                   send({ decision: "reject", next: "alternatives" });
                 }}
               >
-                Reject, allow alternatives
+                {ORDER_ACTIONS.rejectAlternatives}
               </Button>
               <Button
                 loading={decide.isPending}
@@ -232,7 +247,7 @@ function OrderReview({ orderId }: { orderId: string }) {
                   send({ decision: "approve" });
                 }}
               >
-                Approve
+                {ORDER_ACTIONS.approve}
               </Button>
             </div>
           </div>
@@ -243,7 +258,7 @@ function OrderReview({ orderId }: { orderId: string }) {
         onClose={() => {
           setConfirmStop(false);
         }}
-        title="Reject and stop?"
+        title={`${ORDER_ACTIONS.rejectStop}?`}
         footer={
           <>
             <Button
@@ -261,12 +276,12 @@ function OrderReview({ orderId }: { orderId: string }) {
                 send({ decision: "reject", next: "stop" });
               }}
             >
-              Reject and stop
+              {ORDER_ACTIONS.rejectStop}
             </Button>
           </>
         }
       >
-        The order is declined and the agent stops looking for this purchase.
+        {ORDER_OUTCOMES.stop}
       </Dialog>
     </div>
   );
@@ -275,14 +290,24 @@ function OrderReview({ orderId }: { orderId: string }) {
 function PendingOrders() {
   const pending = useQuery({
     queryKey: ["orders", "pending"],
-    queryFn: async () => (await api.orders.pending.get()).data?.orders ?? [],
+    queryFn: async () => {
+      const { data, error } = await api.orders.pending.get();
+      if (error) throw new Error("Unable to load orders.");
+      return data.orders;
+    },
   });
   if (pending.isPending) return <Spinner />;
+  if (pending.isError)
+    return (
+      <Alert tone="danger" title="Could not load orders">
+        Please try again later.
+      </Alert>
+    );
   if (!pending.data || pending.data.length === 0)
     return (
       <EmptyState
         title="No orders wait for approval"
-        description="When an agent's order breaks a limit, it appears here for a decision."
+        description={`When an agent's order breaks an ${ORDER_TERMS.limit.toLowerCase()}, it appears here for a decision.`}
       />
     );
   return (
@@ -299,9 +324,11 @@ function PendingOrders() {
         <tbody>
           {pending.data.map((order) => (
             <tr key={order.orderId}>
-              <Td>{order.originalRequest ?? order.orderId}</Td>
-              <Td>{euro(order.total.gross)}</Td>
-              <Td>{order.reasons.map((reason) => REASON_TEXT[reason]).join(" ")}</Td>
+              <Td>{order.originalRequest ?? formatOrderNumber(order.orderId)}</Td>
+              <Td>{formatMoney(order.total.gross, "EUR", "gross")}</Td>
+              <Td title={order.reasons.join(", ")}>
+                {order.reasons.map((reason) => REASON_TEXT[reason]).join(" ")}
+              </Td>
               <Td>
                 <a className="text-primary" href={pageOf(order.orderId)}>
                   Review
@@ -321,7 +348,7 @@ function ApprovalsScreen() {
     <>
       <PageHeader
         title="Approvals"
-        description="Orders that broke a limit wait here for a human decision."
+        description={`Orders that exceed an ${ORDER_TERMS.limit.toLowerCase()} wait here for a human decision.`}
       />
       {orderId === null ? <PendingOrders /> : <OrderReview orderId={orderId} />}
     </>

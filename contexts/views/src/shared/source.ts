@@ -4,10 +4,6 @@ import { fixtureSource, hostSource, plainSource, type Source, type ViewName } fr
 
 export type { Source } from "./bridge.ts";
 
-/** The server's public base URL, which the API writes into each view it serves. */
-const baseUrl = () =>
-  document.querySelector<HTMLMetaElement>('meta[name="tt-base-url"]')?.content ?? location.origin;
-
 /** Host mode: the MCP Apps bridge (SPEC-013). */
 function bridgeSource(view: ViewName): Source {
   const app = new App({ name: `trusted-trade-${view}`, version: "1.0.0" });
@@ -48,9 +44,11 @@ export function sourceFor(view: ViewName): Source {
   if (window.parent === window) {
     const entry = VIEWS.find((candidate) => candidate.view === view);
     const query = new URLSearchParams(location.search);
+    // A page opened in the browser calls the API on its own origin (the API, or the web app's
+    // proxy), which stays right even when PUBLIC_BASE_URL points elsewhere.
     const source = plainSource(view, {
       fetch: (url, init) => fetch(url, init),
-      baseUrl: baseUrl(),
+      baseUrl: location.origin,
       query,
     });
     if (

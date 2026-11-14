@@ -640,8 +640,8 @@ export const VIEWS = [
     view: "approval-card",
     uri: "ui://trusted-trade/approval-card",
     tools: ["place_order", "list_pending_approvals"],
-    plainQuery: null,
-    plainLoad: null,
+    plainQuery: "order",
+    plainLoad: "status",
     actions: ["decide_approval"],
   },
   {
@@ -681,11 +681,11 @@ export const VIEWS = [
 
 - The `structuredContent` of a tool is the only input of its view. A view parses it with `TOOL_OUTPUT`; a failed parse, or a result with `isError: true` and no `structuredContent` (SPEC-012), shows the error state.
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
-- Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. The approval card has no plain mode; its plain counterpart is the approval page.
+- Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
 - The approval card shows a link to `approvalUrl` in every pending state.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
 - Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
-- The approval page is the screen `/approvals/<orderId>` of the orders context: one plain page with the approval actions, for unattended runs and hosts without Apps. The Apps approval card is the in-chat view; both call the same decision route (SPEC-011).
+- The approval page is the screen `/approvals` of the orders context: the list of open orders, for unattended runs and hosts without Apps. Each order opens the approval card's plain page; `/approvals?order=<id>` (the `approvalUrl`) forwards there. The card calls the same decision route in the chat and on its page (SPEC-011).
 
 ## SPEC-014 Discovery and OpenAPI
 

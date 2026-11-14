@@ -1,12 +1,16 @@
 import { expect, test } from "bun:test";
-import { OrderSchema } from "@app/contract";
+import { type Order, OrderSchema } from "@app/contract";
+import pendingLate from "../../../fixtures/approval-card/pending-late.json";
+import pendingPartial from "../../../fixtures/approval-card/pending-partial.json";
 import pending from "../../../fixtures/approval-card/pending.json";
 import trust from "../../../fixtures/approval-card/pending-trust.json";
 import mismatch from "../../../fixtures/approval-card/placed-mismatch.json";
 import signed from "../../../fixtures/approval-card/placed-signed.json";
 import unsigned from "../../../fixtures/approval-card/placed-unsigned.json";
-import { setLang } from "../../shared/locale.ts";
-import { ApprovalCard } from "./approval-card.ts";
+import { pick, setLang } from "../../shared/locale.ts";
+import { ApprovalCard, reasonSummaries } from "./approval-card.ts";
+import { CARD } from "./card-strings.ts";
+import { amount, day } from "./parts.ts";
 
 const isTemplate = (value: unknown): value is { strings: readonly string[]; values: unknown[] } =>
   typeof value === "object" &&
@@ -37,6 +41,117 @@ const clickHandler = (value: unknown, marker: string): (() => void) | undefined 
   }
   return undefined;
 };
+
+/** The rendered text and attribute values of a template, in order, without a DOM. */
+const flatten = (value: unknown): string => {
+  if (Array.isArray(value)) return value.map(flatten).join("");
+  if (isTemplate(value))
+    return value.strings.map((part, i) => part + flatten(value.values[i])).join("");
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+};
+
+/** A pending card for `order` that records the events it sends. */
+const cardFor = (order: Order) => {
+  const card = new ApprovalCard();
+  card.order = order;
+  card.canAsk = true;
+  const sent: { type: string; detail: unknown }[] = [];
+  card.dispatchEvent = (event: Event) => {
+    if (event instanceof CustomEvent) sent.push({ type: event.type, detail: event.detail });
+    return true;
+  };
+  return { card, sent };
+};
+
+const firstClaims = (order: Order) => {
+  const line = order.lines[0];
+  if (line === undefined) throw new Error("the fixture has a line");
+  return line.claims;
+};
+
+test("a line with a shortfall gets a to-do naming the amount short, linked to its choices", () => {
+  const text = pick(CARD);
+  const order = OrderSchema.parse(pendingPartial);
+  const c = firstClaims(order);
+  if (c.shortfall === null) throw new Error("the partial fixture's first line is short");
+  const shown = flatten(cardFor(order).card.render());
+
+  expect(shown).toContain(text.shortForDelivery(amount(c.shortfall)));
+  expect(shown).toContain(text.chooseHowToHandle);
+  expect(shown).toContain(text.howToHandle(amount(c.shortfall)));
+  expect(shown).toContain(`id="line-${c.offerId}"`);
+  expect(shown).not.toContain(text.checkYouWantProduct);
+  expect(reasonSummaries(order)).toEqual([text.notAllOnTime(c.product.name)]);
+});
+
+test("a late line with no shortfall is flagged and gets a to-do naming the delivery date", () => {
+  const text = pick(CARD);
+  const order = OrderSchema.parse(pendingLate);
+  const c = firstClaims(order);
+  const shown = flatten(cardFor(order).card.render());
+
+  expect(shown).toContain(text.arrivesOn(day(c.deliveryDate), day(c.requestedDate)));
+  expect(shown).toContain(text.approveOrRemove);
+  expect(shown).toContain('class="product flagged"');
+  expect(shown).toContain(text.letAgentFindOnTime);
+  expect(shown).not.toContain("short for this delivery");
+  expect(reasonSummaries(order)).toEqual([text.arrivesLateNamed(c.product.name)]);
+});
+
+test("a line that is late and short gets one to-do per case", () => {
+  const text = pick(CARD);
+  const order = OrderSchema.parse(pendingPartial);
+  const c = firstClaims(order);
+  if (c.shortfall === null) throw new Error("the partial fixture's first line is short");
+  c.deliveryDate = "2026-11-18";
+  const shown = flatten(cardFor(order).card.render());
+
+  expect(shown).toContain(text.shortForDelivery(amount(c.shortfall)));
+  expect(shown).toContain(text.arrivesOn(day(c.deliveryDate), day(c.requestedDate)));
+});
+
+test("a late line's choices send approve, remove or the agent prompt", () => {
+  const text = pick(CARD);
+  const order = OrderSchema.parse(pendingLate);
+  const c = firstClaims(order);
+
+  const approving = cardFor(order);
+  const approve = clickHandler(approving.card.render(), 'part="button approve"');
+  if (approve === undefined) throw new Error("the pending card shows the approve button");
+  approve();
+  expect(approving.sent).toEqual([
+    { type: "tt-decide", detail: { decision: "approve", proposalVersion: order.proposalVersion } },
+  ]);
+
+  const removing = cardFor(order);
+  const remove = clickHandler(removing.card.render(), 'class="link-button"');
+  if (remove === undefined) throw new Error("the late line shows its remove button");
+  remove();
+  const confirm = clickHandler(removing.card.render(), 'part="button approve"');
+  if (confirm === undefined) throw new Error("the pending card shows the approve button");
+  confirm();
+  expect(removing.sent).toEqual([
+    {
+      type: "tt-confirm-changes",
+      detail: {
+        decision: "edit",
+        proposalVersion: order.proposalVersion,
+        changes: [{ productId: c.productId, quantity: { value: 0, unit: c.quantity.unit } }],
+      },
+    },
+  ]);
+
+  const asking = cardFor(order);
+  const ask = clickHandler(asking.card.render(), 'class="btn secondary"');
+  if (ask === undefined) throw new Error("the late line shows the agent help");
+  ask();
+  expect(asking.sent).toEqual([
+    {
+      type: "tt-ask-agent",
+      detail: text.latePrompt(c.product.name, day(c.requestedDate), day(c.deliveryDate)),
+    },
+  ]);
+});
 
 test("the talk button sends a complete request that names the order id", () => {
   const order = OrderSchema.parse(pending);

@@ -144,8 +144,11 @@ const substitutionOf = (order: Order, c: OfferClaims): Substitution | null => {
   const proposed = alternatives.filter((a) => a.replaces === c.productId);
   return proposed.length === 0 ? null : { original: c, options: proposed };
 };
+/** A line that arrives after the requested date (`AVAILABILITY_DIFFERS`). */
+const isLate = (c: OfferClaims) => c.deliveryDate > c.requestedDate;
 const until = (c: OfferClaims) => (c.nextDeliveryDate === null ? null : day(c.nextDeliveryDate));
 const outOfStock = (c: OfferClaims) => pick(CARD).outOfStock(until(c));
+const names = (lines: OfferClaims[]) => lines.map((c) => c.product.name).join(", ");
 /**
  * What needs a decision, one short line per reason, naming the product where there is one
  * ("Out of stock: …", "New product: …"), for the list of open orders.
@@ -153,21 +156,26 @@ const outOfStock = (c: OfferClaims) => pick(CARD).outOfStock(until(c));
 export function reasonSummaries(order: Order): string[] {
   const text = pick(CARD);
   const claims = order.lines.map((l) => l.claims);
-  return order.reasons.map((r) => {
+  return order.reasons.flatMap((r) => {
     if (r === "SUBSTITUTION") {
-      const names = claims.flatMap((c) => {
+      const replaced = claims.flatMap((c) => {
         const sub = substitutionOf(order, c);
-        return sub === null ? [] : [(sub.original ?? c).product.name];
+        return sub === null ? [] : [sub.original ?? c];
       });
-      return text.outOfStockNamed(names.join(", "));
+      return [text.outOfStockNamed(names(replaced))];
     }
-    if (r === "UNCONFIRMED_STOCK") {
-      const short = claims.find((c) => c.shortfall !== null);
-      if (short !== undefined) return text.notAllOnTime(short.product.name);
+    if (r === "AVAILABILITY_DIFFERS") {
+      const short = claims.filter((c) => c.shortfall !== null);
+      const late = claims.filter((c) => c.shortfall === null && isLate(c));
+      const named = [
+        ...(short.length === 0 ? [] : [text.notAllOnTime(names(short))]),
+        ...(late.length === 0 ? [] : [text.arrivesLateNamed(names(late))]),
+      ];
+      if (named.length > 0) return named;
     }
     const title = reasonCopy(r, order, claims[0]).title;
-    const named = linesFor(order, r).map((c) => c.product.name);
-    return named.length === 0 ? title : `${title}: ${named.join(", ")}`;
+    const named = linesFor(order, r);
+    return [named.length === 0 ? title : `${title}: ${names(named)}`];
   });
 }
 /** The order line (with the agent's rationale and allergens) that carries these claims. */
@@ -347,6 +355,9 @@ export class ApprovalCard extends LitElement {
         margin: var(--spacing-md) 0;
         padding: var(--spacing-lg);
         border: 2px solid var(--color-border-brand);
+      }
+      .product.flagged > .link-button {
+        align-self: flex-start;
       }
       .agent-help {
         display: flex;
@@ -914,18 +925,39 @@ export class ApprovalCard extends LitElement {
         case "NEW_PRODUCT":
           return productTodos(r, text.newNotOrdered);
         case "UNCONFIRMED_STOCK": {
-          const c = lines.find((l) => l.shortfall !== null || l.stock === "unconfirmed");
+          const c = lines.find((l) => l.stock === "unconfirmed");
           return [
             {
               where: c?.product.name ?? text.stock,
               target: c === undefined ? "products" : lineId(c),
-              reason:
-                c?.shortfall == null
-                  ? text.stockIsNotConfirmed
-                  : text.shortForDelivery(amount(c.shortfall)),
+              reason: text.stockIsNotConfirmed,
               action: text.checkAmount,
             },
           ];
+        }
+        case "AVAILABILITY_DIFFERS": {
+          // One to-do per case: a line can be both short and late.
+          const todos: Todo[] = [];
+          for (const c of lines) {
+            if (this.quantity(c) === 0) continue;
+            const where = c.product.name;
+            const target = lineId(c);
+            if (c.shortfall !== null)
+              todos.push({
+                where,
+                target,
+                reason: text.shortForDelivery(amount(c.shortfall)),
+                action: text.chooseHowToHandle,
+              });
+            if (isLate(c))
+              todos.push({
+                where,
+                target,
+                reason: text.arrivesOn(day(c.deliveryDate), day(c.requestedDate)),
+                action: text.approveOrRemove,
+              });
+          }
+          return todos.length === 0 ? [generic] : todos;
         }
         default:
           return productTodos(r, reasonCopy(r, order, lines[0]).title);
@@ -1068,7 +1100,7 @@ export class ApprovalCard extends LitElement {
         ...(head.nextDeliveryDate === null ? [] : [text.waitUntil(day(head.nextDeliveryDate))]),
       ])}`;
     }
-    if (c.shortfall === null) return nothing;
+    if (c.shortfall === null) return isLate(c) ? this.lateDecision(c) : nothing;
     const pack = c.product.perSalesUnit;
     const later = c.nextDeliveryDate;
     const packs = (q: number) => (pack === null ? amount(c.quantity) : text.packs(number(q)));
@@ -1153,6 +1185,28 @@ export class ApprovalCard extends LitElement {
           text.onlyPacks(packs(c.quantity.value)),
           text.anotherProduct,
         ],
+      )}`;
+  }
+
+  /** A late line: approving accepts its date; or remove it, or ask the agent for one on time. */
+  private lateDecision(c: OfferClaims) {
+    const text = pick(CARD);
+    const name = c.product.name;
+    return html`<p class="body-small">
+        ${text.arrivesOn(day(c.deliveryDate), day(c.requestedDate))}
+      </p>
+      <button
+        type="button"
+        class="link-button"
+        aria-label=${text.remove(name)}
+        @click=${() => this.setQuantity(c, 0)}
+      >
+        ${text.removeProduct}
+      </button>
+      ${this.agentHelp(
+        text.letAgentFindOnTime,
+        text.latePrompt(name, day(c.requestedDate), day(c.deliveryDate)),
+        [text.sameBrand, text.cheapest],
       )}`;
   }
 
@@ -1270,7 +1324,7 @@ export class ApprovalCard extends LitElement {
     const all = order.lines.map((l) => l.claims);
     const news = linesFor(order, "NEW_PRODUCT");
     const isFlagged = (c: OfferClaims) =>
-      pending && (substitutionOf(order, c) !== null || c.shortfall !== null);
+      pending && (substitutionOf(order, c) !== null || c.shortfall !== null || isLate(c));
     // A replaced product is shown at the top of its substitute's box, not as its own line.
     const replaced = new Set(all.map((c) => (isFlagged(c) ? c.replaces : null)));
     const kept = (c: OfferClaims) => this.quantity(c) > 0;

@@ -210,15 +210,18 @@ export const base = css`
     background-image: linear-gradient(
       90deg,
       transparent 0%,
+      transparent 15%,
       var(--shimmer-edge) 35%,
       var(--shimmer-sweep) 50%,
       var(--shimmer-edge) 65%,
+      transparent 85%,
       transparent 100%
     );
     background-size: 200vw 100%;
     background-repeat: repeat;
     background-attachment: fixed;
-    animation: shimmer 2.4s linear infinite;
+    animation: shimmer 4s linear infinite;
+    will-change: background-position;
   }
   /* A shimmer bar along the bottom of a header or strip while something loads. */
   .load-bar {

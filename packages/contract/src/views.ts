@@ -4,8 +4,8 @@ export const VIEWS = [
     view: "approval-card",
     uri: "ui://trusted-trade/approval-card",
     tools: ["place_order", "list_pending_approvals"],
-    plainQuery: null,
-    plainLoad: null,
+    plainQuery: "order",
+    plainLoad: "status",
     actions: ["decide_approval"],
   },
   {

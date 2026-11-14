@@ -5,7 +5,7 @@ import pendingFixture from "../../../fixtures/approval-card/pending.json";
 import placedFixture from "../../../fixtures/approval-card/placed.json";
 import { fixtureSource, type Source } from "../../shared/bridge.ts";
 import { ApprovalCard } from "./approval-card.ts";
-import { isNewer, onReturn, readCurrent, withCurrent } from "./current-state.ts";
+import { isFresh, isNewer, onReturn, readCurrent, withCurrent } from "./current-state.ts";
 import { clickHandler, markup } from "./template-walk.ts";
 
 type Template = { strings: readonly string[]; values: unknown[] };
@@ -146,4 +146,25 @@ test("the card re-reads when the tab shows again, once at a time, and not on win
   stop();
   page.dispatchEvent(new Event("visibilitychange"));
   expect(reads).toBe(2);
+});
+
+test("a result whose orders all changed in the last two minutes needs no re-read", () => {
+  const created = Date.parse(pending.createdAt);
+  const minute = 60_000;
+  expect(isFresh(pending, created + minute)).toBe(true);
+  expect(isFresh(pending, created + 3 * minute)).toBe(false);
+  expect(isFresh(pending, created - 3 * minute)).toBe(false);
+
+  const decidedNow = {
+    ...pending,
+    decision: {
+      action: "approve" as const,
+      next: null,
+      note: null,
+      by: "approver",
+      at: new Date(created + 10 * minute).toISOString(),
+    },
+  };
+  expect(isFresh(decidedNow, created + 11 * minute)).toBe(true);
+  expect(isFresh({ orders: [decidedNow, pending] }, created + 11 * minute)).toBe(false);
 });

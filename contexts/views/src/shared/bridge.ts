@@ -104,20 +104,32 @@ export function viewEntry<V extends ViewName>(view: V) {
 export function hostSource(host: Host): Source {
   const result = new Promise<unknown>((resolve) => host.onToolResult(resolve));
   const onToolInput = host.onToolInput;
+  // Open WebUI confirms each request and cancels one sent while a confirmation is open.
+  let queue = Promise.resolve();
+  const oneAtATime = <T>(run: () => Promise<T>) => {
+    const next = queue.then(run);
+    queue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
   return {
     ...(onToolInput === undefined
       ? {}
       : { input: new Promise<Record<string, unknown>>((resolve) => onToolInput(resolve)) }),
     load: () => result,
-    call: async (name, args) => {
-      const response = await host.callServerTool({ name, arguments: args });
-      // The server's reason ("OFFER_EXPIRED: …") is the error's text content.
-      if (response.isError === true) throw new Error(response.text ?? `${name} failed.`);
-      return response.structuredContent;
-    },
-    message: async (text) => {
-      if (!(await host.sendMessage(text))) throw new Error("The chat did not take the message.");
-    },
+    call: (name, args) =>
+      oneAtATime(async () => {
+        const response = await host.callServerTool({ name, arguments: args });
+        // The server's reason ("OFFER_EXPIRED: …") is the error's text content.
+        if (response.isError === true) throw new Error(response.text ?? `${name} failed.`);
+        return response.structuredContent;
+      }),
+    message: (text) =>
+      oneAtATime(async () => {
+        if (!(await host.sendMessage(text))) throw new Error("The chat did not take the message.");
+      }),
     context: (text) => host.updateModelContext(text),
   };
 }

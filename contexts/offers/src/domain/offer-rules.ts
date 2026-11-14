@@ -138,18 +138,21 @@ export function deliveryOnRequestedDate(
   };
 }
 
-/**
- * True when the product can arrive on or before the requested date and its order cut-off has not
- * passed. Stock is not checked: a product with partial stock still gets an offer with a shortfall.
- */
+// Positive partial stock remains eligible; the quote has no lot size to validate it against.
 export function isDeliverableBy(
   availability: AvailabilityQuote | undefined,
   deliverBy: string,
   now: Date,
 ): boolean {
-  if (availability === undefined || availabilityOmitReason(availability, 0) !== null) return false;
+  if (availability === undefined) return false;
   const dated = deliveryOnRequestedDate(availability, deliverBy);
-  if (dated.cutoffAt !== null && new Date(dated.cutoffAt) <= now) return false;
+  if (availabilityOmitReason(dated, 0) !== null) return false;
+  if (dated.stock === "confirmed" && dated.amount <= 0) return false;
+  if (
+    dated.cutoffAt !== null &&
+    new Date(dated.cutoffAt).getTime() <= Math.floor(now.getTime() / 1000) * 1000 + 999
+  )
+    return false;
   return dated.availableDate !== null && dated.availableDate <= deliverBy;
 }
 

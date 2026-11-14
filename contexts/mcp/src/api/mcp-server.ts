@@ -81,7 +81,7 @@ const GetSkillRequestSchema = z.object({
 
 const DESCRIPTIONS: Record<ToolName, string> = {
   search_products:
-    "Show the user candidate products for a structured need: search terms, hard constraints (allergens and free-from claims as free_from, vegan as yes) and soft constraints, a quantity with unit and a deliver-by date. Returns each candidate with a per-constraint match and the quantity in sales units, and opens the search results view. Use it when the user asks to see or browse products; when the user asks you to order, use find_products.",
+    "Show the user candidate products for a structured need: search terms, hard constraints (allergens and free-from claims as free_from, vegan as yes) and soft constraints, a quantity with unit and a deliver-by date. Search filters shortlisted static matches by live availability for the date. If availability is unavailable, it returns unfiltered matches. Candidates do not guarantee an offer or the requested quantity. Returns each candidate with a per-constraint match and the quantity in sales units, and opens the search results view. Use it when the user asks to see or browse products; when the user asks you to order, use find_products.",
   find_products:
     "The same search as search_products, without a view. Use it while preparing an order, once per product the user names, with the same full originalRequest each time. Same input and result as search_products.",
   get_offers:

@@ -7,7 +7,7 @@ const product = (productId: string, overrides: Partial<CatalogProduct> = {}): Ca
   gtin: null,
   name: productId,
   searchText: productId,
-  category: "10400",
+  category: "T-CAT",
   salesUnit: "ST",
   allowedLotSize: 1,
   perSalesUnit: null,
@@ -37,7 +37,7 @@ const ids = (catalogProducts: CatalogProduct[], searchRequest: SearchRequest) =>
 describe("search ranking", () => {
   test("a term matches inside a compound word and every word of a term must match", () => {
     const products = [
-      product("a", { searchText: "kevytmaitojuoma 1 l laktoositon" }),
+      product("a", { searchText: "testimaitojuoma 2 l" }),
       product("b", { searchText: "lättmjölk" }),
       product("c", { searchText: "maito luomu" }),
     ];

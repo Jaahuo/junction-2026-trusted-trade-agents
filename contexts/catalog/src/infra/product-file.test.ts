@@ -2,28 +2,30 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toOrderQuantity } from "../domain/quantity.ts";
 import { DATA_FILES, loadProductFile, parseValueCsv } from "./product-file.ts";
 
+// Invented products in the shape of the product file (team rules R-23).
 const raw = (
   id: string,
   overrides: Record<string, unknown> = {},
   synkka: Record<string, unknown> = {},
 ) => ({
   id,
-  salesUnitGtin: `640${id}`,
+  salesUnitGtin: `000${id}`,
   salesUnit: "KI",
   baseUnit: "ST",
-  category: "10400",
+  category: "T-CAT",
   allowedLotSize: 1,
   countryOfOrigin: "fi",
   units: [
-    { unitId: "KI", sizeInBaseUnits: 10 },
+    { unitId: "KI", sizeInBaseUnits: 8 },
     { unitId: "ST", sizeInBaseUnits: 1 },
   ],
   synkkaData: {
     names: [
-      { value: `Maito ${id}`, language: "fi" },
-      { value: `Milk ${id}`, language: "en" },
+      { value: `Testijuoma ${id}`, language: "fi" },
+      { value: `Test drink ${id}`, language: "en" },
     ],
     classifications: [],
     unitConversions: [],
@@ -32,66 +34,70 @@ const raw = (
   ...overrides,
 });
 
-const baseVolume = (unit: string, value: number) => ({
-  unitConversions: [{ synkkaPackagingType: "BASE_UNIT_OR_EACH", volume: { unit, value } }],
+const conversion = (type: string, unit: string, value: number) => ({
+  unitConversions: [{ synkkaPackagingType: type, volume: { unit, value } }],
 });
 
 const records = [
   raw(
-    "1",
-    { substitutions: [{ product: "1", substituteProduct: "2" }] },
+    "T-1",
+    { substitutions: [{ product: "T-1", substituteProduct: "T-2" }] },
     {
-      ...baseVolume("LTR", 1),
+      ...conversion("BASE_UNIT_OR_EACH", "LTR", 1.5),
       classifications: [
         { name: "allergen", values: [{ id: "AM" }] },
         { name: "nutritionalClaim", values: [{ id: "FREE_FROM_LACTOSE" }, { id: "LOW_FAT" }] },
       ],
     },
   ),
-  raw("2", {}, baseVolume("GRM", 500)),
-  raw("3", { salesUnitGtin: undefined, countryOfOrigin: undefined }, { names: [] }),
+  raw("T-2", {}, conversion("BASE_UNIT_OR_EACH", "GRM", 250)),
+  raw("T-3", { salesUnitGtin: undefined, countryOfOrigin: undefined }, { names: [] }),
+  raw("T-KI-CASE", {}, conversion("CASE", "LTR", 7)),
   raw(
-    "4",
-    {},
-    {
-      unitConversions: [{ synkkaPackagingType: "CASE", volume: { unit: "LTR", value: 6 } }],
-    },
-  ),
-  raw(
-    "kg",
+    "T-KG-1",
     {
       salesUnit: "KG",
       baseUnit: "KG",
-      allowedLotSize: 4.4,
+      allowedLotSize: 3.5,
       units: [
         { unitId: "KG", sizeInBaseUnits: 1 },
-        { unitId: "ST", sizeInBaseUnits: 4.4 },
+        { unitId: "ST", sizeInBaseUnits: 3.5 },
       ],
     },
-    baseVolume("GRM", 4400),
+    conversion("BASE_UNIT_OR_EACH", "GRM", 3500),
   ),
   raw(
-    "ki-of-kg",
+    "T-KG-2",
+    {
+      salesUnit: "KG",
+      baseUnit: "KG",
+      allowedLotSize: 0.01,
+      units: [{ unitId: "KG", sizeInBaseUnits: 1 }],
+    },
+    conversion("BASE_UNIT_OR_EACH", "GRM", 1200),
+  ),
+  raw(
+    "T-KI-OF-KG",
     {
       baseUnit: "KG",
       units: [
         { unitId: "KG", sizeInBaseUnits: 1 },
-        { unitId: "KI", sizeInBaseUnits: 2 },
+        { unitId: "KI", sizeInBaseUnits: 3 },
       ],
     },
-    baseVolume("GRM", 500),
+    conversion("BASE_UNIT_OR_EACH", "GRM", 750),
   ),
   raw(
-    "cs",
+    "T-CS",
     { salesUnit: "CS", baseUnit: "CS", units: [{ unitId: "CS", sizeInBaseUnits: 1 }] },
-    { unitConversions: [{ synkkaPackagingType: "CASE", volume: { unit: "GRM", value: 6000 } }] },
+    conversion("CASE", "GRM", 7500),
   ),
   raw(
-    "st",
+    "T-ST-CASE",
     { salesUnit: "ST", units: [{ unitId: "ST", sizeInBaseUnits: 1 }] },
-    { unitConversions: [{ synkkaPackagingType: "CASE", volume: { unit: "LTR", value: 6 } }] },
+    conversion("CASE", "LTR", 7),
   ),
-  { id: "broken" },
+  { id: "T-BROKEN" },
 ];
 
 let dir = "";
@@ -100,55 +106,57 @@ beforeAll(async () => {
   await Bun.write(join(dir, DATA_FILES.products), JSON.stringify(records));
   await Bun.write(
     join(dir, DATA_FILES.reliability),
-    "productId,deliveryReliability\r\n1,0.98\r\n2,1.5\r\n",
+    "productId,deliveryReliability\r\nT-1,0.97\r\nT-2,1.5\r\n",
   );
-  await Bun.write(join(dir, DATA_FILES.co2), "productId,AVG kg CO2-eq/kg\r\n1,1.44\r\n3,\r\n");
+  await Bun.write(join(dir, DATA_FILES.co2), "productId,AVG kg CO2-eq/kg\r\nT-1,2.34\r\nT-3,\r\n");
 });
 afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+const byId = async () =>
+  new Map((await loadProductFile(dir)).map((product) => [product.productId, product]));
+
 test("the slim index maps names, claims, volume per sales unit, reliability, CO2 and substitutes", async () => {
-  const products = await loadProductFile(dir);
-  expect(products.map((product) => product.productId)).toEqual([
-    "1",
-    "2",
-    "3",
-    "4",
-    "kg",
-    "ki-of-kg",
-    "cs",
-    "st",
+  const products = await byId();
+  expect([...products.keys()]).toEqual([
+    "T-1",
+    "T-2",
+    "T-3",
+    "T-KI-CASE",
+    "T-KG-1",
+    "T-KG-2",
+    "T-KI-OF-KG",
+    "T-CS",
+    "T-ST-CASE",
   ]);
-  const [first, second, third, fourth] = products;
-  expect(first).toEqual({
-    productId: "1",
-    gtin: "6401",
-    name: "Milk 1",
-    searchText: "maito 1\nmilk 1",
-    category: "10400",
+  expect(products.get("T-1")).toEqual({
+    productId: "T-1",
+    gtin: "000T-1",
+    name: "Test drink T-1",
+    searchText: "testijuoma t-1\ntest drink t-1",
+    category: "T-CAT",
     salesUnit: "KI",
     allowedLotSize: 1,
-    perSalesUnit: { value: 10, unit: "LTR" },
+    perSalesUnit: { value: 12, unit: "LTR" },
     countryOfOrigin: "fi",
-    deliveryReliability: 0.98,
-    co2PerKg: 1.44,
+    deliveryReliability: 0.97,
+    co2PerKg: 2.34,
     claims: new Set(["FREE_FROM_LACTOSE", "LOW_FAT"]),
-    substitutes: ["2"],
+    substitutes: ["T-2"],
   });
-  expect(second).toMatchObject({
-    perSalesUnit: { value: 5, unit: "KGM" },
+  expect(products.get("T-2")).toMatchObject({
+    perSalesUnit: { value: 2, unit: "KGM" },
     deliveryReliability: null,
     co2PerKg: null,
   });
-  expect(third).toMatchObject({
+  expect(products.get("T-3")).toMatchObject({
     gtin: null,
-    name: "3",
+    name: "T-3",
     perSalesUnit: null,
     countryOfOrigin: null,
     claims: new Set(),
   });
-  expect(fourth).toMatchObject({ perSalesUnit: { value: 6, unit: "LTR" } });
 });
 
 test("CSV values parse with CRLF line ends and skip blank or out-of-range values", () => {
@@ -158,13 +166,41 @@ test("CSV values parse with CRLF line ends and skip blank or out-of-range values
 });
 
 test("the volume per sales unit comes from the unit's own weight, then the consumer unit, then the case", async () => {
-  const volumes = Object.fromEntries(
-    (await loadProductFile(dir)).map((product) => [product.productId, product.perSalesUnit]),
-  );
-  expect(volumes).toMatchObject({
-    kg: { value: 1, unit: "KGM" },
-    "ki-of-kg": { value: 2, unit: "KGM" },
-    cs: { value: 6, unit: "KGM" },
-    st: null,
+  const products = await byId();
+  expect(
+    Object.fromEntries(
+      [...products].map(([productId, product]) => [productId, product.perSalesUnit]),
+    ),
+  ).toMatchObject({
+    "T-1": { value: 12, unit: "LTR" },
+    "T-KG-1": { value: 1, unit: "KGM" },
+    "T-KG-2": { value: 1, unit: "KGM" },
+    "T-KI-OF-KG": { value: 3, unit: "KGM" },
+    "T-KI-CASE": { value: 7, unit: "LTR" },
+    "T-CS": { value: 7.5, unit: "KGM" },
+    "T-ST-CASE": null,
+  });
+});
+
+test("a weight or case sales unit converts a std quantity to its own unit, rounded up to the lot", async () => {
+  const products = await byId();
+  const convert = (productId: string, value: number, unit: string) => {
+    const product = products.get(productId);
+    return product === undefined ? null : toOrderQuantity({ value, unit }, product);
+  };
+  expect({
+    exact: convert("T-KG-1", 35, "KGM"),
+    lot: convert("T-KG-1", 15, "KGM"),
+    grams: convert("T-KG-2", 2500, "GRM"),
+    kiOfKg: convert("T-KI-OF-KG", 10, "KGM"),
+    case: convert("T-CS", 7.5, "KGM"),
+    consumer: convert("T-1", 100, "LTR"),
+  }).toEqual({
+    exact: { orderQuantity: { value: 35, unit: "KG" }, equals: { value: 35, unit: "KGM" } },
+    lot: { orderQuantity: { value: 17.5, unit: "KG" }, equals: { value: 17.5, unit: "KGM" } },
+    grams: { orderQuantity: { value: 2.5, unit: "KG" }, equals: { value: 2.5, unit: "KGM" } },
+    kiOfKg: { orderQuantity: { value: 4, unit: "KI" }, equals: { value: 12, unit: "KGM" } },
+    case: { orderQuantity: { value: 1, unit: "CS" }, equals: { value: 7.5, unit: "KGM" } },
+    consumer: { orderQuantity: { value: 9, unit: "KI" }, equals: { value: 108, unit: "LTR" } },
   });
 });

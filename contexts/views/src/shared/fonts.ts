@@ -1,20 +1,25 @@
-import barlowCondensed700 from "@fontsource/barlow-condensed/files/barlow-condensed-latin-700-normal.woff2";
-import nunito400 from "@fontsource/nunito/files/nunito-latin-400-normal.woff2";
-import nunito600 from "@fontsource/nunito/files/nunito-latin-600-normal.woff2";
-import nunito800 from "@fontsource/nunito/files/nunito-latin-800-normal.woff2";
+import barlowCondensed400 from "@app/ui/fonts/barlow-condensed-latin-400-normal.woff2";
+import barlowCondensed600 from "@app/ui/fonts/barlow-condensed-latin-600-normal.woff2";
+import barlowCondensed700 from "@app/ui/fonts/barlow-condensed-latin-700-normal.woff2";
+import barlowCondensed800 from "@app/ui/fonts/barlow-condensed-latin-800-normal.woff2";
+import nunito400 from "@app/ui/fonts/nunito-latin-400-normal.woff2";
+import nunito600 from "@app/ui/fonts/nunito-latin-600-normal.woff2";
+import nunito700 from "@app/ui/fonts/nunito-latin-700-normal.woff2";
+import nunito800 from "@app/ui/fonts/nunito-latin-800-normal.woff2";
 
-// The view fonts of Figma v11: Nunito for text, Barlow Condensed for buttons. WOFF2 only;
-// the build embeds them, so a view needs no external asset (SPEC-013).
 const FONTS = [
   ["Nunito", "400", nunito400],
   ["Nunito", "600", nunito600],
+  ["Nunito", "700", nunito700],
   ["Nunito", "800", nunito800],
+  ["Barlow Condensed", "400", barlowCondensed400],
+  ["Barlow Condensed", "600", barlowCondensed600],
   ["Barlow Condensed", "700", barlowCondensed700],
+  ["Barlow Condensed", "800", barlowCondensed800],
 ] as const;
 
 let loaded = false;
 
-/** Adds the view fonts to the page once. Font faces are page-wide, so shadow DOM sees them. */
 export function loadFonts() {
   if (loaded) return;
   loaded = true;

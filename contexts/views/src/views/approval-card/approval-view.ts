@@ -1,4 +1,5 @@
 import type { DecideApprovalRequest, Order, PendingList } from "@app/contract";
+import { brand } from "@app/ui/brand";
 import { css, html, nothing } from "lit";
 import {
   callAction,
@@ -8,7 +9,6 @@ import {
   viewEntry,
 } from "../../shared/bridge.ts";
 import checkCircle from "../../shared/icons/check-circle-32.svg?raw";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 import warningSmall from "../../shared/icons/warning-16.svg?raw";
 import warningLarge from "../../shared/icons/warning-32.svg?raw";
 import { base } from "../../shared/styles.ts";
@@ -139,6 +139,11 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         padding: var(--spacing-lg) var(--spacing-xl);
         background: var(--color-bg-brand);
         color: var(--color-text-on-brand);
+      }
+      .updating img {
+        width: 56px;
+        height: auto;
+        flex-shrink: 0;
       }
       .updating-text {
         flex: 1;
@@ -318,7 +323,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   private updating(order: Order) {
     const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     return html`<article class="updating" part="updating" role="status">
-      ${icon(logo, "Valio Aimo")}
+      <img src=${brand.logo} alt=${brand.name} />
       <div class="updating-text">
         <p class="strong">${earliest === undefined ? "Order" : `Order for ${day(earliest)}`}</p>
         <p class="body-small">The agent is updating this order</p>
@@ -366,7 +371,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   private error(approvalUrl: string | null) {
     return html`<article class="card" part="error" role="alert">
-      ${brandHeader("Valio Aimo approvals")}
+      ${brandHeader(`${brand.name} approvals`)}
       <div class="body center">
         ${icon(warningLarge)}
         <p class="headline">This approval can't be shown here</p>
@@ -388,7 +393,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   private empty() {
     return html`<article class="card" part="empty">
-      ${brandHeader("Valio Aimo approvals", html`<h2 class="title">Approvals</h2>`)}
+      ${brandHeader(`${brand.name} approvals`, html`<h2 class="title">Approvals</h2>`)}
       <div class="body center">
         ${icon(checkCircle)}
         <p class="headline">No orders wait for approval</p>
@@ -402,7 +407,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     return html`<div class="top-row" aria-hidden="true"></div>
       <article class="card" part="list">
         ${brandHeader(
-          "Valio Aimo approvals",
+          `${brand.name} approvals`,
           html`<h2 class="title">
             ${pending === 0 ? "Approvals" : `${pending} order${pending === 1 ? "" : "s"} wait for approval`}
           </h2>`,
@@ -504,7 +509,7 @@ const decisionFailure = (result: { kind: string; message?: string }) => {
 /** What the model is told after a decision on the card. */
 const decisionContext = (order: Order) =>
   order.status === "placed" || order.status === "awaiting_payment"
-    ? `The approver confirmed order ${order.orderId} on the approval card. It was sent to Valio Aimo.`
+    ? `The approver confirmed order ${order.orderId} on the approval card. It was sent to ${brand.name}.`
     : `The approver rejected order ${order.orderId} on the approval card. Nothing is ordered. Do not ask for its approval again unless the user asks for a new order.`;
 
 /** Puts a decided order back into the tool result it came from. */

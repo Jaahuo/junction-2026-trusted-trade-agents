@@ -113,6 +113,13 @@ MCP App views in `contexts/views` follow the Junction 2026 Figma file (Screens, 
 - A host page restyles a view through the tokens on the element or through its `part` names, never by reaching into the shadow DOM.
 - The Figma file is the source of truth. Its newest iteration is the current design.
 
+## Open WebUI host
+
+The external Open WebUI host uses its native elements and custom stylesheet hook, not `@app/ui`.
+Its Acme theme tokens, local fonts and responsive rules live in `hosts/openwebui/branding/custom.css`.
+These styles do not change the application or MCP view tokens.
+Keep upstream identity and license notices intact.
+
 ## Guidelines
 
 1. Each view has one `primary` button. Every other action is `secondary` or `ghost`.

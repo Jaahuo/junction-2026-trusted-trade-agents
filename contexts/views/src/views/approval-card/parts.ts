@@ -6,7 +6,14 @@ import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 // Parts that the card and the view share: the petrol header, the card frame and
 // the formatters. Figma: Junction 2026 › Screens › "Approval request — v8".
 
-const UNIT: Record<string, string> = { LTR: "L", KGM: "kg", GRM: "g", CT: "packs", PCE: "pcs" };
+const UNIT: Record<string, string> = {
+  LTR: "L",
+  KGM: "kg",
+  GRM: "g",
+  CT: "packs",
+  PCE: "pcs",
+  ST: "pcs",
+};
 export const unit = (code: string) => UNIT[code] ?? code;
 
 const euro = (digits: number) =>
@@ -59,8 +66,9 @@ export const brandHeader = (eyebrow: string, title?: TemplateResult, facts?: Tem
     ${title ?? nothing} ${facts ?? nothing}
   </header>`;
 
-export const fact = (label: string, value: string) =>
-  html`<div class="fact">
+/** One labelled data point; `wrap` lets a long value (a real product name) break lines. */
+export const fact = (label: string, value: string, wrap = false) =>
+  html`<div class="fact ${wrap ? "wrap" : ""}">
     <dt class="label-small">${label}</dt>
     <dd>${value}</dd>
   </div>`;
@@ -139,6 +147,11 @@ export const cardStyles = css`
     display: flex;
     flex-direction: column;
     gap: var(--spacing-2xs);
+  }
+  .fact.wrap {
+    flex: 1 1 12rem;
+    min-width: 0;
+    white-space: normal;
   }
   .header .fact dt {
     color: var(--color-text-on-brand-subtle);

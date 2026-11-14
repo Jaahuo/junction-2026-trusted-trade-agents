@@ -362,9 +362,9 @@ export class ApprovalCard extends LitElement {
       order.lines.length > 1
         ? fact("Products", String(order.lines.length))
         : order.reasons.includes("SUBSTITUTION")
-          ? html`${fact("Product", first.product.name)} ${fact("Quantity", amount(std))}
+          ? html`${fact("Product", first.product.name, true)} ${fact("Quantity", amount(std))}
             ${fact("Unit price", `${price(first.total.net / std.value)} / ${unit(std.unit)}`)}`
-          : html`${fact("Product", first.product.name)} ${fact("Quantity", amount(std))}
+          : html`${fact("Product", first.product.name, true)} ${fact("Quantity", amount(std))}
             ${pack === null ? nothing : fact("Packs", `${number(first.quantity.value)} × ${amount(pack)}`)}`;
     return brandHeader(this.eyebrow(order), title, html`<dl class="facts">${facts}</dl>`);
   }

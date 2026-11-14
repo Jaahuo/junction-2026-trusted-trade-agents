@@ -205,7 +205,8 @@ async function runScenario(scenario: 1 | 2, baseUrl: string, reset: boolean, dem
     return { productId: found.productId, orderQuantity: found.orderQuantity };
   });
 
-  const token = await step("offers", async () => {
+  // Placed by offer ID, as an agent does (SPEC-009): the server looks up the token it issued.
+  const offerId = await step("offers", async () => {
     const body = request(OffersRequestSchema, {
       ...terms,
       lines: [{ productId: candidate.productId, quantity: candidate.orderQuantity }],
@@ -217,12 +218,12 @@ async function runScenario(scenario: 1 | 2, baseUrl: string, reset: boolean, dem
       offer !== undefined,
       `no offer for the scenario product (omitted: ${omitted?.reason ?? "no reason"})`,
     );
-    return offer.token;
+    return offer.offerId;
   });
 
   const order = await step("place", async () => {
     const body = request(PlaceOrderRequestSchema, {
-      offers: [token],
+      offers: [offerId],
       idempotencyKey: `demo-smoke-${crypto.randomUUID()}`,
       originalRequest: `scenario ${scenario}: lactose-free milk`,
     });

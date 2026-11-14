@@ -4,10 +4,13 @@ import {
   type Evaluation,
   GUARDRAILS,
   type Mandate,
+  type MandateLimits,
   type OfferClaims,
   type Quantity,
   type ReasonCode,
   REJECT_REASONS,
+  type SubstitutionRule,
+  samePair,
   type ValidateResult,
 } from "@app/contract";
 
@@ -120,6 +123,18 @@ const thresholdReasons = (
   return breaks(value, limit.value) ? [reason] : [];
 };
 
+/** The human's rule for a substitute line, while substitutions is ask. */
+export const ruleFor = (
+  limits: MandateLimits,
+  claim: OfferClaims,
+): SubstitutionRule | undefined => {
+  const { replaces } = claim;
+  if (replaces === null || limits.substitutions !== "ask") return undefined;
+  return (limits.substitutionRules ?? []).find((rule) =>
+    samePair(rule, { replaces, productId: claim.productId }),
+  );
+};
+
 const buyerLimitReasons = (
   claim: OfferClaims,
   mandate: Mandate,
@@ -129,7 +144,12 @@ const buyerLimitReasons = (
   const reasons: ReasonCode[] = [];
   if (limits.categories !== null && !limits.categories.includes(claim.product.category))
     reasons.push("CATEGORY_NOT_ALLOWED");
-  if (claim.replaces !== null && limits.substitutions !== "auto") reasons.push("SUBSTITUTION");
+  if (
+    claim.replaces !== null &&
+    limits.substitutions !== "auto" &&
+    ruleFor(limits, claim)?.policy !== "auto"
+  )
+    reasons.push("SUBSTITUTION");
   if (historyOf(claim.productId).length === 0 && limits.newProducts === "ask")
     reasons.push("NEW_PRODUCT");
   reasons.push(

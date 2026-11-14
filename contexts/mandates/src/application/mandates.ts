@@ -102,5 +102,15 @@ export const draftMandate = async (
   const draft = checkTerms(request, now);
   if (!draft.ok) return draft;
   const current = await currentMandate(store, principal, now);
-  return ok({ draft: draft.value, current: current.ok ? current.value : null });
+  // Substitution rules come only from the human's decisions on the approval card: a draft keeps
+  // the current ones, so the agent can neither add nor drop one.
+  const { substitutionRules: _drafted, ...limits } = draft.value.limits;
+  const rules = current.ok ? current.value.mandate.limits.substitutionRules : undefined;
+  return ok({
+    draft: {
+      ...draft.value,
+      limits: rules === undefined ? limits : { ...limits, substitutionRules: rules },
+    },
+    current: current.ok ? current.value : null,
+  });
 };

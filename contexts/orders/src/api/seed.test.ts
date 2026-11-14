@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { DEMO_ACCOUNT, type DemoProducts } from "@app/contract";
 import { type Db, mountContext } from "@app/server-kit";
+import { postgresOrderStore } from "../infra/order-store.ts";
 import { history } from "../infra/schema.ts";
 import { context } from "./index.ts";
 import { seedHistory } from "./seed.ts";
@@ -54,4 +55,29 @@ test("without imported demo metadata the seed adds no history and warns once", a
     });
     expect(warnings).toHaveLength(1);
     expect(await db.select().from(history)).toEqual([]);
+  }));
+
+test("with a scenario 3 substitute the seed adds two approvals of the pair and its history", async () =>
+  withSeedDatabase(async (db) => {
+    await seedHistory(db, {
+      demo: {
+        ...demo,
+        s3: { productId: "prod_test_partial", quantity: { value: 220, unit: "ST" } },
+        s3Substitute: { productId: "prod_test_substitute" },
+      },
+      warn: () => undefined,
+    });
+    const pair = { replaces: "prod_test_partial", productId: "prod_test_substitute" };
+    const approved = await postgresOrderStore(db).withCustomerLock(DEMO_ACCOUNT.customer, (tx) =>
+      tx.approvedWithPair(DEMO_ACCOUNT.customer, pair),
+    );
+    expect(approved.map((order) => [order.status, order.decision?.action])).toEqual([
+      ["placed", "approve"],
+      ["placed", "approve"],
+    ]);
+    expect(approved.every((order) => order.auditAnchor?.count === order.audit.length)).toBe(true);
+    const substituteRows = (await db.select().from(history)).filter(
+      (row) => row.productId === pair.productId,
+    );
+    expect(substituteRows).toHaveLength(2);
   }));

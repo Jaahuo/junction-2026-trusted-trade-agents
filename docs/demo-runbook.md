@@ -126,6 +126,19 @@ Resets preserve that import. Scripts read PostgreSQL, not the source directory.
    The run leaves a placed order, so run `bun run db:reset` once more before you record.
    Wait a few seconds between smoke scripts and before the first chat request to avoid upstream rate limits.
 
+### Trust that grows: the substitute beats
+
+`bun run db:reset` seeds two approved orders of the scenario 3 substitute (`s3Substitute` in imported demo metadata), so the next approval of that pair is the third.
+
+1. Ask for the scenario 3 product. The original is short, so the agent offers the substitute for the rest, and the order waits for approval with `SUBSTITUTION`.
+2. Approve it. The confirmation asks "✦ You've approved … 3 times. Let the agent do this without asking?". Press **Yes, automatically**.
+3. Ask for the scenario 3 product again, and have the agent place the substitute's offer as its own order. It is placed without asking, and the order log says "Substitute allowed without asking: standing approval given …". The short original still asks, because its amount differs from the request.
+4. Show the rule in the agent limits view, and remove it there.
+
+The reject beat: reject a substitute and press **Don't suggest again** on the declined card. The next request for the scenario 3 product gets no offer of that substitute.
+
+Run `bun run db:reset` between takes: a saved rule lasts until the reset, and a new mandate version makes open orders stale.
+
 ### Smoke script options
 
 | Option                | Effect                                                                                                                                                               |

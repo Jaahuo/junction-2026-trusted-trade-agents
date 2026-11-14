@@ -8,6 +8,7 @@ import {
   loadView,
   plainPageUrl,
   plainSource,
+  resultData,
   viewEntry,
 } from "./bridge.ts";
 
@@ -61,6 +62,15 @@ test("host mode passes structuredContent parsed with TOOL_OUTPUT", async () => {
   const pending = loadView(viewEntry("approval-card"), hostSource(list.host));
   list.deliver({ orders: [] });
   expect(await pending).toEqual({ kind: "empty" });
+});
+
+test("a result without structuredContent gives the JSON text item, as some hosts pass only text", () => {
+  const summary = { type: "text", text: "1 order pending approval." };
+  const json = { type: "text", text: JSON.stringify(order) };
+  expect(resultData({ structuredContent: order, content: [summary] })).toEqual(order);
+  expect(resultData({ content: [summary, json] })).toEqual(order);
+  expect(resultData({ content: [summary] })).toBeUndefined();
+  expect(resultData({})).toBeUndefined();
 });
 
 test("plain mode loads plainLoad over REST with no token", async () => {

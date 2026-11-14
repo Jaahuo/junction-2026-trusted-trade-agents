@@ -2,6 +2,11 @@ import { REASON_TEXT, type ReasonCode } from "@app/contract";
 
 // The approval card's text in each language. Read it at render time with `pick(CARD)`.
 
+/** The replaced product in a rule sentence; null when the order does not name it. */
+const replacedEn = (name: string | null) => name ?? "the out-of-stock product";
+const replacedFi = (name: string | null) =>
+  name === null ? "loppuneen tuotteen" : `tuotteen ${name}`;
+
 const en = {
   // The contract sentence says the date or amount "changed"; on the card it differs from the request.
   reason: {
@@ -173,6 +178,17 @@ const en = {
   receiptMismatch: "Confirmation doesn’t match your order",
   receiptMismatchText: (brand: string) =>
     `${brand}’s confirmation differs from the offer you approved. Contact ${brand} before the delivery.`,
+  standingOffer: (substitute: string, replaced: string | null, times: number) =>
+    `You’ve approved ${substitute} as a replacement for ${replacedEn(replaced)} ${times} times. Let the agent do this without asking?`,
+  yesAutomatically: "Yes, automatically",
+  keepAsking: "Keep asking",
+  standingSaved: (substitute: string, replaced: string | null) =>
+    `The agent now orders ${substitute} instead of ${replacedEn(replaced)} without asking. You can undo this in your limits.`,
+  neverSuggest: (substitute: string, replaced: string | null) =>
+    `Should the agent keep suggesting ${substitute} instead of ${replacedEn(replaced)}?`,
+  dontSuggestAgain: "Don’t suggest again",
+  neverSaved: (substitute: string, replaced: string | null) =>
+    `The agent won’t suggest ${substitute} instead of ${replacedEn(replaced)} again. You can undo this in your limits.`,
 };
 
 const FI_REASON: Record<ReasonCode, string> = {
@@ -361,6 +377,17 @@ const fi: typeof en = {
   receiptMismatch: "Vahvistus ei vastaa tilaustasi",
   receiptMismatchText: (brand) =>
     `Vahvistus poikkeaa hyväksymästäsi tarjouksesta. Ota yhteyttä toimittajaan (${brand}) ennen toimitusta.`,
+  standingOffer: (substitute, replaced, times) =>
+    `Olet hyväksynyt tuotteen ${substitute} ${replacedFi(replaced)} tilalle ${times} kertaa. Saako agentti tehdä tämän kysymättä?`,
+  yesAutomatically: "Kyllä, automaattisesti",
+  keepAsking: "Kysy jatkossakin",
+  standingSaved: (substitute, replaced) =>
+    `Agentti tilaa nyt tuotteen ${substitute} ${replacedFi(replaced)} tilalle kysymättä. Voit perua tämän valtuutuksen asetuksista.`,
+  neverSuggest: (substitute, replaced) =>
+    `Ehdottaako agentti jatkossakin tuotetta ${substitute} ${replacedFi(replaced)} tilalle?`,
+  dontSuggestAgain: "Älä ehdota enää",
+  neverSaved: (substitute, replaced) =>
+    `Agentti ei enää ehdota tuotetta ${substitute} ${replacedFi(replaced)} tilalle. Voit perua tämän valtuutuksen asetuksista.`,
 };
 
 export const CARD = { en, fi };

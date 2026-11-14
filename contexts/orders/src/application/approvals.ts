@@ -13,8 +13,9 @@ import {
   type Requote,
 } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
-import { grossTotal, netTotal } from "../domain/evaluate.ts";
+import { grossTotal, netTotal, ruleFor } from "../domain/evaluate.ts";
 import { appendOrderAudit, commitPlacement } from "./commit-placement.ts";
+import { expireCutoff } from "./cutoff.ts";
 import { auditOf, checkTokens, type Evaluated, evaluateChecked, type OrderDeps } from "./orders.ts";
 import type { OrderTx, RequotePort, StoredOrder } from "./ports.ts";
 
@@ -185,6 +186,38 @@ const reject = async (
 
 type Revision = Extract<DecideApprovalRequest, { decision: "edit" | "pick_alternative" }>;
 type Changes = Extract<Revision, { decision: "edit" }>["changes"];
+
+/** Approvals of one substitute pair after which the card offers to stop asking. */
+const STANDING_OFFER_AFTER = 3;
+
+/**
+ * The first substitute line of an approved order that has no rule yet, with how often the human
+ * has approved that pair; set once the count reaches STANDING_OFFER_AFTER.
+ */
+const standingOffer = async (
+  tx: OrderTx,
+  order: StoredOrder,
+  mandate: Mandate | null,
+): Promise<StoredOrder["standingOffer"]> => {
+  if (mandate === null || mandate.limits.substitutions !== "ask") return undefined;
+  if (order.status !== "placed" && order.status !== "awaiting_payment") return undefined;
+  const line = order.lines.find(
+    ({ claims }) => claims.replaces !== null && ruleFor(mandate.limits, claims) === undefined,
+  );
+  if (line === undefined || line.claims.replaces === null) return undefined;
+  const pair = { replaces: line.claims.replaces, productId: line.claims.productId };
+  const approved = await tx.approvedWithPair(order.customer, pair);
+  if (approved.length < STANDING_OFFER_AFTER) return undefined;
+  const replacesName = approved
+    .flatMap((past) => past.lines)
+    .find(({ claims }) => claims.productId === pair.replaces)?.claims.product.name;
+  return {
+    ...pair,
+    timesApproved: approved.length,
+    ...(replacesName === undefined ? {} : { replacesName }),
+  };
+};
+
 /**
  * One line of a proposed revision and its token: `previous` is the line it takes the place of, the
  * line itself when it is kept, or null when it is added.
@@ -483,7 +516,7 @@ const revision = (input: {
             detail: `${dropped} alternative${dropped === 1 ? "" : "s"} dropped: expired or made under another mandate`,
           },
         ];
-  const checks = auditOf(evaluation, byProduct, at).filter(
+  const checks = auditOf(evaluation, byProduct, { lines, mandate }, at).filter(
     (event) => event.event !== "order_requested",
   );
   const claims = lines.map((line) => line.claims);
@@ -588,6 +621,10 @@ const revise = async (
     const order = await tx.find(principal.customer, known.orderId);
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (!isOpen(order, request.proposalVersion)) return changed();
+    const cutoff = await expireCutoff(tx, order, deps.now());
+    if (cutoff === "audit_invalid")
+      return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+    if (cutoff === "expired") return changed();
     const added = checked.value.lines
       .map((line) => line.offerId)
       .filter((offerId) => !order.offerIds.includes(offerId));
@@ -658,6 +695,10 @@ export const decide = async (
     const order = await tx.find(principal.customer, orderId);
     if (order === null) return failure("NOT_FOUND", "No such order.");
     if (!isOpen(order, request.proposalVersion)) return changed();
+    const cutoff = await expireCutoff(tx, order, deps.now());
+    if (cutoff === "audit_invalid")
+      return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
+    if (cutoff === "expired") return changed();
     const verified = await appendOrderAudit(order, []);
     if (!verified.ok) return failure("UPSTREAM_FAILED", "The audit record could not be verified.");
     const decided =
@@ -666,6 +707,8 @@ export const decide = async (
         : await reject(principal, order, request, now);
     if (!decided.ok) return decided;
     await guardedWrite(tx, decided.value, request.proposalVersion);
-    return decided;
+    if (request.decision !== "approve" || !order.reasons.includes("SUBSTITUTION")) return decided;
+    const offer = await standingOffer(tx, decided.value, mandate);
+    return offer === undefined ? decided : ok({ ...decided.value, standingOffer: offer });
   });
 };

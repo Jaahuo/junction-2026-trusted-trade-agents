@@ -67,6 +67,8 @@ export const VIEW = {
     cantShowBody: "Open it on the approval page to review and decide.",
     cantShowRetry: "Try again in a moment.",
     openApprovalPage: "Open approval page",
+    openApprovals: "Open approvals",
+    backToApp: "← Back to the app",
     tryAgain: "Try again",
     opensNewTab: "Opens in a new tab",
     noneWaiting: "No orders wait for approval",
@@ -87,6 +89,7 @@ export const VIEW = {
         "Changing amounts is not available yet. Approve the order as it is, or ask the agent.",
     } as Record<string, string>,
     notSaved: "The decision was not saved. Try again.",
+    ruleNotSaved: "The rule was not saved. Try again.",
     // What the card says for the approver after a decision; the agent reads it.
     decided: {
       placed: (name: string, brand: string) => `${name} approved. It is placed with ${brand}.`,
@@ -112,6 +115,8 @@ export const VIEW = {
     cantShowBody: "Avaa se hyväksyntäsivulla, niin voit tarkistaa ja päättää.",
     cantShowRetry: "Yritä hetken päästä uudelleen.",
     openApprovalPage: "Avaa hyväksyntäsivu",
+    openApprovals: "Avaa hyväksynnät",
+    backToApp: "← Takaisin sovellukseen",
     tryAgain: "Yritä uudelleen",
     opensNewTab: "Avautuu uuteen välilehteen",
     noneWaiting: "Ei hyväksyntää odottavia tilauksia",
@@ -133,6 +138,7 @@ export const VIEW = {
         "Määrien muuttaminen ei ole vielä mahdollista. Hyväksy tilaus sellaisenaan tai kysy agentilta.",
     } as Record<string, string>,
     notSaved: "Päätöstä ei tallennettu. Yritä uudelleen.",
+    ruleNotSaved: "Sääntöä ei tallennettu. Yritä uudelleen.",
     decided: {
       placed: (name: string, brand: string) =>
         `Hyväksyin: ${name}. Tilaus on lähetetty toimittajalle ${brand}.`,

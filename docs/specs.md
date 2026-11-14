@@ -160,6 +160,7 @@ export const TOOL_INPUT = {
 | facts    | —                      | POST /api/catalog/facts              | catalog   | —                                                                     | FactsRequest → FactsResult                                 |
 | precheck | —                      | POST /api/orders/precheck            | orders    | —                                                                     | PrecheckRequest → Precheck                                 |
 | requote  | —                      | POST /api/offers/requote             | offers    | —                                                                     | RequoteRequest → OffersResult                              |
+| issued   | —                      | POST /api/offers/issued              | offers    | —                                                                     | IssuedOffersRequest → IssuedOffers                         |
 | validate | —                      | POST /api/offers/validate            | offers    | —                                                                     | ValidateRequest → ValidateResult                           |
 | account  | —                      | GET /api/accounts/current            | accounts  | —                                                                     | → Account                                                  |
 | openapi  | —                      | GET /api/discovery/openapi.json      | discovery | —                                                                     | → OpenAPI 3.1                                              |
@@ -384,6 +385,7 @@ Steps of `get_offers`:
 - Totals: gross = (net × (1 + vatRate/100) + deposit) × quantity value, rounded to cents. `depositsIncluded: false` when the price quote has `depositKnown: false`: the total then leaves deposits out.
 - `pricePerStandardUnit`: gross price (VAT, no deposit) per `LTR` or `KGM`, rounded to cents. The wholesaler's comparison price wins; without it, the unit price divided by `product.perSalesUnit` when that is in litres or kilograms; otherwise `null`.
 - Keys: `OFFER_SIGNING_JWK` (private ES256 JWK) and `OFFER_SIGNING_KID`. With both set, a restart keeps every issued offer valid. When they are unset and `NODE_ENV` is not `production`, `offerSigningKeyFromEnv` generates a key for the process and logs one warning; in `production` it throws and the server does not start. `GET /.well-known/jwks.json` publishes the public key only.
+- `issued`: the offers service keeps every token it signs (by `get_offers` or `requote`) in process memory until the token's `exp`. `POST /api/offers/issued` with `{ offerIds }` (1 to 40) returns `{ offers: { offerId, token }[] }` for the IDs it issued to the principal's customer and agent and that have not expired; another ID is left out. A restart forgets the IDs; the agent then sends the token or requests new offers. This lets an agent name an offer by its short `offerId`, so a model never has to copy a token (#162). The store is per process, so the demo runs one API instance. Internal calls carry no principal, so orders also checks the owner in the verified token (SPEC-009 R3).
 - `requote`: re-issues offers for the same product, quantity and date (or the given changes) of the given tokens, under the current mandate of the token's `agentId`.
 - `validate`: re-reads live availability of the tokens' products with a fresh availability request (SPEC-005) and reports a sales block, a lost date or a passed cut-off. It also reports the live confirmed amount per product in `products[].liveAmount`, `null` when stock is unconfirmed.
 - Live-amount rule: when the live amount of a product is lower than the summed order quantity of that product (SPEC-009), the offers are stale. At `place_order` the request is refused with `409 STALE_OFFER` and the agent requests new offers (SPEC-009 R6). At approval the order goes through the re-quote path (SPEC-011).
@@ -395,7 +397,7 @@ Failure paths: upstream down → 502 `UPSTREAM_FAILED`. A body field `customer` 
 PRD: [Partial stock](prd.md#partial-stock), [Substitution](prd.md#substitution).
 
 - Confirmed amount below the request: floor the available amount to a multiple of `allowedLotSize`. A result of 0 → omitted `INSUFFICIENT_STOCK`. Otherwise one offer for the floored amount, with `shortfall` = request − floored amount, in std units; when `perSalesUnit` is null, in the sales unit.
-- For the shortfall, substitute candidates come from the product's substitution pairs. Mandate `substitutions: "never"` → no substitute offers. A substitute with a `contradicted` merged hard constraint is excluded. A substitute quantity rounds up to its own lot size.
+- For the shortfall, substitute candidates come from the product's substitution pairs. Mandate `substitutions: "never"` → no substitute offers. A substitution rule with `policy: "never"` for the pair → no offer of that substitute. A substitute with a `contradicted` merged hard constraint is excluded. A substitute quantity rounds up to its own lot size.
 - Rank: best first, by soft matches, then price per std unit, then reliability, then CO2. Up to 3 substitute offers, each covering the shortfall, with `replaces`, `rank` and `comparison`.
 - Unconfirmed stock: the offer says so and carries the reliability score.
 
@@ -408,7 +410,11 @@ export type Policy = "auto" | "ask";
 export interface MandateLimits { maxOrderTotal: { value: number; currency: "EUR"; basis: "gross" };
   categories: string[] | null /* null = all */; substitutions: "never" | "ask" | "auto"; newProducts: Policy;
   minDeliveryReliability: { value: number; ifNoData: Policy } | null; maxCo2PerKg: { value: number; ifNoData: Policy } | null;
-  allergenData: { ifNoData: Policy }; paymentTerms: Record<PaymentTerms, Policy> }
+  allergenData: { ifNoData: Policy }; paymentTerms: Record<PaymentTerms, Policy>;
+  substitutionRules?: SubstitutionRule[] /* absent = none */ }
+export interface SubstitutePair { replaces: string; productId: string }
+export interface SubstitutionRule extends SubstitutePair { policy: "auto" | "never";
+  productName?: string; replacesName?: string /* display only */; decidedAt: string }
 export interface Mandate { iss: string /* customer */; mandateId: string; version: number; agent: string /* agentId */;
   signedBy: string /* accountId */; limits: MandateLimits; standingConstraints: { hard: HardConstraint[]; soft: SoftConstraint[] };
   iat: number; exp: number }
@@ -454,9 +460,10 @@ export type Evaluate = (input: { claims: OfferClaims[]; mandate: Mandate | null;
 
 Precedence for `place_order` (one list; the first matching step R1-R7 ends the request):
 
-- R1. The body fails its schema, or holds 0 or more than 20 tokens → `400 BAD_REQUEST`. No record.
-- R2. The idempotency key is known: same tokens → `200` with the stored order; other tokens → `409 CONFLICT`.
-- R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
+- Each entry of `offers` and `alternatives` (and of the `precheck` body) names an offer by its `offerId` (`off_` followed by letters, digits, `_` or `-`) or by its full token. The server replaces each `offerId` with its token through `issued` (SPEC-006) before R3; the stored order keeps the tokens. The rules below say "token" for the offer after this step.
+- R1. The body fails its schema, or holds 0 or more than 20 offers, or more than 20 alternatives → `400 BAD_REQUEST`. No record.
+- R2. The idempotency key is known: the same `offers` and `alternatives` as sent (IDs and tokens compared as text) → `200` with the stored order; others → `409 CONFLICT`.
+- R3. An `offerId` that `issued` does not return (unknown or expired), or whose verified token names another customer or agent, a token that fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
 - R4. Tokens differ in `customer` or `paymentTerms`, a token's `paymentTerms` is not the account's (alternatives included), or the customer is not the principal's → `400 BAD_REQUEST`.
 - R5. A current mandate exists and a token's `agentId`, `mandateId` or `mandateVersion` differs from it → `409 STALE_OFFER` ("request new offers").
 - R6. `validate` reports a live amount below the summed quantity of a product → `409 STALE_OFFER` (live-amount rule, SPEC-006).
@@ -473,7 +480,7 @@ Then the order is stored with every reason collected:
 1. No current mandate for the principal's agent → `MANDATE_INVALID`.
 2. Expiry: `cutoffAt` passed → `CUTOFF_PASSED` with `nextDeliveryDate`; else `exp` passed → `OFFER_EXPIRED`. Cut-off takes precedence.
 3. Fixed guardrails: a sales block or lost date from `validate` → `SALES_BLOCKED` or `CUTOFF_PASSED`. The summed quantity of a product over 10 × the median of that product's order history (sales units, SPEC-010) or, with no history, over 2000 std units (no conversion → over) → `QUANTITY_UNUSUAL`. Unconfirmed stock over 500 std units for a product (no conversion → over) → `UNCONFIRMED_STOCK`.
-4. Buyer limits: order gross total over `maxOrderTotal` → `SPEND_OVER_LIMIT`; category not listed → `CATEGORY_NOT_ALLOWED`; `replaces` set and policy not `auto` → `SUBSTITUTION`; no order history row for the product (SPEC-010) and `newProducts: ask` → `NEW_PRODUCT`; reliability below minimum → `RELIABILITY_BELOW_MIN`, missing with `ifNoData: ask` → `UNCONFIRMED_DATA`; CO2 above maximum → `CO2_ABOVE_MAX`, missing with ask → `UNCONFIRMED_DATA`; a merged hard constraint on an attribute in `ALLERGEN_ATTRIBUTES` whose match in the offer is `unknown` and `allergenData.ifNoData: ask` → `UNCONFIRMED_ALLERGEN`; a merged hard constraint whose match is `contradicted` or missing → `UNCONFIRMED_ALLERGEN` whatever the setting; terms policy `ask` → `PAYMENT_TERMS`; `deliveryDate` after `requestedDate` or `shortfall` set → `AVAILABILITY_DIFFERS`.
+4. Buyer limits: order gross total over `maxOrderTotal` → `SPEND_OVER_LIMIT`; category not listed → `CATEGORY_NOT_ALLOWED`; `replaces` set and policy not `auto` → `SUBSTITUTION`, except policy `ask` with an `auto` substitution rule for the pair (`samePair`), which also adds a `check_passed` audit event with the `productId`; no order history row for the product (SPEC-010) and `newProducts: ask` → `NEW_PRODUCT`; reliability below minimum → `RELIABILITY_BELOW_MIN`, missing with `ifNoData: ask` → `UNCONFIRMED_DATA`; CO2 above maximum → `CO2_ABOVE_MAX`, missing with ask → `UNCONFIRMED_DATA`; a merged hard constraint on an attribute in `ALLERGEN_ATTRIBUTES` whose match in the offer is `unknown` and `allergenData.ifNoData: ask` → `UNCONFIRMED_ALLERGEN`; a merged hard constraint whose match is `contradicted` or missing → `UNCONFIRMED_ALLERGEN` whatever the setting; terms policy `ask` → `PAYMENT_TERMS`; `deliveryDate` after `requestedDate` or `shortfall` set → `AVAILABILITY_DIFFERS`.
 5. Result: any reject reason → `rejected`; else any approval reason → `pending_approval`; else `commitPlacement` (SPEC-010), which checks credit.
 
 - Invariant: an order with any hard-constraint match that is not `confirmed` is never placed automatically, except an `unknown` match under `allergenData.ifNoData: auto`.
@@ -576,6 +583,7 @@ export interface Order {
   offerSignature?: { state: "verified" | "expired" | "invalid"; validUntil: string };
   receiptSignature?: { state: "verified" | "pending" | "invalid"; signedAt: string | null };
   auditIntegrity?: "intact" | "unverified" | "broken";
+  standingOffer?: SubstitutePair & { timesApproved: number; replacesName?: string };
 }
 export interface PendingList {
   orders: Order[];
@@ -584,6 +592,7 @@ export interface PlaceOrderRequest {
   offers: string[];
   alternatives?: string[];
   originalRequest?: string;
+  supersedes?: { orderId: string; proposalVersion: number };
   idempotencyKey: string;
 }
 export interface PrecheckRequest {
@@ -591,8 +600,10 @@ export interface PrecheckRequest {
 }
 ```
 
-- `place_order` takes signed offer tokens only. `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
+- `place_order` takes signed offers only, each named by its `offerId` or its token (SPEC-009). `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
 - Idempotency: unique (customer, idempotencyKey). See SPEC-009 R2.
+- Replacement: when the buyer changes a pending proposal, `supersedes` identifies that exact order and proposal version. The server requires the same customer, account and agent, pending status and matching version under the customer lock; otherwise `409 CONFLICT`. Only an accepted replacement (`pending_approval`, `placed` or `awaiting_payment`) closes the predecessor as `declined`, with `decision.next: "stop"` and server identity. Rejected or failed replacements leave it open. Both audits identify the other order. The transaction preserves unrelated orders and rolls back both writes on failure. Idempotency includes the replacement reference; changing or omitting it with the same key gives `409 CONFLICT`. Replacement is not a human approval and never places the predecessor.
+- `standingOffer` is set only on the approve response, never stored: policy `ask`, the order has `SUBSTITUTION`, a substitute line has no rule yet, and the customer has approved that pair 3 or more times, this order included. The approval card then offers to save an `auto` rule; after a rejection it offers a `never` rule. The view saves either with `register_mandate`.
 - Trust and rationale fields (optional; the views hide each part when it is absent): `purpose` and line `rationale` come from the agent; line `allergens` with their `status` are computed by the server from the buyer's hard rules; `offerSignature` and `receiptSignature` report the wholesaler's signature checks; `auditIntegrity` and `integrityOk` report the audit signature or hash-chain check, per log and per entry. An `invalid` offer signature or an `error` allergen must be refused at approval by the server; the views only report them.
 - `approvalUrl` is computed when the order is read: `${publicBaseUrl()}/approvals/<orderId>` while pending, else null. It is not stored. It points to the approval page (SPEC-013), the one plain page with the approval actions.
 - Order history: a table owned by the orders context, with rows `{ productId, quantity /* sales units */, placedAt }`. A placed order adds one row per line. The demo seed adds rows directly; they are not orders and use no credit. `QUANTITY_UNUSUAL` compares sales units with the median of that product's rows; `NEW_PRODUCT` means the product has no row.
@@ -655,7 +666,9 @@ export type DecideApprovalRequest = { proposalVersion: number } & (
 - Approve: load the current mandate of the order's `agentId`; none → `rejected MANDATE_INVALID`. Lines whose `mandateId` or `mandateVersion` differ from it, whose offers expired, or whose product breaks the live-amount rule of SPEC-006, are re-quoted under it through `requote`. Same or lower price, same date and amount, no new reason → replace the lines, write `requoted`, continue. Else add `PRICE_CHANGED` or `AVAILABILITY_DIFFERS` (or the new rule's reason), append a `Requote`, increase `proposalVersion`, keep pending, return 200 with the order. Then `commitPlacement`. Until `requote` exists: a differing mandate → `409 STALE_OFFER`, an expired offer → `409 OFFER_EXPIRED`, and the order stays pending.
 - Reject: `declined`, `decision.next` = `stop` (the agent stops and tells the user) or `alternatives` (the agent may look for alternatives).
 - Edit and pick_alternative: new offers through `requote` (or the chosen alternative), every check of SPEC-009 again.
-- Cut-off job: every 60 seconds, and through `runCutoffJob()` in tests, every pending order whose earliest `cutoffAt` has passed becomes `declined` with `next: "alternatives"`, actor `server`, filtered on status.
+- Cut-off job: at startup, every 60 seconds, and through `runCutoffJob()` in tests, every pending order whose earliest `cutoffAt` is at or before server time becomes `declined` with `next: "alternatives"`, actor `server`. The job rechecks status and proposal version under the customer lock. Pending-list reads also run customer-scoped cleanup. Decisions recheck the cut-off under the same lock, so an elapsed proposal cannot be approved or edited before the next scheduled run. Declines preserve the audit chain and do not issue placement receipts.
+- A corrupt audit prevents that order's automatic transition. Cleanup logs the failure and continues with other orders. Pending-list reads still return valid, non-expired proposals; they do not repair or expose the corrupt expired proposal as actionable.
+- Automatic declines are not human preference decisions. They neither count toward standing substitution approvals nor show the card's offer to stop suggesting a substitute.
 
 Approve and remember: the approver raises the mandate's order limit and approves the order in one action. The first build answers this decision with `501 NOT_IMPLEMENTED`. The sequence of mandate change, re-quote and approval, its behaviour under concurrent decisions and its retry rule are not part of this contract yet. The hardening issue that builds it adds them through a SPEC change, with a review, before the work starts.
 
@@ -666,7 +679,7 @@ PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 - `ALL /mcp`: stateless streamable HTTP, a new server and transport per request, JSON responses. No authentication in the first build (SPEC-002).
 - Every tool of SPEC-003 is registered with `inputSchema` = `TOOL_INPUT[tool]` and `outputSchema` = `TOOL_OUTPUT[tool]`. The result has `content` (a text summary) and `structuredContent` (the REST 2xx body). Text of a pending order includes its `approvalUrl`. A REST error, or input that `TOOL_INPUT[tool]` refuses (`BAD_REQUEST`), → `isError: true` and no `structuredContent`; the text has the error code, the message and the envelope as JSON. Reason: an MCP SDK client validates any `structuredContent` against `outputSchema`, also when `isError` is set. So every result with `structuredContent` parses with `TOOL_OUTPUT[tool]`. Hosts without Apps complete the flow from text, structured content and the approval page.
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
-- Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
+- Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`; SPEC-013 defines the versioned URI.
 - Quiet twins: `find_products` and `quote_offers` are `search_products` and `get_offers` without a view. Same `TOOL_INPUT`, `TOOL_OUTPUT`, REST route and handler; no `_meta.ui` and no `language` input; `ROUTES` keeps the name of the tool with the view. A host opens a view for every call of a tool that declares one, so the agent uses the quiet twins while it prepares or places an order the user asked for, and the chat shows only the approval card. It uses `search_products` and `get_offers` when the user asks to see the products or compare offers.
 - Each tool whose view is shown in the chat also lists an optional `language` input (a BCP 47 tag): the language the user writes in. Only the view reads it, from the tool input; the server drops it before the REST call, so it is not part of `TOOL_INPUT` or any route.
 - Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
@@ -739,6 +752,9 @@ export const VIEWS = [
 ] as const; // priority order
 ```
 
+- `VIEWS.uri` is the base URI. The MCP server appends `/<version>` when it announces a view: `ui://trusted-trade/<view>/<version>` in `_meta.ui.resourceUri`, the flat `ui/resourceUri` key and `resources/list`. `<version>` is the first 12 hex characters of the SHA-256 of the view HTML (`GET /views/<view>`), so it changes only when that view changes, and a host that caches HTML by URI loads the new view after a deploy. The server computes it once per process and view. A view it cannot fetch keeps the base URI and is not cached, so `tools/list` does not fail.
+- `resources/read` accepts the base URI and `ui://trusted-trade/<view>/<any version>` of a known view, and returns the current HTML under the requested URI. An unknown view gives `-32602`; a view that `GET /views/<view>` cannot serve gives `-32002` (not found) or `-32603`.
+
 - The `structuredContent` of a tool is the only input of its view. A view parses it with `TOOL_OUTPUT`; a failed parse, or a result with `isError: true` and no `structuredContent` (SPEC-012), shows the error state.
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
 - Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. Without the query, a view with a `plainList` route loads that list instead (`/views/approval-card` lists the open orders). The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
@@ -768,6 +784,7 @@ export interface DemoProducts {
   s2: { productId: string; quantity: Quantity };
   s3: { productId: string; quantity: Quantity } | null /* null = no product found */;
   late: { productId: string } | null;
+  s3Substitute?: { productId: string } /* the wholesaler's substitute for s3 */;
   triedForS3: { productId: string; quantity: Quantity }[];
 }
 ```
@@ -776,5 +793,5 @@ export interface DemoProducts {
 - Later (SPEC-002): `acct_pay` (customer `cust_pay_01`, agent `agent_pay`, pay-on-order, creditLimit null).
 - Mandate: maxOrderTotal 1000 EUR gross; categories null; substitutions ask; newProducts ask; reliability 0.9 with ifNoData auto; CO2 3.0 with ifNoData auto; allergenData ifNoData ask; payment terms invoice auto, pay_on_order ask; standing soft constraint countryOfOrigin fi. Demo users may change every value.
 - Demo products: optional imported metadata, parsed with `DemoProductsSchema` and stored with the catalogue import. It holds product ids, quantities, observation time and scenario status only. Reset orchestration reads PostgreSQL and passes this metadata to seeds. Without imported metadata, seeds add no history and log one warning. Demo scripts require imported metadata.
-- Order history rows (SPEC-010), derived from imported demo metadata: S1 product, 3 rows of `s1.quantity`; S2 product, 3 rows of `s2.quantity` / 5, rounded up to a whole sales unit; S3 product (when `s3` is set), 3 rows of `s3.quantity` / 5, rounded up. Scenario 1 (`s1.quantity`) gives no reason; scenario 2 (`s2.quantity`, the 1000 LTR request, gross above 1000 EUR) gives exactly `SPEND_OVER_LIMIT`.
+- Order history rows (SPEC-010), derived from imported demo metadata: S1 product, 3 rows of `s1.quantity`; S2 product, 3 rows of `s2.quantity` / 5, rounded up to a whole sales unit; S3 product (when `s3` is set), 3 rows of `s3.quantity` / 5, rounded up. With `s3Substitute` also set: 2 rows of the same amount for the substitute and 2 approved, placed orders of the substitute alone (`replaces` the S3 product), so the demo's approval of the pair is the third. Scenario 1 (`s1.quantity`) gives no reason; scenario 2 (`s2.quantity`, the 1000 LTR request, gross above 1000 EUR) gives exactly `SPEND_OVER_LIMIT`.
 - Credit: placed orders use up the 5000 EUR credit. `bun run db:reset` restores it; run it before each rehearsal.

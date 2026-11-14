@@ -25,6 +25,7 @@ import {
   decide,
   listPending,
 } from "../application/approvals.ts";
+import { isCutoffDue, runCutoffJob } from "../application/cutoff.ts";
 import { findOrder, placeOrder, precheck, type Refusal } from "../application/orders.ts";
 import type { StoredOrder } from "../application/ports.ts";
 import { mandateClient } from "../infra/mandate-client.ts";
@@ -92,6 +93,7 @@ const defaultDeps = (db: Db): ApiDeps => {
   return {
     store: postgresOrderStore(db),
     verifyOffer: processOfferVerifier(),
+    issuedOffers: offersClient,
     // Resolved on first use: the base URL needs the server's environment.
     mandates: {
       current: (agentId) => (mandates ??= mandateClient(`${selfBaseUrl()}/api`)).current(agentId),
@@ -106,7 +108,26 @@ const defaultDeps = (db: Db): ApiDeps => {
 
 export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
   const deps: ApiDeps = { ...defaultDeps(db), ...overrides };
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let running: Promise<void> | undefined;
+  const tick = () => {
+    if (running !== undefined) return;
+    running = runCutoffJob(deps)
+      .catch((error: unknown) => console.error("Order cutoff job failed", error))
+      .finally(() => {
+        running = undefined;
+      });
+  };
   return new Elysia({ prefix: "/orders" })
+    .onStart(() => {
+      tick();
+      timer = setInterval(tick, 60_000);
+    })
+    .onStop(async () => {
+      clearInterval(timer);
+      timer = undefined;
+      await running;
+    })
     .use(badRequestEnvelope())
     .post(
       "/",
@@ -121,11 +142,20 @@ export const createApi = (db: Db, overrides: Partial<ApiDeps> = {}) => {
         return result.value.created ? status(201, order) : order;
       },
     )
-    .get("/pending", { response: { 200: PendingListSchema } }, async ({ request }) => ({
-      orders: (await listPending(deps, await principalFrom(request))).map((order) =>
-        toOrder(order, deps.publicBaseUrl),
-      ),
-    }))
+    .get("/pending", { response: { 200: PendingListSchema } }, async ({ request }) => {
+      const principal = await principalFrom(request);
+      try {
+        await runCutoffJob(deps, principal.customer);
+      } catch (error) {
+        console.error("Order cutoff cleanup failed before listing pending orders", error);
+      }
+      const now = deps.now();
+      return {
+        orders: (await listPending(deps, principal))
+          .filter((order) => !isCutoffDue(order, now))
+          .map((order) => toOrder(order, deps.publicBaseUrl)),
+      };
+    })
     .post(
       "/precheck",
       { body: PrecheckRequestSchema, response: { 200: PrecheckSchema, ...refused } },

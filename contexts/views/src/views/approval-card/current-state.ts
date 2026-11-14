@@ -50,3 +50,21 @@ export async function readCurrent(source: Source, data: Order | PendingList) {
     else unread.add(orderId);
   return { current, unread };
 }
+
+type Page = EventTarget & { readonly visibilityState: DocumentVisibilityState };
+
+/**
+ * Runs `read` when the page becomes visible again, at most one run at a time. It does not listen
+ * for window focus: a host that confirms each tool call returns focus to the view when its dialog
+ * closes, so a re-read on focus asks for confirmation again without end.
+ */
+export function onReturn(page: Page, read: () => Promise<void>) {
+  let running = false;
+  const listener = () => {
+    if (running || page.visibilityState === "hidden") return;
+    running = true;
+    void read().finally(() => (running = false));
+  };
+  page.addEventListener("visibilitychange", listener);
+  return () => page.removeEventListener("visibilitychange", listener);
+}

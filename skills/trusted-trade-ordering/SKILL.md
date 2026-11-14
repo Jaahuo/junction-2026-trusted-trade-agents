@@ -9,9 +9,9 @@ The wholesaler's server checks every order against the buyer's mandate. This ski
 
 ## Direct order
 
-The user is a chef at work. A request that names what, how much and by when is an instruction to order. Run the four calls with no text in between, then give one reply:
+The user is a chef at work. A request that names what, how much and by when is an instruction to order. Run the flow with no text in between, then give one reply:
 
-`get_mandate` → `find_products` → `quote_offers` → `place_order` → reply
+`get_mandate` → `find_products` for each product → `quote_offers` → `place_order` → reply
 
 Leave this path only for a branch that [Flow](#flow) names.
 
@@ -41,10 +41,12 @@ Ask everything in one message, then order on the answer. Look up the rest: pack 
 
 Do the steps in order. Each step ends when its output is in hand.
 
+One request gives one order. Search for each product, quote the shortlists together and place one `place_order` with one chosen offer per product. Never place one order per product: the server checks limits on the order total. If any product cannot be fulfilled, ask rather than silently placing a partial order.
+
 When the user asks you to order, use the quiet tools `find_products` and `quote_offers`: they open no view, so the chat shows only the order. Use `search_products` and `get_offers` only when the user asks to see the products or compare offers; those open a view in the chat. Both pairs take the same input and return the same result.
 
 1. **Read the mandate.** Call `get_mandate`. Done when you know the limits in force: spend per order (EUR, gross), allowed categories, substitution policy, payment terms. A 404 means no mandate exists. Draft one with the user (see [Mandate](#mandate)), and stop until `get_mandate` shows it.
-2. **Search.** Call `find_products` (or `search_products` when the user asks to see the products) with the user's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words). Done when you hold a shortlist of candidates.
+2. **Search.** Call `find_products` once per product the user names (or `search_products` when the user asks to see the products), with that product's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words, the same full request for every product). Done when you hold a shortlist of candidates for every product.
    - Put a requirement the user cannot waive in `hard`. Supported: `{ attribute: <allergen or free-from claim>, is: "free_from" }`, for example `gluten`, `egg`, `lactose`, `peanut`, and `{ attribute: "vegan", is: "yes" }`. The tool input schema lists every attribute. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
    - Put a preference in `soft`. It only changes the ranking. Supported: `{ attribute: "countryOfOrigin", prefer: <country code> }` and `{ attribute: "category", prefer: <category> }`. Any other soft attribute gives 400: leave it out and put the word in `terms`.
    - What the user rules out is a requirement, never a preference. "Lactose free only" is `hard` (`lactose`, `free_from`). A rule-out with no supported attribute, such as "not barista" or "not chocolate", goes in neither `hard` nor `soft`, and its word stays out of `terms`. Apply it yourself: skip every candidate whose name shows the ruled-out variant, before you quote.
@@ -52,12 +54,16 @@ When the user asks you to order, use the quiet tools `find_products` and `quote_
    - Every candidate can be delivered on or before `deliverBy`: the search leaves out a product that cannot. `availability.dropped` counts the matches left out. When the second search is also empty and `dropped` is above 0, the wholesaler cannot deliver the product by that date: say so in one sentence and ask for another date.
    - When `availability.checked` is `false`, the search could not read live availability. A candidate may then still be `omitted` at step 3.
    - Read `match` on each candidate: `confirmed`, `contradicted` or `unknown`. Missing data is `unknown`, never `confirmed`. An `unknown` match sends the order to approval, unless the constraint is an allergen and the mandate allows missing allergen data (`allergenData.ifNoData: auto`). Vegan and the other free-from claims always go to approval when unknown.
-3. **Request offers.** Call `quote_offers` (or `get_offers` when the user asks to compare offers) for the shortlist only. Done when every candidate is an offer or is listed in `omitted` with a reason.
-   - The candidates come best match first. Send the first three that are the kind of product the user asked for as `lines` of one call, in that order, not one product per call. Do not skip a candidate for a property the user did not rule out, such as lactose free or UHT. When every line is `omitted`, quote the next three candidates before you tell the user that nothing can be delivered. A product whose cut-off has passed says nothing about the others.
+3. **Request offers.** Call `quote_offers` once with the shortlist for every product (or `get_offers` when the user asks to compare offers). Done when every candidate is an offer or is listed in `omitted` with a reason.
+   - The candidates come best match first. For each product, send the first three that are the kind of product the user asked for as `lines` of the same call, in that order. Do not skip a candidate for a property the user did not rule out, such as lactose free or UHT. When every line for a product is `omitted`, quote its next three candidates before you tell the user that nothing can be delivered. A product whose cut-off has passed says nothing about the others.
    - Read `precheck` on each offer. It is guidance: `place_order` runs the checks again.
    - Read `claims.deliveryDate`, `claims.shortfall` and `claims.replaces`. A later date or a shortfall adds `AVAILABILITY_DIFFERS`. A substitute names the product it replaces.
-4. **Choose.** Only a product of the kind the user asked for meets the need: banana purée is not banana yogurt. When no product of that kind has an offer, tell the user what is available and ask. Do not place an order for another kind of product until the user agrees. Among the offers that meet the user's need, prefer one whose `precheck.decision` is `auto`. When none is `auto`, take the best offer that meets the need: the human then decides. Done when you hold one `offerId` (`off_…`) per line. Keep the unchosen offers: pass them as `alternatives`.
-5. **Place the order.** Call `place_order` with `offers` (the chosen `offerId` values, not the long tokens), optional `alternatives` (their `offerId` values), and `originalRequest`. The server generates the idempotency key. After a timeout or a lost reply, send the same offers, alternatives and `supersedes`: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
+4. **Choose.** Only a product of the kind the user asked for meets the need: banana purée is not banana yogurt. When no product of that kind has an offer, tell the user what is available and ask. Do not place an order for another kind of product until the user agrees. For each requested product, choose one offer that meets the need; select up to 20 unchosen offers as `alternatives` across the entire order. Done when you hold one `offerId` (`off_…`) per product.
+   Apply the choice rule in this order, and go to the next rule only on a tie:
+   1. **Pre-check.** Prefer `precheck.decision` `auto`. When no offer is `auto`, take the best offer that meets the need: the human then decides.
+   2. **Price per standard unit.** Prefer the lower `claims.pricePerStandardUnit.gross` (EUR per `LTR` or `KGM`, VAT included). Compare only offers with the same `unit`. When it is `null`, do not compute one: skip this rule for that offer.
+   3. **Delivery date.** Prefer the earlier `claims.deliveryDate`.
+5. **Place the order.** Call `place_order` once, with `offers` (one chosen `offerId` per product, up to 20 chosen offers, not the long tokens), optional `alternatives` (their `offerId` values, up to 20 alternatives across the entire order), and the full `originalRequest`. The two limits are separate: retain the chosen offer for every requested product. The server generates the idempotency key. After a timeout or a lost reply, send the same offers, alternatives and `supersedes`: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
 6. **Act on the status.**
 
 | Status                                       | Action                                                                                                                                    |
@@ -91,6 +97,7 @@ Only a human registers limits. You draft them.
 ## Units
 
 - Money is EUR. Limits apply to the gross total: VAT and deposits included.
+- When an offer has `depositsIncluded: false`, the wholesaler gives no deposit amount and the total leaves deposits out. Say so when you report the total.
 - State the user's quantity in standard units: `LTR` for volume, `KGM` for mass.
 - The wholesaler sells in its own sales unit (for example `KI`). Every candidate gives `orderQuantity` (sales unit) and `equals` (standard units). Pass `orderQuantity` unchanged to `quote_offers` (or `get_offers` when the user asks to compare offers): its unit is the product's sales unit and its value is a multiple of the lot size.
 - When the user counts packs and names the pack size, multiply: the count times the pack size is the standard quantity. "900 pieces of oat drink 1 l" is `{ value: 900, unit: "LTR" }`; "40 tubs of 2.5 kg" is `{ value: 100, unit: "KGM" }`.

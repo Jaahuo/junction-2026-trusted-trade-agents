@@ -23,7 +23,7 @@ import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { defineApprovalCard, reasonSummaries, type RuleChoice } from "./approval-card.ts";
 import { CARD } from "./card-strings.ts";
-import { readCurrent, withCurrent } from "./current-state.ts";
+import { onReturn, readCurrent, withCurrent } from "./current-state.ts";
 import { brandHeader, cardStyles, icon, money, orderName, vat, when } from "./parts.ts";
 import { VIEW } from "./strings.ts";
 
@@ -225,10 +225,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   declare private unchecked: ReadonlySet<string>;
   /** True once the shown orders were read from the server after the tool result arrived. */
   private checked = false;
-  /** Reads the orders again when the approver comes back to the chat or the tab. */
-  private readonly recheck = () => {
-    if (globalThis.document?.visibilityState !== "hidden") void this.refresh();
-  };
+  /** Stops the re-read when the approver comes back to the tab. */
+  private stopRecheck = () => {};
 
   constructor() {
     super();
@@ -252,14 +250,13 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
         request: typeof args["originalRequest"] === "string" ? args["originalRequest"] : null,
       };
     });
-    globalThis.addEventListener?.("focus", this.recheck);
-    globalThis.document?.addEventListener("visibilitychange", this.recheck);
+    const page = globalThis.document;
+    if (page !== undefined) this.stopRecheck = onReturn(page, () => this.refresh());
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    globalThis.removeEventListener?.("focus", this.recheck);
-    globalThis.document?.removeEventListener("visibilitychange", this.recheck);
+    this.stopRecheck();
   }
 
   /**

@@ -124,7 +124,6 @@ export interface DecideApprovalInput {
   note?: string;
   changes?: { productId: string; quantity?: Quantity; deliverBy?: string }[];
   offerId?: string;
-  operationId?: string;
   maxOrderTotal?: number;
 }
 export const TOOL_INPUT = {
@@ -526,10 +525,6 @@ export interface Order {
     by: string;
     at: string;
   } | null;
-  remember: {
-    operationId: string;
-    step: "mandate_registered" | "proposal_requoted" | "approved";
-  } | null;
   requotes: Requote[];
   nextDeliveryDate: string | null;
   audit: AuditEvent[];
@@ -565,7 +560,7 @@ Verification: parallel tests: 10 calls with one idempotency key; two orders that
 
 PRD: [Approval card](prd.md#approval-card), [Offer expires while the order waits](prd.md#offer-expires-while-the-order-waits).
 
-Later hardening: re-quote at approval, edit, pick_alternative and approve and remember. This part is built in the later hardening issues and is reviewed again before that work starts.
+Later hardening: re-quote at approval, edit and pick_alternative; approve and remember is specified later (see the end of this section). This part is built in the later hardening issues and is reviewed again before that work starts.
 
 ```ts
 export type DecideApprovalRequest = { proposalVersion: number } & (
@@ -573,20 +568,17 @@ export type DecideApprovalRequest = { proposalVersion: number } & (
   | { decision: "reject"; next: "stop" | "alternatives"; note?: string }
   | { decision: "edit"; changes: { productId: string; quantity?: Quantity; deliverBy?: string }[] }
   | { decision: "pick_alternative"; offerId: string }
-  | { decision: "approve_and_remember"; operationId: string; maxOrderTotal: number }
+  | { decision: "approve_and_remember"; maxOrderTotal: number }
 );
 ```
 
-- Replay first: an `approve_and_remember` request whose `operationId` equals the order's `remember.operationId` is a replay. It skips the `proposalVersion` check. It resumes after the stored `remember.step` only while the order is still `pending_approval`, and every transition stays conditional on that status. At step `approved` it returns 200 with the order unchanged. A replay on an order that reached another final state returns 409 `CONFLICT` and changes nothing.
-- Only `pending_approval` orders accept a decision. `proposalVersion` must equal the order's; else 409 `CONFLICT`. This includes an `approve_and_remember` request with an unknown `operationId` and an old `proposalVersion`. Edit and re-quote increase it by 1. The update filters on status and proposalVersion, so one decision wins.
+- Only `pending_approval` orders accept a decision. `proposalVersion` must equal the order's; else 409 `CONFLICT`. Edit and re-quote increase it by 1. The update filters on status and proposalVersion, so one decision wins.
 - Approve: load the current mandate of the order's `agentId`; none → `rejected MANDATE_INVALID`. Lines whose `mandateId` or `mandateVersion` differ from it, whose offers expired, or whose product breaks the live-amount rule of SPEC-006, are re-quoted under it through `requote`. Same or lower price, same date and amount, no new reason → replace the lines, write `requoted`, continue. Else add `PRICE_CHANGED` or `AVAILABILITY_DIFFERS` (or the new rule's reason), append a `Requote`, increase `proposalVersion`, keep pending, return 200 with the order. Then `commitPlacement`. Until `requote` exists: a differing mandate → `409 STALE_OFFER`, an expired offer → `409 OFFER_EXPIRED`, and the order stays pending.
 - Reject: `declined`, `decision.next` = `stop` (the agent stops and tells the user) or `alternatives` (the agent may look for alternatives).
 - Edit and pick_alternative: new offers through `requote` (or the chosen alternative), every check of SPEC-009 again.
-- Approve and remember, in this order: (1) register a mandate with the raised `maxOrderTotal` and the `operationId` (idempotent, SPEC-008), then store `remember` with step `mandate_registered`; (2) re-quote the order's lines under the new mandate; (3) in one transaction, store the new lines, the new mandate id and version, `proposalVersion` + 1 and step `proposal_requoted`; (4) approve as above, and set step `approved` in the transaction that writes the approve result. A retry with the original request reuses the operationId: it is a replay and resumes after the stored step; with no stored step, step 1 returns the stored mandate and steps 2-4 run.
-
-Verification: a failure after the proposal update (step 3), then a retry with the original request, ends in the approved result.
-
 - Cut-off job: every 60 seconds, and through `runCutoffJob()` in tests, every pending order whose earliest `cutoffAt` has passed becomes `declined` with `next: "alternatives"`, actor `server`, filtered on status.
+
+Approve and remember: the approver raises the mandate's order limit and approves the order in one action. The first build answers this decision with `501 NOT_IMPLEMENTED`. The sequence of mandate change, re-quote and approval, its behaviour under concurrent decisions and its retry rule are not part of this contract yet. The hardening issue that builds it adds them through a SPEC change, with a review, before the work starts.
 
 ## SPEC-012 MCP binding
 

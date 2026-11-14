@@ -5,6 +5,7 @@ import {
   REASON_TEXT,
   type ReasonCode,
 } from "@app/contract";
+import { brand } from "@app/ui/brand";
 import { css, html, LitElement, nothing, type PropertyValues } from "lit";
 import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
@@ -213,7 +214,7 @@ export class ApprovalCard extends LitElement {
         flex-direction: column;
         gap: var(--spacing-md);
         padding: var(--spacing-lg);
-        background: var(--color-yellow-aimo-soft);
+        background: var(--color-bg-attention);
       }
       .todo-title {
         display: flex;
@@ -1460,7 +1461,7 @@ export class ApprovalCard extends LitElement {
         ? {
             tone: "success",
             svg: checkCircle,
-            title: "Order sent to Valio Aimo",
+            title: `Order sent to ${brand.name}`,
             text: `${delivery}Confirmation also on the approval page.`,
           }
         : order.status === "awaiting_payment"
@@ -1570,7 +1571,7 @@ export class ApprovalCard extends LitElement {
           <h3 class="section-title">Offer</h3>
           ${rows([
             ["Offer no.", order.offerIds.join(", ")],
-            ["Signature", verified ? "Verified by Valio Aimo" : "Not verified"],
+            ["Signature", verified ? `Verified by ${brand.name}` : "Not verified"],
           ])}
         </section>
         <p class="details-links body-small">

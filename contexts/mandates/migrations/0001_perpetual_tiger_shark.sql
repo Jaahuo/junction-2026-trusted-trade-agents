@@ -1,0 +1,2 @@
+ALTER TABLE "mandates_mandates" ADD COLUMN "operationId" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "mandates_mandates_owner_operation" ON "mandates_mandates" USING btree ("customer","agent","operationId");

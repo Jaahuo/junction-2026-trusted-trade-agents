@@ -126,6 +126,7 @@ test("the trust parts follow the view language", () => {
     expect(output).toContain("Tarkoitus");
     expect(output).toContain("Voi sisältää seesaminsiemeniä");
     expect(output).toContain("Rikkoo sääntöäsi: ei kananmunaa");
+    expect(output).toContain("Tarkista, sopiiko se sääntöösi: ei seesaminsiemeniä");
   } finally {
     setLang("en");
   }

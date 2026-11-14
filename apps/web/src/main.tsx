@@ -5,7 +5,7 @@ import type { Screen } from "@app/web-kit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { Link, matchRoute, Route, Switch, useLocation, useRouter, useSearch } from "wouter";
+import { Link, matchRoute, Route, Switch, useLocation, useRouter } from "wouter";
 import { Home } from "./home.tsx";
 
 const modules = import.meta.glob<{ screen: Screen }>(
@@ -19,20 +19,13 @@ const screens = Object.values(modules)
 function App() {
   const [location] = useLocation();
   const router = useRouter();
-  const search = useSearch();
   const isHome = matchRoute(router.parser, "/", location)[0];
   const activeScreen = screens.find((item) => matchRoute(router.parser, item.path, location)[0]);
-  const orderId =
-    activeScreen?.path === "/approvals" ? new URLSearchParams(search).get("order") : null;
 
   useEffect(() => {
-    const page = isHome
-      ? "Home"
-      : orderId !== null
-        ? `Approval ${orderId}`
-        : (activeScreen?.title ?? "Not found");
+    const page = isHome ? "Home" : (activeScreen?.title ?? "Not found");
     document.title = `${page} | ${brand.name}`;
-  }, [isHome, orderId, activeScreen]);
+  }, [isHome, activeScreen]);
   return (
     <div className="min-h-screen">
       <header className="border-b border-border bg-surface">
@@ -56,7 +49,7 @@ function App() {
           {screens.map((screen) => (
             <Link
               key={screen.path}
-              href={screen.path}
+              href={screen.href ?? screen.path}
               className={(active) =>
                 active
                   ? "rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary"

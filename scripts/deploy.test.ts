@@ -3,6 +3,7 @@ import {
   deployEnv,
   type Outputs,
   parseEnv,
+  parseOutputs,
   renderCaddyfile,
   renderEnvFile,
   resetEnv,
@@ -84,6 +85,19 @@ test("an empty, public-only, malformed, truncated or mismatched signing key fail
     ).toMatch(
       value === "" ? /lacks BUYER_SIGNING_JWK/ : /BUYER_SIGNING_JWK must be a private P-256 JWK/,
     );
+});
+
+test("outputs parse from tofu output -json, as CI receives them in DEPLOY_OUTPUTS", () => {
+  const entries = Object.entries(outputs).map(([name, value]) => [
+    name,
+    { sensitive: false, value },
+  ]);
+  expect(parseOutputs(JSON.stringify(Object.fromEntries(entries)))).toEqual(outputs);
+  const withoutUrl = entries.filter(([name]) => name !== "database_url");
+  expect(() => parseOutputs(JSON.stringify(Object.fromEntries(withoutUrl)))).toThrow(
+    /database_url is missing/,
+  );
+  expect(() => parseOutputs("{}")).toThrow(/public_ip is missing/);
 });
 
 test("Caddy serves the hostname with automatic TLS and proxies to the app port", () => {

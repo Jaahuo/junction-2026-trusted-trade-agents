@@ -52,9 +52,10 @@ resource "vultr_instance" "app" {
   backups           = "disabled"
   ssh_key_ids       = [vultr_ssh_key.deploy.id]
   firewall_group_id = vultr_firewall_group.app.id
-  user_data = templatefile("${path.module}/cloud-init.yaml", {
-    app_dir     = local.app_dir
-    bun_version = var.bun_version
+  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
+    app_dir           = local.app_dir
+    bun_version       = var.bun_version
+    ci_ssh_public_key = trimspace(var.ci_ssh_public_key)
   })
 }
 

@@ -98,13 +98,17 @@ const RSYNC_EXCLUDES = [
   "infra",
   "report",
   "apps/api/.production",
+  // The challenge data is not in Git (#38): it ships without --delete, so a CI push never removes it.
+  "/data/",
 ];
 
-const readOutputs = async (): Promise<Outputs> => {
-  const raw: Record<string, { value: unknown }> = await $`tofu -chdir=infra output -json`.json();
+/** Parses `tofu output -json`; CI passes the same JSON in DEPLOY_OUTPUTS because it has no state. */
+export const parseOutputs = (json: string): Outputs => {
+  const raw: unknown = JSON.parse(json);
   const value = (name: keyof Outputs): unknown => {
-    const entry = raw[name];
-    if (entry === undefined) throw new Error(`tofu output ${name} is missing; run tofu apply`);
+    const entry: unknown = typeof raw === "object" && raw !== null ? Reflect.get(raw, name) : null;
+    if (typeof entry !== "object" || entry === null || !("value" in entry))
+      throw new Error(`tofu output ${name} is missing; run tofu apply`);
     return entry.value;
   };
   return {
@@ -116,6 +120,9 @@ const readOutputs = async (): Promise<Outputs> => {
     database_url: String(value("database_url")),
   };
 };
+
+const readOutputs = async (): Promise<Outputs> =>
+  parseOutputs(process.env["DEPLOY_OUTPUTS"] ?? (await $`tofu -chdir=infra output -json`.text()));
 
 const waitForHealth = async (url: string): Promise<void> => {
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -131,10 +138,12 @@ const waitForHealth = async (url: string): Promise<void> => {
   throw new Error(`${url}/api/health did not answer 200 within two minutes`);
 };
 
+/** The app secrets: DEPLOY_ENV in CI, else the ignored local file. */
 const loadDeployEnv = async (outputs: Outputs): Promise<Map<string, string>> => {
-  if (!existsSync(SECRETS_FILE))
+  const inline = process.env["DEPLOY_ENV"];
+  if (inline === undefined && !existsSync(SECRETS_FILE))
     throw new Error(`Create ${SECRETS_FILE}: bun scripts/generate-keys.ts > ${SECRETS_FILE}`);
-  return deployEnv(outputs, parseEnv(await Bun.file(SECRETS_FILE).text()));
+  return deployEnv(outputs, parseEnv(inline ?? (await Bun.file(SECRETS_FILE).text())));
 };
 
 /** A reset runs here, with the hosted keys, against the checkout's own contexts. */
@@ -153,7 +162,10 @@ const push = async (outputs: Outputs): Promise<void> => {
   const host = `root@${outputs.public_ip}`;
   await $`bun scripts/production.ts --build-only`;
   await $`ssh ${SSH} ${host} cloud-init status --wait`.quiet();
-  await $`rsync -az --delete -e ${`ssh ${SSH.join(" ")}`} ${RSYNC_EXCLUDES.map((pattern) => `--exclude=${pattern}`)} ./ ${host}:${outputs.app_dir}/`;
+  const remoteShell = `ssh ${SSH.join(" ")}`;
+  await $`rsync -az --delete -e ${remoteShell} ${RSYNC_EXCLUDES.map((pattern) => `--exclude=${pattern}`)} ./ ${host}:${outputs.app_dir}/`;
+  if (existsSync("data"))
+    await $`rsync -az -e ${remoteShell} data/ ${host}:${outputs.app_dir}/data/`;
   await $`ssh ${SSH} ${host} install -m 600 -o app /dev/stdin /etc/trusted-trade.env < ${new Response(envFile)}`;
   await $`ssh ${SSH} ${host} install -m 644 /dev/stdin /etc/caddy/Caddyfile < ${new Response(renderCaddyfile(outputs))}`;
   await $`ssh ${SSH} ${host} ${`cd ${outputs.app_dir} && bun install --frozen-lockfile --ignore-scripts && chown -R app:app . && systemctl restart trusted-trade && systemctl reload caddy`}`;

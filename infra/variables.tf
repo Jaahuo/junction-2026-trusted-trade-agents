@@ -21,6 +21,12 @@ variable "ssh_public_key_path" {
   default = "~/.ssh/id_ed25519.pub"
 }
 
+variable "ci_ssh_public_key" {
+  description = "Public key of the CI deploy key, authorized for root at creation. Empty adds none."
+  type        = string
+  default     = ""
+}
+
 variable "admin_cidr" {
   description = "IPv4 network allowed to reach SSH, as address/size."
   type        = string

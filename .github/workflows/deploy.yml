@@ -1,0 +1,53 @@
+name: deploy
+on:
+  workflow_run:
+    workflows: [gate]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  deploy:
+    name: deploy
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      DEPLOY_OUTPUTS: ${{ secrets.DEPLOY_OUTPUTS }}
+      DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
+    steps:
+      - name: Skip until the deploy secrets exist
+        id: configured
+        run: |
+          if [ -z "$DEPLOY_OUTPUTS" ] || [ -z "$DEPLOY_ENV" ]; then
+            echo "Deploy secrets are not set; see docs/deploy.md." >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v5
+        if: steps.configured.outputs.ready == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: jdx/mise-action@v5
+        if: steps.configured.outputs.ready == 'true'
+      - if: steps.configured.outputs.ready == 'true'
+        run: bun install --frozen-lockfile
+      - name: SSH key and pinned host key
+        if: steps.configured.outputs.ready == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Push to the hosted demo
+        if: steps.configured.outputs.ready == 'true'
+        run: bun scripts/deploy.ts push

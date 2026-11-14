@@ -28,6 +28,13 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+%{ if ci_ssh_public_key != "" ~}
+  - path: /root/.ssh/authorized_keys
+    append: true
+    permissions: "0600"
+    content: |
+      ${ci_ssh_public_key}
+%{ endif ~}
 runcmd:
   - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${bun_version}"
   - mkdir -p ${app_dir}

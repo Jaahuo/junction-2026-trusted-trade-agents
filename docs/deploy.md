@@ -38,6 +38,28 @@ bun scripts/deploy.ts push
 
 The URL is `tofu -chdir=infra output -raw public_base_url`: `https://<ip>.sslip.io`, or `https://<domain>` with `TF_VAR_domain` and a DNS A record to `public_ip`. Connect the host to `<url>/mcp`.
 
+## Automatic deploy from main
+
+`.github/workflows/deploy.yml` runs `bun scripts/deploy.ts push` after `gate` passes on a push to `main`, on the commit that gate checked. One deploy runs at a time. It never resets data. Until the secrets below exist, it skips with a note in the run summary. `workflow_dispatch` runs it by hand.
+
+The CI key must be on the instance from creation, so create it before the first `apply`:
+
+```sh
+ssh-keygen -t ed25519 -N "" -C trusted-trade-ci -f ~/.ssh/trusted-trade-ci
+export TF_VAR_ci_ssh_public_key="$(cat ~/.ssh/trusted-trade-ci.pub)"
+```
+
+After the first `apply` and `push`, set the repository secrets (environment `production`):
+
+```sh
+gh secret set DEPLOY_SSH_KEY --env production < ~/.ssh/trusted-trade-ci
+gh secret set DEPLOY_ENV --env production < .env.deploy
+tofu -chdir=infra output -json | gh secret set DEPLOY_OUTPUTS --env production
+ssh-keyscan -t ed25519 "$(tofu -chdir=infra output -raw public_ip)" | gh secret set DEPLOY_KNOWN_HOSTS --env production
+```
+
+`DEPLOY_OUTPUTS` holds the database URL. Set it again after any `apply` that changes an output. The challenge data ships in a separate step without `--delete`, so a CI push never removes the data files that are not in Git.
+
 ## Update, inspect and remove
 
 - Ship a new commit: `bun scripts/deploy.ts push`.

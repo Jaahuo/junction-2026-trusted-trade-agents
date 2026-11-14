@@ -43,6 +43,8 @@ export type Source = {
   call: (tool: ToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** Sends a message to the agent in the chat; absent outside a chat (plain mode). */
   message?: (text: string) => Promise<void>;
+  /** Tells the model something without a chat message (MCP Apps updateModelContext). */
+  context?: (text: string) => Promise<void>;
 };
 
 /** The part of the MCP Apps bridge (`App` of ext-apps) a view uses. */
@@ -54,6 +56,8 @@ export type Host = {
   }) => Promise<{ isError?: boolean; structuredContent?: unknown }>;
   /** Posts a user message to the chat; false when the host rejects it. */
   sendMessage: (text: string) => Promise<boolean>;
+  /** Updates what the model knows about the view, without a chat message. */
+  updateModelContext: (text: string) => Promise<void>;
 };
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -78,6 +82,7 @@ export function hostSource(host: Host): Source {
     message: async (text) => {
       if (!(await host.sendMessage(text))) throw new Error("The chat did not take the message.");
     },
+    context: (text) => host.updateModelContext(text),
   };
 }
 
@@ -163,6 +168,7 @@ export function fixtureSource(fixture: unknown, now = () => new Date().toISOStri
     },
     // The harness shows the chat states, so messages are accepted and dropped.
     message: async () => {},
+    context: async () => {},
   };
 }
 

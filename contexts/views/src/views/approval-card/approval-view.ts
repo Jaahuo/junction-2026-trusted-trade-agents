@@ -216,6 +216,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       updated.reasons.every((r) => order.reasons.includes(r))
     )
       await this.decide(updated, { decision: "approve", proposalVersion: updated.proposalVersion });
+    // The model learns the decision made on the card, so it does not say the order still waits.
+    if (updated.status !== "pending_approval") void this.source.context?.(decisionContext(updated));
     // The agent confirms a placed order in the chat.
     if (request.decision !== "reject" && updated.status === "placed")
       void this.source.message?.(`I confirmed order ${order.orderId}.`);
@@ -389,6 +391,12 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       ></tt-approval-card>`;
   }
 }
+
+/** What the model is told after a decision on the card. */
+const decisionContext = (order: Order) =>
+  order.status === "placed" || order.status === "awaiting_payment"
+    ? `The approver confirmed order ${order.orderId} on the approval card. It was sent to Valio Aimo.`
+    : `The approver rejected order ${order.orderId} on the approval card. Nothing is ordered. Do not ask for its approval again unless the user asks for a new order.`;
 
 /** Puts a decided order back into the tool result it came from. */
 const replace = (data: Order | PendingList, updated: Order) =>

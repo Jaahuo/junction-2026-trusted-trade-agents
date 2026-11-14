@@ -121,6 +121,24 @@ test("an expired token is requoted for the same quantity", async () => {
   ]);
 });
 
+test("requote advances delivery and signs the shifted cutoff with unconfirmed stock", async () => {
+  const { app, offer, verify } = await mount();
+  const response = await requote(app, {
+    tokens: [await offer({ requestedDate: "2026-11-20" })],
+    changes: [{ productId: OAT, deliverBy: "2026-11-21" }],
+  });
+  const result = OffersResultSchema.parse(await response.json());
+  const fresh = result.offers[0];
+  const verified = await verify(fresh?.token ?? "");
+  if (!verified.ok) throw new Error("The requoted token failed verification.");
+  expect(verified.value).toMatchObject({
+    deliveryDate: "2026-11-21",
+    requestedDate: "2026-11-21",
+    cutoffAt: "2026-11-19T10:00:00.000+02:00",
+    stock: "unconfirmed",
+  });
+});
+
 test("a quantity the product cannot be offered at is omitted with its reason", async () => {
   const { app, offer } = await mount();
   const response = await requote(app, {

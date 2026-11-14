@@ -97,6 +97,40 @@ const records = [
     { salesUnit: "ST", units: [{ unitId: "ST", sizeInBaseUnits: 1 }] },
     conversion("CASE", "LTR", 7),
   ),
+  raw(
+    "T-EACH",
+    { salesUnit: "ST", units: [{ unitId: "ST", sizeInBaseUnits: 1 }] },
+    conversion("BASE_UNIT_OR_EACH", "MLT", 750),
+  ),
+  raw(
+    "T-RATIO",
+    {
+      baseUnit: "PAK",
+      units: [
+        { unitId: "KI", sizeInBaseUnits: 6 },
+        { unitId: "ST", sizeInBaseUnits: 2 },
+      ],
+    },
+    conversion("BASE_UNIT_OR_EACH", "LTR", 2),
+  ),
+  raw(
+    "T-UNKNOWN-BASE",
+    {
+      baseUnit: "PAK",
+      units: [{ unitId: "KI", sizeInBaseUnits: 6 }],
+    },
+    conversion("BASE_UNIT_OR_EACH", "LTR", 2),
+  ),
+  raw(
+    "T-CASE-AND-EACH",
+    {},
+    {
+      unitConversions: [
+        { synkkaPackagingType: "CASE", volume: { unit: "LTR", value: 9 } },
+        { synkkaPackagingType: "BASE_UNIT_OR_EACH", volume: { unit: "LTR", value: 1 } },
+      ],
+    },
+  ),
   { id: "T-BROKEN" },
 ];
 
@@ -129,6 +163,10 @@ test("the slim index maps names, claims, volume per sales unit, reliability, CO2
     "T-KI-OF-KG",
     "T-CS",
     "T-ST-CASE",
+    "T-EACH",
+    "T-RATIO",
+    "T-UNKNOWN-BASE",
+    "T-CASE-AND-EACH",
   ]);
   expect(products.get("T-1")).toEqual({
     productId: "T-1",
@@ -165,7 +203,7 @@ test("CSV values parse with CRLF line ends and skip blank or out-of-range values
   );
 });
 
-test("the volume per sales unit comes from the unit's own weight, then the consumer unit, then the case", async () => {
+test("the volume per sales unit comes from weight, case, or identifiable consumer units", async () => {
   const products = await byId();
   expect(
     Object.fromEntries(
@@ -179,6 +217,10 @@ test("the volume per sales unit comes from the unit's own weight, then the consu
     "T-KI-CASE": { value: 7, unit: "LTR" },
     "T-CS": { value: 7.5, unit: "KGM" },
     "T-ST-CASE": null,
+    "T-EACH": { value: 0.75, unit: "LTR" },
+    "T-RATIO": { value: 6, unit: "LTR" },
+    "T-UNKNOWN-BASE": null,
+    "T-CASE-AND-EACH": { value: 9, unit: "LTR" },
   });
 });
 
@@ -202,6 +244,15 @@ test("a weight or case sales unit converts a std quantity to its own unit, round
     kiOfKg: { orderQuantity: { value: 4, unit: "KI" }, equals: { value: 12, unit: "KGM" } },
     case: { orderQuantity: { value: 1, unit: "CS" }, equals: { value: 7.5, unit: "KGM" } },
     consumer: { orderQuantity: { value: 9, unit: "KI" }, equals: { value: 108, unit: "LTR" } },
+  });
+  expect(convert("T-EACH", 2, "LTR")).toEqual({
+    orderQuantity: { value: 3, unit: "ST" },
+    equals: { value: 2.25, unit: "LTR" },
+  });
+  expect(convert("T-UNKNOWN-BASE", 2, "LTR")).toEqual({
+    orderQuantity: null,
+    equals: null,
+    quantityReason: "Sales unit conversion is unavailable.",
   });
 });
 

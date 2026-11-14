@@ -366,6 +366,33 @@ const reset = async (outputs: Outputs): Promise<void> => {
   await $`bun apps/api/src/remote-reset.ts --yes`.env(resetEnv(hosted, process.env, process.cwd()));
 };
 
+const failedConclusions = new Set(["failure", "timed_out", "startup_failure"]);
+
+/** A warning when the latest completed deploy of main failed, from `gh run list --json`. */
+export const deployWarning = (runs: unknown): string | undefined => {
+  const run: unknown = Array.isArray(runs) ? runs[0] : undefined;
+  if (!run || typeof run !== "object") return undefined;
+  const conclusion = "conclusion" in run ? run.conclusion : undefined;
+  if (typeof conclusion !== "string" || !failedConclusions.has(conclusion)) return undefined;
+  const sha = "headSha" in run && typeof run.headSha === "string" ? run.headSha.slice(0, 7) : "?";
+  const url = "url" in run && typeof run.url === "string" ? run.url : "the deploy workflow";
+  return `Warning: the latest deploy of main (${sha}) ended in ${conclusion}, so the hosted demo may be stale. See ${url}.`;
+};
+
+/** Looks up the latest completed deploy of main; never fails, because the warning is advisory. */
+export const latestDeployWarning = async (): Promise<string | undefined> => {
+  const result =
+    await $`gh run list --workflow deploy.yml --branch main --status completed --limit 1 --json conclusion,headSha,url`
+      .nothrow()
+      .quiet();
+  if (result.exitCode !== 0) return "Warning: could not read the latest deploy of main.";
+  try {
+    return deployWarning(JSON.parse(result.stdout.toString()));
+  } catch {
+    return "Warning: could not read the latest deploy of main.";
+  }
+};
+
 if (import.meta.main) {
   const command = process.argv[2] ?? "push";
   const outputs = await readOutputs();

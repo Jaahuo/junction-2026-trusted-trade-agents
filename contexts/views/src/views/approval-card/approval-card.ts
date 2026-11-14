@@ -2,11 +2,10 @@ import {
   type DecideApprovalRequest,
   type OfferClaims,
   type Order,
-  REASON_TEXT,
   type ReasonCode,
 } from "@app/contract";
 import { brand } from "@app/ui/brand";
-import { formatOrderNumber, ORDER_ACTIONS, ORDER_STATUS_LABELS } from "@app/ui/format";
+import { formatOrderNumber, ORDER_WORDING } from "@app/ui/format";
 import { css, html, LitElement, nothing, type PropertyValues } from "lit";
 import checkCircle from "../../shared/icons/check-circle.svg?raw";
 import chevronDown from "../../shared/icons/chevron-down.svg?raw";
@@ -20,7 +19,9 @@ import plus16 from "../../shared/icons/plus-16.svg?raw";
 import search from "../../shared/icons/search.svg?raw";
 import warning16 from "../../shared/icons/warning-16.svg?raw";
 import xCircle from "../../shared/icons/x-circle.svg?raw";
+import { intlLocale, lang, LocaleController, pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
+import { CARD } from "./card-strings.ts";
 import { productImage } from "./images.ts";
 import {
   amount,
@@ -62,48 +63,52 @@ const warn = (title: string, detail: string | null = null): Reason => ({
 /** Banner headline and short explanation per reason, from the v8 and v16 copy. */
 function reasonCopy(code: ReasonCode, order: Order, claims: OfferClaims | undefined): Reason {
   const p = claims?.product;
+  const text = pick(CARD);
   switch (code) {
     case "SPEND_OVER_LIMIT":
-      return warn("Over your order limit");
+      return warn(text.overOrderLimit);
     case "NEW_PRODUCT":
       return {
-        title: "New product",
-        detail: `${order.customer} has not ordered a product in this order before`,
+        title: text.newProduct,
+        detail: text.newProductDetail(order.customer),
         tone: "info",
       };
     case "SUBSTITUTION":
       return {
-        title: "Substitute proposed",
-        detail: "a product in this order is out of stock",
+        title: text.substituteProposed,
+        detail: text.substituteDetail,
         tone: "info",
       };
     case "CATEGORY_NOT_ALLOWED":
-      return warn("Category not allowed", p === undefined ? null : `${p.category} is not allowed`);
+      return warn(
+        text.categoryNotAllowed,
+        p === undefined ? null : text.categoryDetail(p.category),
+      );
     case "RELIABILITY_BELOW_MIN":
       return warn(
-        "Delivery reliability below minimum",
+        text.reliabilityBelowMin,
         p?.deliveryReliability == null
           ? null
-          : `on-time delivery ${Math.round(p.deliveryReliability * 100)}%`,
+          : text.reliabilityDetail(Math.round(p.deliveryReliability * 100)),
       );
     case "CO2_ABOVE_MAX":
       return warn(
-        "CO₂ above maximum",
-        p?.co2PerKg == null ? null : `${number(p.co2PerKg)} kg CO₂e per kg`,
+        text.co2AboveMax,
+        p?.co2PerKg == null ? null : text.co2Detail(number(p.co2PerKg)),
       );
     case "UNCONFIRMED_ALLERGEN":
-      return warn("Allergen information not confirmed");
+      return warn(text.allergenNotConfirmed);
     case "UNCONFIRMED_STOCK":
-      return warn("Stock not confirmed");
+      return warn(text.stockNotConfirmed);
     case "QUANTITY_UNUSUAL":
-      return warn("Unusually large quantity");
+      return warn(text.quantityUnusual);
     case "PAYMENT_TERMS":
       return warn(
-        "Payment terms need approval",
-        order.paymentTerms === "pay_on_order" ? "prepayment instead of invoice" : null,
+        text.paymentTerms,
+        order.paymentTerms === "pay_on_order" ? text.paymentTermsDetail : null,
       );
     default:
-      return warn(REASON_TEXT[code]);
+      return warn(text.reason[code]);
   }
 }
 
@@ -132,13 +137,14 @@ const substitutionOf = (order: Order, c: OfferClaims): Substitution | null => {
   const proposed = alternatives.filter((a) => a.replaces === c.productId);
   return proposed.length === 0 ? null : { original: c, options: proposed };
 };
-const outOfStock = (c: OfferClaims) =>
-  `out of stock${c.nextDeliveryDate === null ? "" : ` until ${day(c.nextDeliveryDate)}`}`;
+const until = (c: OfferClaims) => (c.nextDeliveryDate === null ? null : day(c.nextDeliveryDate));
+const outOfStock = (c: OfferClaims) => pick(CARD).outOfStock(until(c));
 /**
  * What needs a decision, one short line per reason, naming the product where there is one
  * ("Out of stock: …", "New product: …"), for the list of open orders.
  */
 export function reasonSummaries(order: Order): string[] {
+  const text = pick(CARD);
   const claims = order.lines.map((l) => l.claims);
   return order.reasons.map((r) => {
     if (r === "SUBSTITUTION") {
@@ -146,11 +152,11 @@ export function reasonSummaries(order: Order): string[] {
         const sub = substitutionOf(order, c);
         return sub === null ? [] : [(sub.original ?? c).product.name];
       });
-      return `Out of stock: ${names.join(", ")}`;
+      return text.outOfStockNamed(names.join(", "));
     }
     if (r === "UNCONFIRMED_STOCK") {
       const short = claims.find((c) => c.shortfall !== null);
-      if (short !== undefined) return `Not all arrives on time: ${short.product.name}`;
+      if (short !== undefined) return text.notAllOnTime(short.product.name);
     }
     const title = reasonCopy(r, order, claims[0]).title;
     const named = linesFor(order, r).map((c) => c.product.name);
@@ -171,7 +177,7 @@ const SHOWN = 3;
 const round = (value: number) => Math.round(value * 100) / 100;
 /** "Wednesday", for the agent prompts. */
 const weekday = (date: string) =>
-  new Intl.DateTimeFormat("en-GB", { weekday: "long" }).format(new Date(date));
+  new Intl.DateTimeFormat(intlLocale(), { weekday: "long" }).format(new Date(date));
 /** The number typed into a quantity field, or NaN. */
 const typed = (e: Event) => (e.target instanceof HTMLInputElement ? Number(e.target.value) : NaN);
 
@@ -718,6 +724,8 @@ export class ApprovalCard extends LitElement {
   declare private picked: string | null;
   /** True from Confirm with changed amounts until the new quote arrives. */
   declare private requoting: boolean;
+  /** Re-renders the card in the new language when it changes. */
+  protected readonly locale = new LocaleController(this);
   /** The reject picked, from its click until the decision comes back: it says "Rejecting…". */
   declare private rejecting: "stop" | "alternatives" | null;
   /** The decision waiting for its second click, which states what happens. */
@@ -771,16 +779,18 @@ export class ApprovalCard extends LitElement {
   }
 
   private eyebrow(order: Order) {
-    if (order.status === "placed") return "Approved";
-    if (order.status === "awaiting_payment") return "Approved · waiting for payment";
-    if (order.status !== "pending_approval") return ORDER_STATUS_LABELS[order.status];
-    if (this.busy && this.requoting) return "Getting a new offer";
+    const text = pick(CARD);
+    if (order.status === "placed") return text.approved;
+    if (order.status === "awaiting_payment") return text.approvedWaiting;
+    if (order.status !== "pending_approval") return ORDER_WORDING[lang()].statuses[order.status];
+    if (this.busy && this.requoting) return text.gettingOffer;
     // Nothing left to approve after changing amounts (prototype A2): the logo only.
-    return this.todos(order).length > 0 ? "Approval required" : "";
+    return this.todos(order).length > 0 ? text.approvalRequired : "";
   }
 
   /** v16: an order of products, named by its delivery day, with order number and count. */
   private header(order: Order) {
+    const text = pick(CARD);
     const title = html`<div class="headline">
       <h2 class="name">${orderName(order)}</h2>
       <p aria-live="polite">
@@ -788,8 +798,8 @@ export class ApprovalCard extends LitElement {
       </p>
     </div>`;
     const facts = html`<dl class="facts">
-      ${fact("Order no.", formatOrderNumber(order.orderId))}
-      ${fact("Products", String(order.lines.length))}
+      ${fact(text.orderNo, formatOrderNumber(order.orderId))}
+      ${fact(text.products, String(order.lines.length))}
     </dl>`;
     const pill =
       order.status === "pending_approval" &&
@@ -805,9 +815,10 @@ export class ApprovalCard extends LitElement {
   }
 
   private reasonTodos(order: Order, lines: OfferClaims[]): Todo[] {
+    const text = pick(CARD);
     return order.reasons.flatMap((r): Todo[] => {
       // A check the audit names products for gets one to-do per product still in the order.
-      const productTodos = (reason: ReasonCode, text: string): Todo[] => {
+      const productTodos = (reason: ReasonCode, why: string): Todo[] => {
         const named = linesFor(order, reason);
         if (named.length === 0) return [generic];
         return named
@@ -815,15 +826,15 @@ export class ApprovalCard extends LitElement {
           .map((c) => ({
             where: c.product.name,
             target: lineId(c),
-            reason: text,
-            action: "Check that you want this product",
+            reason: why,
+            action: text.checkYouWantProduct,
           }));
       };
       const generic: Todo = {
         where: reasonCopy(r, order, lines[0]).title,
         target: "products",
-        reason: REASON_TEXT[r],
-        action: "Check the products",
+        reason: text.reason[r],
+        action: text.checkProducts,
       };
       switch (r) {
         case "SPEND_OVER_LIMIT": {
@@ -832,13 +843,10 @@ export class ApprovalCard extends LitElement {
           if (over !== null && over <= 0) return [];
           return [
             {
-              where: "Order total",
+              where: text.orderTotal,
               target: "order-total",
-              reason: "Order total is over your order limit",
-              action:
-                over === null
-                  ? "Approve it as it is, or reject it"
-                  : `Reduce by ${money(round(over))} to fit your limit`,
+              reason: text.totalOverLimit,
+              action: over === null ? text.approveOrReject : text.reduceBy(money(round(over))),
             },
           ];
         }
@@ -852,24 +860,24 @@ export class ApprovalCard extends LitElement {
                   {
                     where: head.product.name,
                     target: lineId(c),
-                    reason: `Out of stock${head.nextDeliveryDate === null ? "" : ` until ${day(head.nextDeliveryDate)}`}`,
-                    action: "Choose a replacement",
+                    reason: text.outOfStockTitle(until(head)),
+                    action: text.chooseReplacement,
                   },
                 ];
           });
         case "NEW_PRODUCT":
-          return productTodos(r, "New product, not ordered before");
+          return productTodos(r, text.newNotOrdered);
         case "UNCONFIRMED_STOCK": {
           const c = lines.find((l) => l.shortfall !== null || l.stock === "unconfirmed");
           return [
             {
-              where: c?.product.name ?? "Stock",
+              where: c?.product.name ?? text.stock,
               target: c === undefined ? "products" : lineId(c),
               reason:
                 c?.shortfall == null
-                  ? "Stock is not confirmed"
-                  : `${amount(c.shortfall)} short for this delivery`,
-              action: "Check the amount",
+                  ? text.stockIsNotConfirmed
+                  : text.shortForDelivery(amount(c.shortfall)),
+              action: text.checkAmount,
             },
           ];
         }
@@ -893,7 +901,7 @@ export class ApprovalCard extends LitElement {
     const items = this.todos(order);
     if (items.length === 0) return nothing;
     return html`<section class="todo" part="reason" aria-labelledby="todo-title">
-      <h3 id="todo-title" class="todo-title">${icon(attention)}Needs your approval</h3>
+      <h3 id="todo-title" class="todo-title">${icon(attention)}${pick(CARD).needsYourApproval}</h3>
       <ul class="todo-list">
         ${items.map(
           (t) =>
@@ -929,7 +937,7 @@ export class ApprovalCard extends LitElement {
       ${
         chips.length === 0
           ? nothing
-          : html`<p class="label-small secondary">Or tell it what to do:</p>
+          : html`<p class="label-small secondary">${pick(CARD).orTellIt}</p>
               <div class="chips">
                 ${chips.map(
                   (chip) =>
@@ -962,27 +970,28 @@ export class ApprovalCard extends LitElement {
    */
   private totalBlock(order: Order) {
     if (!order.reasons.includes("SPEND_OVER_LIMIT")) return nothing;
+    const text = pick(CARD);
     const over = this.overLimit(order);
     const limitRows =
       this.orderLimit === null || over === null
         ? nothing
         : html`<div class="limit">
-              <dt>Your order limit</dt>
+              <dt>${text.yourOrderLimit}</dt>
               <dd>${money(this.orderLimit)}</dd>
             </div>
             <div class="difference ${over > 0 ? "over" : "under"}">
               <dt class="label">
-                ${icon(over > 0 ? warning16 : checkCircle)}${over > 0 ? "Over your limit" : "Under your limit"}
+                ${icon(over > 0 ? warning16 : checkCircle)}${over > 0 ? text.overYourLimit : text.underYourLimit}
               </dt>
               <dd>${over > 0 ? signed(round(over)) : money(round(-over))}</dd>
             </div>`;
     const within = over !== null && over <= 0;
     return html`<section class="group" id="order-total" tabindex="-1" part="order-total">
-      <h3 class="section-title">Order total</h3>
+      <h3 class="section-title">${text.orderTotal}</h3>
       <div class="total-block ${within ? "within" : ""}">
         <dl class="limit-rows body-small" aria-live="polite">
           <div>
-            <dt>Total ${vat("gross")}</dt>
+            <dt>${text.totalInclVat}</dt>
             <dd>${money(round(this.total(order, "gross")))}</dd>
           </div>
           ${limitRows}
@@ -991,9 +1000,9 @@ export class ApprovalCard extends LitElement {
           within
             ? nothing
             : this.agentHelp(
-                "Let the agent reduce it",
-                `Get order ${order.orderId} under my order limit. Keep the products we need most. Send me a new offer to approve.`,
-                ["Remove the least needed", "Choose cheaper brands", "Order less of each"],
+                text.letAgentReduce,
+                text.reducePrompt(order.orderId),
+                text.reduceChips,
               )
         }
       </div>
@@ -1002,24 +1011,21 @@ export class ApprovalCard extends LitElement {
 
   /** The decision block of a flagged product: its choices and agent help (v17). */
   private lineDecision(order: Order, c: OfferClaims) {
+    const text = pick(CARD);
     const sub = substitutionOf(order, c);
     if (sub !== null) {
       const head = sub.original ?? c;
       return html`${this.choices(sub)}
-      ${this.agentHelp(
-        "Let the agent find another",
-        `${head.product.name} is ${outOfStock(head)}. Find the best replacement. Send me a new offer to approve.`,
-        [
-          "Same brand only",
-          "Cheapest option",
-          ...(head.nextDeliveryDate === null ? [] : [`Wait until ${day(head.nextDeliveryDate)}`]),
-        ],
-      )}`;
+      ${this.agentHelp(text.letAgentFind, text.findPrompt(head.product.name, outOfStock(head)), [
+        text.sameBrand,
+        text.cheapest,
+        ...(head.nextDeliveryDate === null ? [] : [text.waitUntil(day(head.nextDeliveryDate))]),
+      ])}`;
     }
     if (c.shortfall === null) return nothing;
     const pack = c.product.perSalesUnit;
     const later = c.nextDeliveryDate;
-    const packs = (q: number) => (pack === null ? amount(c.quantity) : `${number(q)} packs`);
+    const packs = (q: number) => (pack === null ? amount(c.quantity) : text.packs(number(q)));
     const missing = pack === null ? c.shortfall.value : Math.round(c.shortfall.value / pack.value);
     const perPack = c.total.net / c.quantity.value;
     const options: { value: Handling; label: string; facts: [string, string][]; price: string }[] =
@@ -1028,7 +1034,7 @@ export class ApprovalCard extends LitElement {
         : [
             {
               value: "split",
-              label: "Split delivery",
+              label: text.splitDelivery,
               facts: [
                 [day(c.deliveryDate), packs(c.quantity.value)],
                 [day(later), packs(missing)],
@@ -1037,15 +1043,15 @@ export class ApprovalCard extends LitElement {
             },
             {
               value: "later",
-              label: `All on ${day(later)}`,
+              label: text.allOn(day(later)),
               facts: [[day(later), packs(c.quantity.value + missing)]],
               price: money(0),
             },
           ];
     options.push({
       value: "fewer",
-      label: "Order fewer",
-      facts: [[day(c.deliveryDate), `${packs(c.quantity.value)} only`]],
+      label: text.orderFewer,
+      facts: [[day(c.deliveryDate), text.only(packs(c.quantity.value))]],
       price: signed(-round(perPack * missing)),
     });
     const [first, ...rest] = options;
@@ -1059,7 +1065,7 @@ export class ApprovalCard extends LitElement {
           @change=${() => (this.handling = o.value)}
         />
         <span class="choice-body">
-          ${o === first ? html`<span class="recommended label-small">Recommended</span>` : nothing}
+          ${o === first ? html`<span class="recommended label-small">${text.recommended}</span>` : nothing}
           <span class="choice-top">
             <span>${o.label}</span>
             <span class="strong">${o.price}</span>
@@ -1077,7 +1083,7 @@ export class ApprovalCard extends LitElement {
       </label>`;
     const all = c.quantity.value + missing;
     return html`<fieldset class="options">
-        <legend class="section-title">How to handle the missing ${amount(c.shortfall)}</legend>
+        <legend class="section-title">${text.howToHandle(amount(c.shortfall))}</legend>
         ${first === undefined ? nothing : option(first)}
         ${
           rest.length === 0
@@ -1088,18 +1094,18 @@ export class ApprovalCard extends LitElement {
                 aria-expanded=${open ? "true" : "false"}
                 @click=${() => (this.choicesOpen = !open)}
               >
-                ${open ? "Hide other choices" : `Other choices (${rest.length})`}${icon(chevronDown)}
+                ${open ? text.hideOtherChoices : text.otherChoices(rest.length)}${icon(chevronDown)}
               </button>`
         }
         ${open ? rest.map(option) : nothing}
       </fieldset>
       ${this.agentHelp(
-        "Let the agent sort it out",
-        `Only ${c.quantity.value} of ${all} ${c.product.name} packs arrive on ${weekday(c.deliveryDate)}. Find the best way to get all ${all}. Send me a new offer to approve.`,
+        text.letAgentSort,
+        text.shortPrompt(c.quantity.value, all, c.product.name, weekday(c.deliveryDate)),
         [
-          ...(later === null ? [] : [`All on ${weekday(later)}`]),
-          `Only ${packs(c.quantity.value)}`,
-          "Another product",
+          ...(later === null ? [] : [text.allOnWeekday(weekday(later))]),
+          text.onlyPacks(packs(c.quantity.value)),
+          text.anotherProduct,
         ],
       )}`;
   }
@@ -1139,6 +1145,7 @@ export class ApprovalCard extends LitElement {
 
   private productLine(order: Order, c: OfferClaims, flagged: boolean) {
     // Ready lines (and a new product) of a pending order take a stepper and a bin (no edit mode).
+    const text = pick(CARD);
     const editable = !flagged && order.status === "pending_approval";
     const isNew = editable && linesFor(order, "NEW_PRODUCT").includes(c);
     // A flagged substitute heads its box with the product it replaces (when the order has it)
@@ -1163,7 +1170,7 @@ export class ApprovalCard extends LitElement {
         : html`<div class="line-main">
             ${thumb(head.product.name)}
             <div class="line-content">
-              ${isNew ? html`<span class="tag label-small">New product</span>` : nothing}
+              ${isNew ? html`<span class="tag label-small">${text.newProduct}</span>` : nothing}
               <p class="product-top">
                 <span class="product-name">${head.product.name}</span
                 ><span>${money(this.lineTotal(head))}</span>
@@ -1177,7 +1184,7 @@ export class ApprovalCard extends LitElement {
                         <button
                           type="button"
                           class="bin"
-                          aria-label="Remove ${head.product.name}"
+                          aria-label=${text.remove(head.product.name)}
                           @click=${() => this.setQuantity(head, 0)}
                         >
                           ${icon(bin)}
@@ -1199,6 +1206,7 @@ export class ApprovalCard extends LitElement {
 
   /** v17 products: flagged lines first and always shown; ready lines collapse after three. */
   private products(order: Order) {
+    const text = pick(CARD);
     const pending = order.status === "pending_approval";
     const all = order.lines.map((l) => l.claims);
     const news = linesFor(order, "NEW_PRODUCT");
@@ -1216,7 +1224,7 @@ export class ApprovalCard extends LitElement {
     const visible = this.allProducts ? ready : ready.slice(0, SHOWN);
     const hidden = ready.length - SHOWN;
     return html`<section part="products" id="products" tabindex="-1">
-      <h3 class="section-title">Products</h3>
+      <h3 class="section-title">${text.products}</h3>
       <ul class="product-list">
         ${flagged.map((c) => this.productLine(order, c, true))}
         ${visible.map((c) => this.productLine(order, c, false))}
@@ -1229,9 +1237,7 @@ export class ApprovalCard extends LitElement {
               @click=${() => (this.allProducts = !this.allProducts)}
             >
               ${
-                this.allProducts
-                  ? "Show fewer products"
-                  : `Show ${hidden} more product${hidden === 1 ? "" : "s"}`
+                this.allProducts ? text.showFewerProducts : text.showMoreProducts(hidden)
               }${icon(chevronDown)}
             </button>`
           : nothing
@@ -1239,13 +1245,13 @@ export class ApprovalCard extends LitElement {
       ${removed.map(
         (c) =>
           html`<p class="removed body-small">
-            <span>${c.product.name} removed</span>
+            <span>${text.removed(c.product.name)}</span>
             <button
               type="button"
               class="link-button"
               @click=${() => this.setQuantity(c, c.quantity.value)}
             >
-              Undo
+              ${text.undo}
             </button>
           </p>`,
       )}
@@ -1257,9 +1263,10 @@ export class ApprovalCard extends LitElement {
     // "Approve order" while the order is over the limit; else "Confirm order".
     const over = this.overLimit(order);
     const confirm = !order.reasons.includes("SPEND_OVER_LIMIT") || (over !== null && over <= 0);
+    const text = pick(CARD);
     if (this.busy && !this.requoting && this.rejecting === null)
-      return confirm ? "Confirming…" : "Approving…";
-    return confirm ? "Confirm order" : "Approve order";
+      return confirm ? text.confirming : text.approving;
+    return confirm ? text.confirmOrder : text.approveOrder;
   }
 
   /** Approve (or Confirm) and Reject; each asks its question before anything is sent. */
@@ -1281,7 +1288,9 @@ export class ApprovalCard extends LitElement {
       >
         ${this.approveLabel(order)}
       </button>
-      <button part="button reject" class="btn brand" @click=${ask("reject")}>Reject</button>
+      <button part="button reject" class="btn brand" @click=${ask("reject")}>
+        ${pick(CARD).reject}
+      </button>
     </div>`;
   }
 
@@ -1290,13 +1299,14 @@ export class ApprovalCard extends LitElement {
    * the agent look for alternatives. Cancel goes back to the buttons.
    */
   private confirmation(order: Order, confirm: () => void) {
+    const text = pick(CARD);
     const cancel = html`<button
       type="button"
       part="button cancel"
       class="btn ghost"
       @click=${() => (this.busy ? undefined : (this.confirming = null))}
     >
-      Cancel
+      ${text.cancel}
     </button>`;
     if (this.confirming === "approve")
       return html`<div
@@ -1306,7 +1316,7 @@ export class ApprovalCard extends LitElement {
         aria-labelledby="confirm-question"
       >
         <p id="confirm-question" class="strong">
-          Approve order of ${money(round(this.total(order, "gross")))} ${vat("gross")}?
+          ${text.approveQuestion(`${money(round(this.total(order, "gross")))} ${vat("gross")}`)}
         </p>
         <div class="actions">
           <button
@@ -1320,6 +1330,7 @@ export class ApprovalCard extends LitElement {
           ${cancel}
         </div>
       </div>`;
+    const actions = ORDER_WORDING[lang()].actions;
     const reject = (next: "stop" | "alternatives", label: string) =>
       html`<button
         part="button reject-${next}"
@@ -1331,24 +1342,23 @@ export class ApprovalCard extends LitElement {
           this.decide({ decision: "reject", next, proposalVersion: order.proposalVersion });
         }}
       >
-        ${this.busy && this.rejecting === next ? "Rejecting…" : label}
+        ${this.busy && this.rejecting === next ? text.rejecting : label}
       </button>`;
     return html`<div class="confirm" part="confirm" role="group" aria-labelledby="confirm-question">
-      <p id="confirm-question" class="strong">Reject this order?</p>
+      <p id="confirm-question" class="strong">${text.rejectQuestion}</p>
       <div class="actions">
-        ${reject("stop", ORDER_ACTIONS.rejectStop)}
-        ${reject("alternatives", ORDER_ACTIONS.rejectAlternatives)} ${cancel}
+        ${reject("stop", actions.rejectStop)} ${reject("alternatives", actions.rejectAlternatives)}
+        ${cancel}
       </div>
     </div>`;
   }
 
   private pendingBody(order: Order) {
+    const text = pick(CARD);
     const changed = this.changed(order);
     const gettingOffer =
       this.busy && this.requoting
-        ? html`<p class="getting strong" role="status">
-            Getting a new offer and placing the order…
-          </p>`
+        ? html`<p class="getting strong" role="status">${text.gettingOfferAndOrdering}</p>`
         : nothing;
     const confirm = () => {
       if (!changed) return this.decide(this.approveRequest(order));
@@ -1360,15 +1370,9 @@ export class ApprovalCard extends LitElement {
     };
     return html`${gettingOffer} ${this.todoBox(order)} ${this.totalBlock(order)}
       ${this.products(order)}
-      ${
-        changed
-          ? html`<p class="body-small">
-              You changed amounts. Confirming gets the new price and places the order.
-            </p>`
-          : nothing
-      }
+      ${changed ? html`<p class="body-small">${text.changedAmounts}</p>` : nothing}
       <p class="total-row">
-        <span>Order total <span class="vat">${vat("net")}</span></span
+        <span>${text.orderTotal} <span class="vat">${vat("net")}</span></span
         ><span class="value" aria-live="polite">${money(this.total(order, "net"))}</span>
       </p>
       ${
@@ -1383,13 +1387,9 @@ export class ApprovalCard extends LitElement {
               type="button"
               class="btn secondary talk"
               part="button talk"
-              @click=${() =>
-                this.ask(
-                  `I'd like to discuss order ${order.orderId} before I decide. Give me a short summary and ask what I want to change.`,
-                  "tt-talk",
-                )}
+              @click=${() => this.ask(text.aboutOrder(order.orderId), "tt-talk")}
             >
-              ${icon(agent16)}Discuss order with agent
+              ${icon(agent16)}${text.discussWithAgent}
             </button>`
           : nothing
       }`;
@@ -1401,8 +1401,9 @@ export class ApprovalCard extends LitElement {
     if (recommended === undefined) return nothing;
     const reference = original ?? recommended;
     const open = this.choicesOpen;
+    const text = pick(CARD);
     return html`<fieldset class="options">
-      <legend class="section-title">Replace with</legend>
+      <legend class="section-title">${text.replaceWith}</legend>
       ${this.choice(recommended, true, reference)}
       ${
         others.length === 0
@@ -1413,7 +1414,7 @@ export class ApprovalCard extends LitElement {
               aria-expanded=${open ? "true" : "false"}
               @click=${() => (this.choicesOpen = !open)}
             >
-              ${open ? "Hide other choices" : `Other choices (${others.length})`}${icon(chevronDown)}
+              ${open ? text.hideOtherChoices : text.otherChoices(others.length)}${icon(chevronDown)}
             </button>`
       }
       ${open ? others.map((c) => this.choice(c, false, reference)) : nothing}
@@ -1425,6 +1426,7 @@ export class ApprovalCard extends LitElement {
     const selected = this.picked === (recommended ? null : c.offerId);
     const std = stdUnits(c);
     const pack = c.product.perSalesUnit;
+    const text = pick(CARD);
     return html`<label class="choice ${selected ? "selected" : ""}">
       <input
         type="radio"
@@ -1434,7 +1436,7 @@ export class ApprovalCard extends LitElement {
       />
       ${thumb(c.product.name, "small")}
       <span class="choice-body">
-        ${recommended ? html`<span class="recommended label-small">Recommended</span>` : nothing}
+        ${recommended ? html`<span class="recommended label-small">${text.recommended}</span>` : nothing}
         <span class="choice-top">
           <span>${c.product.name}</span>
           <span class="strong"
@@ -1443,13 +1445,13 @@ export class ApprovalCard extends LitElement {
         </span>
         <dl class="option-facts body-small">
           <div>
-            <dt class="label-small secondary">Pack</dt>
+            <dt class="label-small secondary">${text.pack}</dt>
             <dd>
               ${pack === null ? amount(c.quantity) : `${number(c.quantity.value)} × ${amount(pack)}`}
             </dd>
           </div>
           <div>
-            <dt class="label-small secondary">Price</dt>
+            <dt class="label-small secondary">${text.price}</dt>
             <dd>${money(round(c.total.net / std.value))} / ${unit(std.unit)}</dd>
           </div>
         </dl>
@@ -1499,10 +1501,11 @@ export class ApprovalCard extends LitElement {
   /** The − amount + stepper of a ready line; the amount can also be typed. */
   private stepper(c: OfferClaims, q: number) {
     const name = c.product.name;
+    const text = pick(CARD);
     return html`<div class="stepper">
       <button
         type="button"
-        aria-label="Decrease ${name}"
+        aria-label=${text.decrease(name)}
         ?disabled=${q <= 1}
         @click=${() => this.setQuantity(c, q - 1)}
       >
@@ -1520,7 +1523,7 @@ export class ApprovalCard extends LitElement {
       >
       <button
         type="button"
-        aria-label="Increase ${name}"
+        aria-label=${text.increase(name)}
         @click=${() => this.setQuantity(c, q + 1)}
       >
         ${icon(plus16)}
@@ -1529,45 +1532,48 @@ export class ApprovalCard extends LitElement {
   }
 
   private decidedBody(order: Order) {
+    const text = pick(CARD);
     const decision = order.decision;
     // Only the approver decides on the card; `decision.by` is their account id.
     const by =
-      decision === null ? null : `You, ${when(new Date(decision.at)).replace("Today", "today")}`;
+      decision === null
+        ? null
+        : `${text.you}, ${when(new Date(decision.at)).replace(text.todayStart, text.todayMid)}`;
     const earliest = order.lines.map((l) => l.claims.deliveryDate).toSorted()[0];
     const result =
       order.status === "placed"
         ? {
             tone: "success",
             svg: checkCircle,
-            title: `Order sent to ${brand.name}`,
-            text: earliest === undefined ? "" : `Delivery ${day(earliest)}.`,
+            title: text.sentTitle(brand.name),
+            text: earliest === undefined ? "" : text.deliveryOn(day(earliest)),
           }
         : order.status === "awaiting_payment"
           ? {
               tone: "",
               svg: clockIcon,
-              title: "Approved. Waiting for payment",
-              text: "The order is sent to the wholesaler when the payment is confirmed.",
+              title: text.waitingTitle,
+              text: text.waitingText,
             }
           : decision?.next === "alternatives"
             ? {
                 tone: "",
                 svg: search,
-                title: "Declined. The agent looks for a better option",
-                text: "A new approval request comes here if the agent finds one.",
+                title: text.alternativesTitle,
+                text: text.alternativesText,
               }
             : decision?.next === "stop"
               ? {
                   tone: "",
                   svg: xCircle,
-                  title: "Declined. No order placed.",
-                  text: "Nothing is ordered unless you ask the agent again.",
+                  title: text.stopTitle,
+                  text: text.stopText,
                 }
               : {
                   tone: "danger",
                   svg: xCircle,
-                  title: "Rejected",
-                  text: order.reasons.map((r) => REASON_TEXT[r]).join(" "),
+                  title: text.rejected,
+                  text: order.reasons.map((r) => text.reason[r]).join(" "),
                 };
     const note = decision?.note ?? "";
     return html`<div class="result ${result.tone}" part="result" role="status" tabindex="-1">
@@ -1582,31 +1588,32 @@ export class ApprovalCard extends LitElement {
           ? html`${
               order.status === "awaiting_payment"
                 ? rows([
-                    ["Approved by", by],
-                    ["Payment", "Prepayment"],
+                    [text.approvedBy, by],
+                    [text.payment, text.prepayment],
                   ])
                 : nothing
             }
             ${
               order.status === "placed"
                 ? rows([
-                    ["Order no.", formatOrderNumber(order.orderId)],
-                    ["Delivery", earliest === undefined ? null : day(earliest)],
-                    ["Total", `${money(order.total.net)} ${vat("net")}`],
-                    ["Confirmed by", decision === null ? null : "You"],
-                    ["Confirmed at", decision === null ? null : timeOnly(new Date(decision.at))],
+                    [text.orderNo, formatOrderNumber(order.orderId)],
+                    [text.delivery, earliest === undefined ? null : day(earliest)],
+                    [text.total, `${money(order.total.net)} ${vat("net")}`],
+                    [text.confirmedBy, decision === null ? null : text.you],
+                    [text.confirmedAt, decision === null ? null : timeOnly(new Date(decision.at))],
                   ])
                 : nothing
             }
             ${this.products(order)}`
           : decision?.next === "stop"
             ? nothing
-            : rows([["Your note", note === "" ? null : `“${note}”`]])
+            : rows([[text.yourNote, note === "" ? null : `“${note}”`]])
       }`;
   }
 
   /** v17 "More details": a disclosure at the bottom of every card, collapsed by default. */
   private details(order: Order) {
+    const text = pick(CARD);
     const verified = order.audit.some((e) => e.event === "offer_verified");
     const open = this.detailsOpen;
     const log =
@@ -1620,28 +1627,28 @@ export class ApprovalCard extends LitElement {
         aria-controls="details-body"
         @click=${() => (this.detailsOpen = !open)}
       >
-        <span class="more">${open ? "Fewer details" : "More details"}</span>${icon(chevronDown)}
-        ${open ? nothing : html`<span class="hint">Offer and signature</span>`}
+        <span class="more">${open ? text.fewerDetails : text.moreDetails}</span>${icon(chevronDown)}
+        ${open ? nothing : html`<span class="hint">${text.offerAndSignature}</span>`}
       </button>
       <div id="details-body" class="details-body ${open ? "open" : ""}">
         <section class="group">
-          <h3 class="section-title">Your request</h3>
+          <h3 class="section-title">${text.yourRequest}</h3>
           ${order.originalRequest === null ? nothing : html`<p>“${order.originalRequest}”</p>`}
           ${rows([
-            ["Order id", order.orderId],
-            ["Sent", when(new Date(order.createdAt))],
-            ["Sent by", order.agentId],
+            [text.orderId, order.orderId],
+            [text.sent, when(new Date(order.createdAt))],
+            [text.sentBy, order.agentId],
           ])}
         </section>
         <section class="group">
-          <h3 class="section-title">Offer</h3>
+          <h3 class="section-title">${text.offer}</h3>
           ${rows([
-            ["Offer no.", order.offerIds.join(", ")],
-            ["Signature", verified ? `Verified by ${brand.name}` : "Not verified"],
+            [text.offerNo, order.offerIds.join(", ")],
+            [text.signature, verified ? text.verified(brand.name) : text.notVerified],
           ])}
         </section>
         <p class="details-links body-small">
-          ${log === null ? nothing : html`<a href=${log} target="_blank" rel="noreferrer">View full log</a>`}
+          ${log === null ? nothing : html`<a href=${log} target="_blank" rel="noreferrer">${text.viewFullLog}</a>`}
         </p>
       </div>
     </aside>`;

@@ -1,9 +1,4 @@
-import {
-  type DecideApprovalRequest,
-  type Order,
-  type PendingList,
-  REASON_TEXT,
-} from "@app/contract";
+import type { DecideApprovalRequest, Order, PendingList } from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { css, html, nothing } from "lit";
 import {
@@ -16,10 +11,13 @@ import {
 import checkCircle from "../../shared/icons/check-circle-32.svg?raw";
 import warningSmall from "../../shared/icons/warning-16.svg?raw";
 import warningLarge from "../../shared/icons/warning-32.svg?raw";
+import { pick } from "../../shared/locale.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { defineApprovalCard, reasonSummaries } from "./approval-card.ts";
+import { CARD } from "./card-strings.ts";
 import { brandHeader, cardStyles, icon, money, orderName, vat, when } from "./parts.ts";
+import { VIEW } from "./strings.ts";
 
 /**
  * Loads the tool result from `source` and shows each view state: loading, error, the empty
@@ -336,7 +334,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       this.updatingId = null;
       this.state = {
         kind: "error",
-        message: cause instanceof Error ? cause.message : "The message was not sent.",
+        message: cause instanceof Error ? cause.message : pick(VIEW).notSent,
         plainUrl: order.approvalUrl,
       };
     }
@@ -344,11 +342,12 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 
   /** Prototype P4: the collapsed card while the agent works on the order. */
   private updating(order: Order) {
+    const text = pick(VIEW);
     return html`<article class="updating" part="updating" role="status">
       <img src=${brand.logo} alt=${brand.name} />
       <div class="updating-text">
         <p class="strong">${orderName(order)}</p>
-        <p class="body-small">The agent is updating this order</p>
+        <p class="body-small">${text.agentUpdating}</p>
       </div>
       <span class="shimmer load-bar strip-bar" aria-hidden="true"></span>
     </article>`;
@@ -360,7 +359,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
    */
   private loading() {
     const { placing, request } = this.pending;
-    const title = placing ? "Checking your order…" : "Loading approvals…";
+    const text = pick(VIEW);
+    const title = placing ? text.checkingOrder : text.loadingApprovals;
     return html`<article class="card" part="loading" aria-busy="true">
       ${brandHeader(
         title,
@@ -371,13 +371,7 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       <div class="body">
         <div class="loading-text" role="status">
           <p class="strong">${title}</p>
-          ${
-            placing
-              ? html`<p class="body-small secondary">
-                  Verifying the signed offers and checking them against your limits.
-                </p>`
-              : nothing
-          }
+          ${placing ? html`<p class="body-small secondary">${text.verifying}</p>` : nothing}
           ${request === null ? nothing : html`<p class="body-small">“${request}”</p>`}
         </div>
         <span class="skeleton shimmer w-80" aria-hidden="true"></span
@@ -392,25 +386,25 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
   }
 
   private empty() {
+    const text = pick(VIEW);
     return html`<article class="card" part="empty">
-      ${brandHeader(`${brand.name} approvals`, html`<h2 class="title">Approvals</h2>`)}
+      ${brandHeader(text.brandApprovals(brand.name), html`<h2 class="title">${text.approvals}</h2>`)}
       <div class="body center">
         ${icon(checkCircle)}
-        <p class="headline">No orders wait for approval</p>
-        <p class="secondary">New requests from the agent show up here.</p>
+        <p class="headline">${text.noneWaiting}</p>
+        <p class="secondary">${text.newRequests}</p>
       </div>
     </article>`;
   }
 
   private list(orders: Order[]) {
     const pending = orders.filter((o) => o.status === "pending_approval").length;
+    const text = pick(VIEW);
     return html`<div class="top-row" aria-hidden="true"></div>
       <article class="card" part="list">
         ${brandHeader(
-          `${brand.name} approvals`,
-          html`<h2 class="title">
-            ${pending === 0 ? "Approvals" : `${pending} order${pending === 1 ? "" : "s"} wait for approval`}
-          </h2>`,
+          text.brandApprovals(brand.name),
+          html`<h2 class="title">${pending === 0 ? text.approvals : text.waiting(pending)}</h2>`,
         )}
         <div class="body">
           <ul class="list">
@@ -429,20 +423,20 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
                 </ul>
                 <dl class="item-facts body-small">
                   <div>
-                    <dt class="label-small">Products</dt>
+                    <dt class="label-small">${text.products}</dt>
                     <dd>${claims.length}</dd>
                   </div>
                   ${
                     Number.isFinite(decideBy)
                       ? html`<div>
-                          <dt class="label-small">Decide by</dt>
+                          <dt class="label-small">${text.decideBy}</dt>
                           <dd>${when(new Date(decideBy * 1000))}</dd>
                         </div>`
                       : nothing
                   }
                 </dl>
                 <button class="btn secondary" @click=${() => this.open(order.orderId)}>
-                  Review
+                  ${text.review}
                 </button>
               </li>`;
             })}
@@ -468,7 +462,9 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
     return html`${
         orders.length > 1
           ? html`<div class="top-row">
-              <button class="back" @click=${() => this.open(null)}>← All approvals</button>
+              <button class="back" @click=${() => this.open(null)}>
+                ${pick(VIEW).allApprovals}
+              </button>
             </div>`
           : nothing
       }
@@ -488,62 +484,46 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
 }
 
 /** Plain words for a failed decision, by the server's error code ("CODE: message"). */
-const FAILURES: Record<string, string> = {
-  OFFER_EXPIRED: "An offer in this order has expired. Ask the agent for new offers.",
-  STALE_OFFER: "The mandate changed after the offers were made. Ask the agent for new offers.",
-  CONFLICT: "This order was already decided or changed. Reload to see it.",
-  NOT_FOUND: "This order no longer exists.",
-  UPSTREAM_FAILED: "The decision could not be checked right now. Try again in a moment.",
-  NOT_IMPLEMENTED:
-    "Changing amounts is not available yet. Approve the order as it is, or ask the agent.",
-};
 const decisionFailure = (result: { kind: string; message?: string }) => {
+  const text = pick(VIEW);
   const code = /^([A-Z_]+):/.exec(result.message ?? "")?.[1];
-  return (
-    (code === undefined ? undefined : FAILURES[code]) ?? "The decision was not saved. Try again."
-  );
+  return (code === undefined ? undefined : text.failures[code]) ?? text.notSaved;
 };
 
 /** The decision made on the card and what the agent does next, in the approver's words, without ids. */
 export const decisionText = (order: Order) => {
   const name = orderName(order);
-  if (order.status === "placed") return `${name} approved. It is placed with ${brand.name}.`;
-  if (order.status === "awaiting_payment")
-    return `${name} approved. It goes to ${brand.name} when the payment is confirmed.`;
+  const decided = pick(VIEW).decided;
+  if (order.status === "placed") return decided.placed(name, brand.name);
+  if (order.status === "awaiting_payment") return decided.awaitingPayment(name, brand.name);
   if (order.status === "rejected")
-    return `${name} was not placed: ${order.reasons.map((r) => REASON_TEXT[r]).join(" ")}`;
-  return order.decision?.next === "alternatives"
-    ? `${name} rejected. Look for alternatives and send me a new order to approve.`
-    : `${name} rejected. Order nothing for it, and do not ask again unless I ask for a new order.`;
+    return decided.notPlaced(name, order.reasons.map((r) => pick(CARD).reason[r]).join(" "));
+  return order.decision?.next === "alternatives" ? decided.alternatives(name) : decided.stop(name);
 };
 
 /** The error state: the approval page when there is one, and Try again. */
-export const errorCard = (approvalUrl: string | null, retry: () => void) =>
-  html`<article class="card" part="error" role="alert">
-    ${brandHeader(`${brand.name} approvals`)}
+export const errorCard = (approvalUrl: string | null, retry: () => void) => {
+  const text = pick(VIEW);
+  return html`<article class="card" part="error" role="alert">
+    ${brandHeader(text.brandApprovals(brand.name))}
     <div class="body center">
       ${icon(warningLarge)}
-      <p class="headline">This approval can't be shown here</p>
-      <p class="secondary">
-        ${
-          approvalUrl === null
-            ? "Try again in a moment."
-            : "Open it on the approval page to review and decide."
-        }
-      </p>
+      <p class="headline">${text.cantShowTitle}</p>
+      <p class="secondary">${approvalUrl === null ? text.cantShowRetry : text.cantShowBody}</p>
       <div class="actions">
         ${
           approvalUrl === null
             ? nothing
             : html`<a class="btn primary" href=${approvalUrl} target="_blank" rel="noreferrer"
-                >Open approval page</a
+                >${text.openApprovalPage}</a
               >`
         }
-        <button class="btn ghost" @click=${retry}>Try again</button>
+        <button class="btn ghost" @click=${retry}>${text.tryAgain}</button>
       </div>
-      ${approvalUrl === null ? nothing : html`<p class="label-small secondary">Opens in a new tab</p>`}
+      ${approvalUrl === null ? nothing : html`<p class="label-small secondary">${text.opensNewTab}</p>`}
     </div>
   </article>`;
+};
 
 /** Puts a decided order back into the tool result it came from. */
 const replace = (data: Order | PendingList, updated: Order) =>

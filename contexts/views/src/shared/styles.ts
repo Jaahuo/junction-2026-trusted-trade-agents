@@ -1,0 +1,192 @@
+import { css } from "lit";
+
+// Design tokens of the views, named as the Figma variables of the Junction 2026 file
+// (Screens, Approval request). Update a value here when the design changes. A page can
+// override any of them on the element, for example `tt-approval-card { --color-bg-brand: … }`.
+const tokens = css`
+  :host {
+    --color-bg-brand: #005670;
+    --color-text-brand: #005670;
+    --color-heading: #005670;
+    --color-link: #005670;
+    --color-button: #007fb0;
+    --color-text: #23282d;
+    --color-text-secondary: #555759;
+    --color-text-on-brand: #ffffff;
+    --color-text-on-brand-subtle: #d9e6ea;
+    --color-text-warning: #92400e;
+    --color-text-danger: #b91c1c;
+    --color-text-success: #15803d;
+    --color-white: #ffffff;
+    --color-border: #0000001a;
+    --color-border-strong: #818181;
+    --color-bg-brand-subtle: #f2f7f8;
+    --color-bg-subtle: #f4f4f4;
+    --color-bg-warning: #fef3c7;
+    --color-bg-success: #eaf8e9;
+    --color-bg-danger: #fdedeb;
+    --spacing-2xs: 2px;
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    --spacing-xl: 24px;
+    --spacing-2xl: 32px;
+    --font-size-2xs: 12px;
+    --font-size-xs: 14px;
+    --font-size-sm: 16px;
+    --font-size-xl: 24px;
+    --border-radius-md: 5px;
+    --border-radius-lg: 10px;
+    --radius-full: 999px;
+    --shadow-sm: 0 1px 3px 0 rgb(15 23 41 / 0.1), 0 1px 2px 0 rgb(15 23 41 / 0.06);
+    --font-family: Inter, system-ui, sans-serif;
+  }
+`;
+
+// Shared building blocks of every view: text styles, buttons, chips, fields and states.
+export const base = css`
+  ${tokens}
+  :host {
+    display: block;
+    color: var(--color-text);
+    font-family: var(--font-family);
+    font-size: var(--font-size-sm);
+    line-height: 1.28;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  h2,
+  h3,
+  p,
+  ul,
+  dl,
+  dd {
+    margin: 0;
+  }
+  .label-small {
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: 0.2px;
+  }
+  .body-small {
+    font-size: var(--font-size-xs);
+    line-height: 1.25;
+  }
+  .strong {
+    font-weight: 600;
+  }
+  .secondary {
+    color: var(--color-text-secondary);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    min-height: 2.25rem;
+    padding: var(--spacing-sm) var(--spacing-lg);
+    border: 1px solid transparent;
+    border-radius: var(--border-radius-md);
+    background: none;
+    font: inherit;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    line-height: 1.25;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .btn:focus-visible,
+  .chip:focus-visible,
+  .field:focus-visible,
+  .toggle:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-button) 45%, transparent);
+    outline-offset: 2px;
+  }
+  .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .btn.primary {
+    background: var(--color-button);
+    color: var(--color-text-on-brand);
+  }
+  .btn.secondary {
+    border-color: var(--color-border-strong);
+    background: var(--color-white);
+    color: var(--color-text);
+  }
+  .btn.ghost {
+    color: var(--color-text-brand);
+  }
+  .chip {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-full);
+    background: var(--color-white);
+    color: var(--color-text);
+    font: inherit;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    line-height: 1.25;
+    cursor: pointer;
+  }
+  .chip[aria-pressed="true"] {
+    border-color: var(--color-bg-brand);
+    background: var(--color-bg-brand);
+    color: var(--color-text-on-brand);
+  }
+  .field-label {
+    display: block;
+    margin-bottom: var(--spacing-xs);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  .field {
+    width: 100%;
+    padding: var(--spacing-md);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--border-radius-md);
+    background: var(--color-white);
+    color: var(--color-text);
+    font: inherit;
+  }
+  .message {
+    padding: var(--spacing-md) var(--spacing-lg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-md);
+    background: var(--color-bg-brand-subtle);
+    font-size: var(--font-size-xs);
+    line-height: 1.25;
+  }
+  .message.danger {
+    color: var(--color-text-danger);
+  }
+  .spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: var(--radius-full);
+    animation: spin 0.8s linear infinite;
+  }
+  .empty {
+    padding: var(--spacing-2xl) var(--spacing-xl);
+    border: 1px dashed var(--color-border-strong);
+    border-radius: var(--border-radius-lg);
+    text-align: center;
+  }
+  a {
+    color: var(--color-link);
+    font-weight: 600;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+`;

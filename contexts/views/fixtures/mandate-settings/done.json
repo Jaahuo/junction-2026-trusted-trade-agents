@@ -1,0 +1,48 @@
+{
+  "mandate": {
+    "iss": "cust_invoice_01",
+    "mandateId": "mnd_test_1",
+    "version": 1,
+    "agent": "agent_demo",
+    "signedBy": "acct_demo",
+    "limits": {
+      "maxOrderTotal": {
+        "value": 1000,
+        "currency": "EUR",
+        "basis": "gross"
+      },
+      "categories": null,
+      "substitutions": "ask",
+      "newProducts": "ask",
+      "minDeliveryReliability": {
+        "value": 0.9,
+        "ifNoData": "auto"
+      },
+      "maxCo2PerKg": {
+        "value": 3,
+        "ifNoData": "auto"
+      },
+      "allergenData": {
+        "ifNoData": "ask"
+      },
+      "paymentTerms": {
+        "invoice": "auto",
+        "pay_on_order": "ask"
+      }
+    },
+    "standingConstraints": {
+      "hard": [],
+      "soft": [
+        {
+          "attribute": "countryOfOrigin",
+          "prefer": "fi"
+        }
+      ]
+    },
+    "iat": 1794800000,
+    "exp": 1826336000
+  },
+  "jws": "test-mandate-jws",
+  "status": "active",
+  "registeredAt": "2026-11-14T10:00:00+00:00"
+}

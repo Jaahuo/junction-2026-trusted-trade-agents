@@ -2,7 +2,13 @@ import { z } from "zod";
 import { AccountSchema } from "./account.ts";
 import { EmptySchema } from "./common.ts";
 import { DecideApprovalRouteInputSchema } from "./decision.ts";
-import { MandateRefSchema, RegisterMandateRequestSchema, StoredMandateSchema } from "./mandate.ts";
+import {
+  DraftMandateRequestSchema,
+  MandateDraftSchema,
+  MandateRefSchema,
+  RegisterMandateRequestSchema,
+  StoredMandateSchema,
+} from "./mandate.ts";
 import {
   OffersRequestSchema,
   OffersResultSchema,
@@ -74,6 +80,15 @@ export const ROUTES = [
     context: "mandates",
     input: EmptySchema,
     output: StoredMandateSchema,
+  },
+  {
+    key: "draft",
+    tool: "draft_mandate",
+    method: "POST",
+    path: "/api/mandates/drafts",
+    context: "mandates",
+    input: DraftMandateRequestSchema,
+    output: MandateDraftSchema,
   },
   {
     key: "pending",

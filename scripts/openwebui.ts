@@ -1,120 +1,94 @@
-// Runs Open WebUI as a local chat host and sets it up for the buyer agent.
-// Usage: bun scripts/openwebui.ts up|setup|down
-// Settings and secrets come from the ignored hosts/openwebui/.env; see hosts/openwebui/.env.example.
+// Runs and provisions the local Open WebUI host.
 import { loadRuntime } from "./runtime.ts";
 
-const ROOT = `${import.meta.dir}/..`;
-const HOST_DIR = `${ROOT}/hosts/openwebui`;
-const SERVER_ID = "trusted-trade";
-const MODEL_ID = "buyer-agent";
-const USAGE = "Usage: bun scripts/openwebui.ts up|setup|down";
+const HOST_DIR = `${import.meta.dir}/../hosts/openwebui`;
+const ENV_FILE = `${HOST_DIR}/.env`;
+const DEFAULT_MODEL_URL = "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1";
+const DEFAULT_MODEL = "nemotron-3.5-super-vl";
+const USAGE = "Usage: bun scripts/openwebui.ts up|setup|setup-buyer|down";
 
-type Json = Record<string, unknown>;
+const COMPOSE = ["docker", "compose", "--env-file", ENV_FILE, "-f", `${HOST_DIR}/compose.yaml`];
 
-const isObject = (value: unknown): value is Json =>
+const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** `KEY=value` lines; blank lines and `#` comments are skipped. */
-export function parseEnv(text: string): Record<string, string> {
+export async function settings(): Promise<Record<string, string>> {
+  const child = Bun.spawn([...COMPOSE, "config", "--format", "json"], {
+    stdout: "pipe",
+    stderr: "inherit",
+  });
+  const output = await new Response(child.stdout).text();
+  if ((await child.exited) !== 0) throw new Error("Could not resolve Open WebUI Compose settings.");
+  const config: unknown = JSON.parse(output);
+  if (
+    !isObject(config) ||
+    !isObject(config["services"]) ||
+    !isObject(config["services"]["open-webui"]) ||
+    !isObject(config["services"]["open-webui"]["environment"])
+  )
+    throw new Error("Compose returned no Open WebUI environment.");
   const values: Record<string, string> = {};
-  for (const line of text.split(/\r?\n/)) {
-    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
-    if (match?.[1] !== undefined && match[2] !== undefined) values[match[1]] = match[2].trim();
+  for (const [key, value] of Object.entries(config["services"]["open-webui"]["environment"])) {
+    if (typeof value === "string") values[key] = value;
   }
   return values;
 }
 
-/** The first fenced `text` block of docs/buyer-agent-prompt.md: the one copy of the prompt. */
-export function extractPrompt(markdown: string): string {
-  const match = /^```text\n([\s\S]*?)\n```$/m.exec(markdown);
-  const prompt = match?.[1]?.trim();
-  if (!prompt) throw new Error("docs/buyer-agent-prompt.md has no ```text prompt block.");
-  return prompt;
+export interface ChatHost {
+  readonly base: string;
+  readonly email: string;
+  readonly password: string;
+  readonly mcpUrl: string;
+  readonly openaiUrl?: string | undefined;
+  readonly openaiKey?: string | undefined;
+  readonly baseModel?: string | undefined;
+  readonly maxTokens?: string | undefined;
+  readonly recipePermission?: string | undefined;
+  readonly mcpKey?: string | undefined;
 }
 
-/** The skill is the agent's reference; the prompt comes last, where a small model weighs it most. */
-export const buildSystemPrompt = (skill: string, prompt: string): string =>
-  `${skill.trim()}\n\n${prompt.trim()}\n`;
-
-export const toolServer = (url: string): Json => ({
-  url,
-  path: "",
-  type: "mcp",
-  auth_type: "none",
-  key: "",
-  config: { enable: true },
-  info: { id: SERVER_ID, name: "Trusted trade", description: "Wholesaler MCP server" },
-});
-
-const serverId = (connection: unknown): unknown =>
-  isObject(connection) && isObject(connection["info"]) ? connection["info"]["id"] : undefined;
-
-/** True when our connection already points at `url`; the server adds fields of its own, so compare ours only. */
-export const hasConnection = (existing: readonly unknown[], url: string): boolean =>
-  existing.some(
-    (connection) =>
-      isObject(connection) &&
-      serverId(connection) === SERVER_ID &&
-      connection["url"] === url &&
-      connection["type"] === "mcp",
-  );
-
-/** Replaces our connection and keeps every connection that a person added. */
-export const mergeConnections = (existing: readonly unknown[], ours: Json): unknown[] => [
-  ...existing.filter((connection) => serverId(connection) !== SERVER_ID),
-  ours,
-];
-
-/** Open WebUI keeps the model endpoint in its database after the first start, so .env must be pushed. */
-export const openaiConfig = (url: string, key: string): Json => ({
-  ENABLE_OPENAI_API: true,
-  OPENAI_API_BASE_URLS: [url],
-  OPENAI_API_KEYS: [key],
-  OPENAI_API_CONFIGS: {},
-});
-
-/** True when the stored endpoint is exactly the one from .env. */
-export const hasOpenaiConfig = (current: unknown, url: string, key: string): boolean =>
-  isObject(current) &&
-  current["ENABLE_OPENAI_API"] === true &&
-  JSON.stringify(current["OPENAI_API_BASE_URLS"]) === JSON.stringify([url]) &&
-  JSON.stringify(current["OPENAI_API_KEYS"]) === JSON.stringify([key]);
-
-export const modelPayload = (baseModel: string, system: string): Json => ({
-  id: MODEL_ID,
-  name: "Buyer agent",
-  base_model_id: baseModel,
-  params: { system, function_calling: "native" },
-  meta: {
-    description: "Orders from the wholesaler through the trusted-trade tools.",
-    capabilities: { vision: false },
-    toolIds: [`server:mcp:${SERVER_ID}`],
-  },
-  access_grants: [],
-  is_active: true,
-});
-
-function fail(message: string): never {
-  console.error(message);
-  process.exit(1);
+/** Map the public host interface to the Python provisioner's environment. */
+export function provisionEnv(host: ChatHost): Record<string, string> {
+  return {
+    WEBUI_BASE_URL: host.base,
+    COMPANION_FILES: HOST_DIR,
+    WEBUI_ADMIN_EMAIL: host.email,
+    WEBUI_ADMIN_PASSWORD: host.password,
+    MCP_SERVER_URL: host.mcpUrl,
+    OPENAI_API_BASE_URL: host.openaiUrl || DEFAULT_MODEL_URL,
+    OPENAI_API_KEY: host.openaiKey ?? "",
+    AGENT_MODEL_ID: host.baseModel || DEFAULT_MODEL,
+    OPENWEBUI_MAX_TOKENS: host.maxTokens || "4096",
+    VALIO_AIMO_RECIPE_PERMISSION: host.recipePermission || "False",
+    MCP_AGENT_KEY: host.mcpKey || "",
+  };
 }
 
-async function settings(): Promise<Record<string, string>> {
-  const file = Bun.file(`${HOST_DIR}/.env`);
-  if (!(await file.exists()))
-    fail("Missing hosts/openwebui/.env. Copy hosts/openwebui/.env.example and fill it in.");
-  const values = parseEnv(await file.text());
-  if (!values["WEBUI_SECRET_KEY"])
-    fail("Set WEBUI_SECRET_KEY in hosts/openwebui/.env (openssl rand -hex 32).");
-  return values;
+export function localHost(env: Record<string, string>, mcpUrl: string): ChatHost {
+  return {
+    base: `http://127.0.0.1:${env["OPENWEBUI_PORT"] || "38090"}`,
+    email: env["WEBUI_ADMIN_EMAIL"] || "",
+    password: env["WEBUI_ADMIN_PASSWORD"] || "",
+    mcpUrl,
+    openaiUrl: env["OPENAI_API_BASE_URL"],
+    openaiKey: env["OPENAI_API_KEY"],
+    baseModel: env["OPENWEBUI_BASE_MODEL"],
+    maxTokens: env["OPENWEBUI_MAX_TOKENS"],
+    recipePermission: env["VALIO_AIMO_RECIPE_PERMISSION"],
+    mcpKey: env["MCP_AGENT_KEY"],
+  };
 }
 
-async function compose(...args: string[]): Promise<void> {
-  const child = Bun.spawn(["docker", "compose", "-f", `${HOST_DIR}/compose.yaml`, ...args], {
+export async function configure(host: ChatHost): Promise<void> {
+  console.log(`tool server: ${host.mcpUrl}`);
+  const child = Bun.spawn(["python3", `${HOST_DIR}/scripts/provision_agent.py`], {
+    env: { ...process.env, ...provisionEnv(host) },
     stdout: "inherit",
     stderr: "inherit",
+    stdin: "inherit",
   });
-  if ((await child.exited) !== 0) fail(`docker compose ${args.join(" ")} failed.`);
+  const status = await child.exited;
+  if (status !== 0) throw new Error(`Open WebUI provisioning failed (exit ${status}).`);
 }
 
 export async function waitUntilUp(base: string): Promise<void> {
@@ -128,137 +102,62 @@ export async function waitUntilUp(base: string): Promise<void> {
   throw new Error(`Open WebUI did not answer at ${base} within 3 minutes.`);
 }
 
-/** How `configure` reaches one Open WebUI and what it sets there. */
-export interface ChatHost {
-  readonly base: string;
-  /** Empty on the laptop, where login is off and every visitor is the one local account. */
-  readonly email: string;
-  readonly password: string;
-  readonly mcpUrl: string;
-  /** When set, pushed to Open WebUI, which otherwise keeps the endpoint of its first start. */
-  readonly openaiUrl?: string | undefined;
-  readonly openaiKey?: string | undefined;
-  /** Empty = the first model of the endpoint that is not an embedding model. */
-  readonly baseModel?: string | undefined;
-}
-
-/** Connects the MCP server, sets the model endpoint and creates the Buyer agent model. A rerun changes nothing. */
-export async function configure(host: ChatHost): Promise<void> {
-  const { base, mcpUrl, openaiUrl } = host;
-  let token = "";
-  async function call(path: string, body?: Json): Promise<{ status: number; data: unknown }> {
-    const response = await fetch(`${base}${path}`, {
-      method: body === undefined ? "GET" : "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const data: unknown = await response.json().catch(() => null);
-    return { status: response.status, data };
-  }
-  async function must(step: string, path: string, body?: Json): Promise<unknown> {
-    const { status, data } = await call(path, body);
-    if (status === 400 && path === "/api/v1/auths/signin" && host.email !== "")
-      throw new Error(
-        `sign in: HTTP ${status}. Open WebUI keeps the admin password of its first start, so a changed password secret does not apply.`,
-      );
-    if (status !== 200) throw new Error(`${step}: HTTP ${status} from ${path}`);
-    return data;
-  }
-
-  const session = await must("sign in", "/api/v1/auths/signin", {
-    email: host.email,
-    password: host.password,
-  });
-  if (!isObject(session) || typeof session["token"] !== "string")
-    throw new Error(
-      "sign in: no token. On the VM, Open WebUI keeps the admin password of its first start; on the laptop, WEBUI_AUTH must be False.",
-    );
-  token = session["token"];
-
-  const current = await must("read tool servers", "/api/v1/configs/tool_servers");
-  const existing =
-    isObject(current) && Array.isArray(current["TOOL_SERVER_CONNECTIONS"])
-      ? current["TOOL_SERVER_CONNECTIONS"]
-      : [];
-  if (hasConnection(existing, mcpUrl)) console.log("tool server: unchanged");
-  else {
-    await must("set tool server", "/api/v1/configs/tool_servers", {
-      TOOL_SERVER_CONNECTIONS: mergeConnections(existing, toolServer(mcpUrl)),
-    });
-    console.log(`tool server: ${mcpUrl}`);
-  }
-
-  if (openaiUrl) {
-    const openaiKey = host.openaiKey ?? "";
-    const stored = await must("read model endpoint", "/openai/config");
-    if (hasOpenaiConfig(stored, openaiUrl, openaiKey)) console.log("model endpoint: unchanged");
-    else {
-      await must("set model endpoint", "/openai/config/update", openaiConfig(openaiUrl, openaiKey));
-      console.log(`model endpoint: ${openaiUrl}`);
-    }
-  }
-
-  let baseModel = host.baseModel;
-  if (!baseModel) {
-    const models = await must("list models", "/api/models");
-    const ids = (isObject(models) && Array.isArray(models["data"]) ? models["data"] : [])
-      .map((model) => (isObject(model) ? model["id"] : undefined))
-      .filter((id): id is string => typeof id === "string");
-    baseModel = ids.find((id) => id !== MODEL_ID && !/embed/i.test(id));
-    if (!baseModel)
-      throw new Error("No chat model found. Check the model endpoint or set the base model.");
-  }
-
-  const system = buildSystemPrompt(
-    await Bun.file(`${ROOT}/skills/trusted-trade-ordering/SKILL.md`).text(),
-    extractPrompt(await Bun.file(`${ROOT}/docs/buyer-agent-prompt.md`).text()),
-  );
-  const payload = modelPayload(baseModel, system);
-  const found = await call(`/api/v1/models/model?id=${MODEL_ID}`);
-  if (found.status !== 200 || !isObject(found.data)) {
-    await must("create model", "/api/v1/models/create", payload);
-    console.log(`model: created ${MODEL_ID} on ${baseModel}`);
-  } else {
-    const params = isObject(found.data["params"]) ? found.data["params"] : {};
-    const same = found.data["base_model_id"] === baseModel && params["system"] === system;
-    if (same) console.log("model: unchanged");
-    else {
-      await must("update model", `/api/v1/models/model/update?id=${MODEL_ID}`, payload);
-      console.log(`model: updated ${MODEL_ID} on ${baseModel}`);
-    }
-  }
-  console.log(`Open WebUI is ready at ${base}. Choose the model "Buyer agent".`);
-}
-
-async function setup(env: Record<string, string>, base: string): Promise<void> {
-  let mcpUrl = env["OPENWEBUI_MCP_URL"];
-  if (!mcpUrl) {
-    await loadRuntime();
-    mcpUrl = `http://host.docker.internal:${process.env["PORT"]}/mcp`;
-  }
-  await configure({
-    base,
-    email: "",
-    password: "",
-    mcpUrl,
-    openaiUrl: env["OPENAI_API_BASE_URL"],
-    openaiKey: env["OPENAI_API_KEY"],
-    baseModel: env["OPENWEBUI_BASE_MODEL"],
-  });
+async function compose(...args: string[]): Promise<void> {
+  const child = Bun.spawn([...COMPOSE, ...args], { stdout: "inherit", stderr: "inherit" });
+  if ((await child.exited) !== 0) throw new Error(`docker compose ${args.join(" ")} failed.`);
 }
 
 async function main(): Promise<void> {
   const command = process.argv[2];
-  if (command !== "up" && command !== "setup" && command !== "down") fail(USAGE);
+  if (command !== "up" && command !== "setup" && command !== "setup-buyer" && command !== "down")
+    throw new Error(USAGE);
+  const file = Bun.file(ENV_FILE);
+  if (!(await file.exists()))
+    throw new Error(
+      "Missing hosts/openwebui/.env. Copy hosts/openwebui/.env.example and fill it in.",
+    );
   const env = await settings();
   if (command === "down") return compose("down");
-  const base = `http://127.0.0.1:${env["OPENWEBUI_PORT"] || "38090"}`;
-  if (command === "up") await compose("up", "-d");
-  await waitUntilUp(base);
-  await setup(env, base);
+  if (!env["WEBUI_SECRET_KEY"])
+    throw new Error("Set WEBUI_SECRET_KEY in hosts/openwebui/.env (openssl rand -hex 32).");
+  if (!env["WEBUI_ADMIN_EMAIL"] || !env["WEBUI_ADMIN_PASSWORD"])
+    throw new Error("Set WEBUI_ADMIN_EMAIL and WEBUI_ADMIN_PASSWORD in hosts/openwebui/.env.");
+  let mcpUrl = env["OPENWEBUI_MCP_URL"];
+  if (mcpUrl)
+    console.error(`Warning: OPENWEBUI_MCP_URL overrides this worktree's MCP server: ${mcpUrl}`);
+  else {
+    await loadRuntime();
+    mcpUrl = `http://host.docker.internal:${process.env["PORT"]}/mcp`;
+  }
+  const host = localHost(env, mcpUrl);
+  if (command === "up") {
+    await compose("stop", "open-webui");
+    await compose(
+      "run",
+      "--rm",
+      "--no-deps",
+      "--entrypoint",
+      "python",
+      "open-webui",
+      "/opt/companion/migrate_auth.py",
+    );
+    await compose("up", "-d");
+  }
+  await waitUntilUp(host.base);
+  if (command === "setup-buyer") {
+    const child = Bun.spawn(["python3", `${HOST_DIR}/scripts/provision_buyer.py`], {
+      env: { ...process.env, ...provisionEnv(host) },
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    if ((await child.exited) !== 0) throw new Error("Buyer provisioning failed.");
+  } else await configure(host);
+  console.log(`Open WebUI is ready at ${host.base}. Choose Acme Kitchens or Acme Bakery.`);
 }
 
 if (import.meta.main)
-  await main().catch((error: unknown) =>
-    fail(error instanceof Error ? error.message : String(error)),
-  );
+  await main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });

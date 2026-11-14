@@ -59,9 +59,3 @@ variable "ts_region" {
   type    = string
   default = "eu-central-1"
 }
-
-variable "bun_version" {
-  description = "Keep equal to mise.toml."
-  type        = string
-  default     = "1.4.3"
-}

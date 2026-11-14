@@ -1,0 +1,46 @@
+{
+  "restaurant": [
+    {
+      "title": ["Tomorrow’s lunch", "Salmon soup for 60"],
+      "content": "We’re making salmon soup for 60 tomorrow. We need 9 kg salmon, 12 kg potatoes, 2 kg onions, 12 litres fish stock, 4 litres cream and 200 g dill. We have 3 kg salmon, 8 kg potatoes, all the onions and fish stock, and 1 litre cream. No dill left. Butter, salt and pepper are covered. Find what we’re missing for delivery tomorrow morning. Show me the order before placing it."
+    },
+    {
+      "title": ["Extra guests", "Breakfast for 30 more"],
+      "content": "Tomorrow’s breakfast booking has gone from 40 to 70 guests. Allow 2 eggs, 200 ml lactose-free milk and 50 g sliced cheese per extra guest. We have 20 spare eggs, 2 litres of milk and 500 g cheese available after the original booking. Order the extra we need for delivery before 7 tomorrow morning, up to €100."
+    },
+    {
+      "title": ["Use surplus stock", "Plan tomorrow’s lunch"],
+      "content": "We have 8 kg potatoes, 3 kg carrots and 2 litres lactose-free cream to use up. Suggest a lunch for 40 tomorrow that uses these. We also have oil, salt and pepper; assume we need to buy any other ingredients. Keep the extra shopping under €80 and show me the menu and shopping list first."
+    },
+    {
+      "title": ["Ingredient shortage", "Cream for mushroom sauce"],
+      "content": "We’re making a creamy mushroom sauce for tomorrow’s lunch. Everything else is covered, but we’re short 3 litres of lactose-free cooking cream. Find some for delivery tomorrow morning, up to €30. If it’s unavailable, suggest a substitute that works in the sauce and is still lactose-free. Ask me before ordering a substitute."
+    },
+    {
+      "title": ["Routine restock", "Monday’s breakfast supplies"],
+      "content": "Top up our breakfast supplies for Monday. We want 30 litres of lactose-free semi-skimmed milk, 5 kg butter and 4 kg sliced Gouda in stock. We have 8 litres of that milk, 1 kg butter and no Gouda. Order the difference for delivery by Monday at 7, up to €180. Ask me if anything needs replacing."
+    }
+  ],
+  "bakery": [
+    {
+      "title": ["Tomorrow’s bread", "100 wheat loaves"],
+      "content": "We’re baking 100 wheat loaves tomorrow. Our recipe for 10 loaves uses 5 kg wheat flour, 3 litres water, 100 g fresh yeast and 100 g salt. We have 18 kg flour and 400 g fresh yeast available. Water and salt are covered. Find what we’re missing for delivery today. Show me the order before placing it."
+    },
+    {
+      "title": ["Larger pastry order", "60 extra cinnamon buns"],
+      "content": "A customer increased tomorrow’s cinnamon bun order from 80 to 140. For each 20 buns we need 1 kg wheat flour, 500 ml milk, 200 g butter, 150 g sugar, 50 g fresh yeast and 10 g cinnamon. We have 1 kg flour, 1 litre milk and 200 g butter spare after the original order. The other ingredients are fully allocated; salt and cardamom are covered. Order the extra ingredients for delivery today, up to €60."
+    },
+    {
+      "title": ["Use surplus ingredients", "A traybake for the counter"],
+      "content": "We have 3 kg ripe bananas and 2 kg plain yoghurt to use up today. Suggest a traybake for tomorrow’s counter, aiming for 60 pieces. We have 5 kg wheat flour, 2 kg sugar, 1 kg butter and 30 eggs available. Salt, baking powder and baking soda are covered. Keep any extra ingredients under €40 and show me the recipe quantities and shopping list first."
+    },
+    {
+      "title": ["Cream shortage", "Whipping cream for cakes"],
+      "content": "We’re short 6 litres of lactose-free whipping cream for tomorrow’s cakes. Everything else is ready. Find cream suitable for whipping and piping, delivered today, up to €70. Cooking cream won’t work. Show me the options before ordering."
+    },
+    {
+      "title": ["Weekly restock", "Monday’s baking staples"],
+      "content": "Top up our baking staples for Monday. We want 50 kg strong wheat bread flour, 15 kg unsalted butter and 10 kg white sugar in stock. We have 12 kg flour, 4 kg butter and 3 kg sugar left, with nothing reserved. Order the difference for delivery Monday morning, up to €250. Don’t replace the butter with margarine or change the flour type."
+    }
+  ]
+}

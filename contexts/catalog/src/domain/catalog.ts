@@ -27,7 +27,7 @@ export interface CatalogProduct {
   countryOfOrigin: string | null;
   deliveryReliability: number | null;
   co2PerKg: number | null;
-  /** Nutritional claim codes, for example `FREE_FROM_LACTOSE`. */
+  /** Nutritional claim codes, such as `FREE_FROM_LACTOSE`, and allergen facts, such as `CONTAINS:AE` or `FREE_FROM:AE`. */
   claims: ReadonlySet<string>;
   substitutes: readonly string[];
 }

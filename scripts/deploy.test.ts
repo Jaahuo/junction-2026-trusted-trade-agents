@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { $ } from "bun";
 import {
   CHAT_SERVICE,
+  CHAT_SYNC_EXCLUDES,
   chatEnv,
   chatSettings,
   deployEnv,
@@ -146,6 +148,7 @@ test("the deploy skips the chat host until the inference key is set", () => {
     secretKey: "session-key",
     adminEmail: "admin@example.com",
     adminPassword: "admin-password",
+    recipePermission: "False",
   });
 });
 
@@ -160,6 +163,11 @@ test("the chat host runs with login on, sign-up off and the hosted inference end
   const env = chatEnv(outputs, chat);
   expect(env.get("WEBUI_AUTH")).toBe("True");
   expect(env.get("ENABLE_SIGNUP")).toBe("False");
+  expect(env.get("ENABLE_OLLAMA_API")).toBe("False");
+  expect(env.get("ENABLE_TITLE_GENERATION")).toBe("False");
+  expect(env.get("ENABLE_FOLLOW_UP_GENERATION")).toBe("False");
+  expect(env.get("ENABLE_TAGS_GENERATION")).toBe("False");
+  expect(env.has("ENABLE_VOICE")).toBe(false);
   expect(env.get("WEBUI_URL")).toBe("https://chat.203-0-113-7.sslip.io");
   expect(env.get("OPENAI_API_BASE_URL")).toBe(
     "https://containers.datacrunch.io/nemotron-3-5-super-vl-b300/v1",
@@ -178,6 +186,12 @@ test("Caddy serves the chat host on its own subdomain when the chat runs", () =>
 test("the chat unit keeps its data in a volume and listens on loopback only", () => {
   expect(CHAT_SERVICE).toContain("-p 127.0.0.1:8080:8080");
   expect(CHAT_SERVICE).toContain("-v trusted-trade-chat:/app/backend/data");
+  expect(CHAT_SERVICE).toContain(
+    "-v /opt/trusted-trade-chat/branding/custom.css:/app/backend/open_webui/static/custom.css:ro",
+  );
+  expect(CHAT_SERVICE).toContain(
+    "-v /opt/trusted-trade-chat/branding:/app/backend/open_webui/static/acme:ro",
+  );
   expect(CHAT_SERVICE).toContain("--env-file /etc/trusted-trade-chat.env");
   expect(CHAT_SERVICE).toContain("ghcr.io/open-webui/open-webui:v0.13.3");
 });
@@ -345,4 +359,19 @@ test("deployWarning warns only when the latest completed deploy of main failed",
   expect(deployWarning([{ conclusion: "failure" }])).toBe(
     "Warning: the latest deploy of main (?) ended in failure, so the hosted demo may be stale. See the deploy workflow.",
   );
+});
+
+test("the chat sync passes its exclude patterns to rsync without glob expansion", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-sync-"));
+  try {
+    const args = await $`printf '%s\n' ${CHAT_SYNC_EXCLUDES}`.cwd(dir).text();
+    expect(args.trim().split("\n")).toEqual([
+      "--exclude=.env",
+      "--exclude=.env.*",
+      "--exclude=__pycache__",
+      "--exclude=*.pyc",
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -1,4 +1,20 @@
 {
   "offers": [],
-  "omitted": []
+  "omitted": [
+    {
+      "productId": "prod_test_missing",
+      "reason": "UNKNOWN_PRODUCT",
+      "detail": "Not in the catalogue."
+    },
+    {
+      "productId": "prod_test_blocked",
+      "reason": "SALES_BLOCKED",
+      "detail": "The product is blocked from sale."
+    },
+    {
+      "productId": "prod_test_sold_out",
+      "reason": "INSUFFICIENT_STOCK",
+      "detail": "No stock for the requested date."
+    }
+  ]
 }

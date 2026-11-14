@@ -1,8 +1,22 @@
-import type { Mandate, Principal, RegisterMandateRequest, StoredMandate } from "@app/contract";
+import type {
+  DraftMandateRequest,
+  Mandate,
+  Principal,
+  RegisterMandateRequest,
+  StoredMandate,
+} from "@app/contract";
+import { err, ok, type Result } from "@app/kernel";
 
 const defaultLifetimeSeconds = 365 * 24 * 60 * 60;
 
 const epochSeconds = (now: Date): number => Math.floor(now.getTime() / 1000);
+
+/** A requested `exp` must be after the server time in epoch seconds (SPEC-008). */
+export const checkTerms = <T extends DraftMandateRequest>(
+  request: T,
+  now: Date,
+): Result<T, "expired"> =>
+  request.exp !== undefined && request.exp <= epochSeconds(now) ? err("expired") : ok(request);
 
 /** Builds the next mandate of the principal; the server sets every identity field (SPEC-008). */
 export const buildMandate = (input: {

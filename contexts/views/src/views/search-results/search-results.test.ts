@@ -64,23 +64,25 @@ test("the merged standing constraints are listed", async () => {
   expect(output).toContain("Packaging material: Returnable glass");
 });
 
-test("two required constraints show two different names", async () => {
+test("required constraints each show their own name", async () => {
   const result = SearchResultSchema.parse(await fixture("results"));
-  // The contract accepts only lactose until #71; the view must name any attribute it is given.
   const [candidate] = result.candidates;
   if (!candidate) throw new Error("Expected a candidate");
   const output = visible(
     renderSearchResults({
       ...result,
-      candidates: [{ ...candidate, match: { gluten: "unknown", lactose: "confirmed" } }],
+      candidates: [
+        { ...candidate, match: { gluten: "unknown", vegan: "confirmed", lactose: "confirmed" } },
+      ],
       constraints: {
         ...result.constraints,
-        hard: [{ attribute: "gluten" }, ...result.constraints.hard],
+        hard: [{ attribute: "gluten" }, { attribute: "vegan" }, ...result.constraints.hard],
       },
     }),
   );
-  expect(output).toContain("Required Gluten free, Lactose free");
+  expect(output).toContain("Required Gluten free, Vegan, Lactose free");
   expect(output).toContain("Gluten free · Unknown");
+  expect(output).toContain("Vegan · Confirmed");
   expect(output).toContain("Lactose free · Confirmed");
 });
 

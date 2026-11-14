@@ -94,3 +94,14 @@ jobs:
           for result in "$QUALITY" "$TEST" "$SECRETS"; do
             if [ "$result" != success ]; then exit 1; fi
           done
+
+  deploy:
+    name: deploy
+    needs: gate
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit

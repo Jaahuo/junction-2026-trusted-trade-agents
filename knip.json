@@ -8,12 +8,6 @@
     "apps/api": {
       "entry": ["src/main.ts!", "src/server.ts!"]
     },
-    "contexts/catalog": {
-      "ignoreDependencies": ["@app/kernel", "@ctx/mandates", "@elysia/eden", "zod"]
-    },
-    "contexts/mandates": {
-      "ignoreDependencies": ["@app/kernel", "drizzle-orm", "zod"]
-    },
     "contexts/offers": {
       "ignoreDependencies": [
         "@app/kernel",
@@ -39,11 +33,8 @@
       "entry": ["src/views/*/main.{ts,tsx}"],
       "ignoreDependencies": ["@ctx/mandates", "@ctx/orders", "@elysia/eden"]
     },
-    "packages/contract": {
-      "ignoreDependencies": ["@app/server-kit", "jose"]
-    },
-    "contexts/*": {
-      "ignoreDependencies": ["react"]
+    "contexts/mandates": {
+      "ignoreDependencies": ["zod"]
     }
   },
   "ignoreBinaries": ["gitleaks"]

@@ -167,6 +167,7 @@ jobs:
           OPENWEBUI_SECRET_KEY: ${{ secrets.OPENWEBUI_SECRET_KEY }}
           OPENWEBUI_ADMIN_EMAIL: ${{ secrets.OPENWEBUI_ADMIN_EMAIL }}
           OPENWEBUI_ADMIN_PASSWORD: ${{ secrets.OPENWEBUI_ADMIN_PASSWORD }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           VALIO_AIMO_RECIPE_PERMISSION: ${{ vars.VALIO_AIMO_RECIPE_PERMISSION || 'False' }}
           DEPLOY_IMAGE: ${{ needs.api.outputs.image }}
           DEPLOY_CHAT_IMAGE: ${{ needs.chat.outputs.chat_image }}

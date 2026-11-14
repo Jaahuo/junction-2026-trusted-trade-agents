@@ -113,6 +113,7 @@ export interface Chat {
   readonly adminEmail: string;
   readonly adminPassword: string;
   readonly recipePermission: string;
+  readonly elevenLabsKey: string;
 }
 
 /** The chat settings, or undefined when VERDA_INFERENCE_KEY is unset and the deploy skips the chat host. */
@@ -134,12 +135,13 @@ export const chatSettings = (
     adminPassword: value("OPENWEBUI_ADMIN_PASSWORD"),
     recipePermission:
       settings["VALIO_AIMO_RECIPE_PERMISSION"]?.toLowerCase() === "true" ? "True" : "False",
+    elevenLabsKey: (settings["ELEVENLABS_API_KEY"] ?? "").trim(),
   };
 };
 
 /** Login on and sign-up off: the inference key pays for every chat. The admin exists after the first start. */
 export const chatEnv = (outputs: Outputs, chat: Chat): Map<string, string> =>
-  new Map([
+  new Map<string, string>([
     ["WEBUI_URL", `https://${chatHostname(outputs)}`],
     ["WEBUI_AUTH", "True"],
     ["ENABLE_SIGNUP", "False"],
@@ -156,6 +158,8 @@ export const chatEnv = (outputs: Outputs, chat: Chat): Map<string, string> =>
     ["MCP_SERVER_URL", `${outputs.public_base_url}/mcp`],
     ["AGENT_MODEL_ID", CHAT_BASE_MODEL],
     ["OPENWEBUI_MAX_TOKENS", "16384"],
+    // Provisioning applies the key, because Open WebUI keeps an existing volume's audio settings.
+    ...(chat.elevenLabsKey === "" ? [] : [["ELEVENLABS_API_KEY", chat.elevenLabsKey] as const]),
   ]);
 
 export const CHAT_SERVICE = `[Unit]

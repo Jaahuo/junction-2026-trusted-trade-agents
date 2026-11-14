@@ -1,3 +1,4 @@
+import { formatMoney, formatQuantity, formatTimestamp, ORDER_TERMS } from "@app/ui/format";
 import { css, html } from "lit";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import { plainPageUrl, type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
@@ -14,12 +15,6 @@ import {
   thresholdText,
 } from "./presentation.ts";
 
-const date = (seconds: number) =>
-  new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(seconds * 1000),
-  );
-const number = (value: number) =>
-  new Intl.NumberFormat("en-GB", { maximumFractionDigits: 4 }).format(value);
 const row = (label: string, value: string) =>
   html`<div class="row">
     <dt>${label}</dt>
@@ -225,7 +220,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
         <section>
           <h3>Order limits</h3>
           <dl>
-            ${row("Maximum order total", `${new Intl.NumberFormat("en-GB", { style: "currency", currency: limits.maxOrderTotal.currency }).format(limits.maxOrderTotal.value)} gross per order, including VAT and deposits. At or below this limit, automatic placement is allowed subject to other checks; above it, approval is required.`)}
+            ${row(ORDER_TERMS.limit, `${formatMoney(limits.maxOrderTotal.value, limits.maxOrderTotal.currency, limits.maxOrderTotal.basis)} per order, including VAT and deposits. At or below this limit, automatic placement is allowed subject to other checks; above it, approval is required.`)}
             ${row("Categories", `${categoriesText(limits.categories)}. ${limits.categories === null ? "All categories are eligible for automatic placement, subject to other checks." : limits.categories.length === 0 ? "No categories are eligible for automatic placement; approval is required." : "Listed categories are eligible for automatic placement, subject to other checks; other categories require approval."}`)}
             ${row("Substitutions", substitutionText(limits.substitutions))}
             ${row("Products not previously ordered by this customer", policyText(limits.newProducts))}
@@ -234,8 +229,8 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
         <section>
           <h3>Product data</h3>
           <dl>
-            ${row("Minimum delivery reliability", `${thresholdText(limits.minDeliveryReliability, (value) => `${number(value * 100)}%`)} ${limits.minDeliveryReliability === null ? "" : "At or above the minimum, automatic placement is allowed subject to other checks; below it, approval is required."}`)}
-            ${row("Maximum estimated CO₂-equivalent per kg", `${thresholdText(limits.maxCo2PerKg, (value) => `${number(value)} kg CO₂-eq per kg`)} ${limits.maxCo2PerKg === null ? "" : "At or below the maximum, automatic placement is allowed subject to other checks; above it, approval is required."}`)}
+            ${row("Minimum delivery reliability", `${thresholdText(limits.minDeliveryReliability, (value) => new Intl.NumberFormat("en-FI", { style: "percent", maximumFractionDigits: 4 }).format(value))} ${limits.minDeliveryReliability === null ? "" : "At or above the minimum, automatic placement is allowed subject to other checks; below it, approval is required."}`)}
+            ${row("Maximum estimated CO₂-equivalent per kg", `${thresholdText(limits.maxCo2PerKg, (value) => `${formatQuantity({ value, unit: "KGM" })} CO₂-eq per kg`)} ${limits.maxCo2PerKg === null ? "" : "At or below the maximum, automatic placement is allowed subject to other checks; above it, approval is required."}`)}
             ${row("Missing allergen data", `${policyText(limits.allergenData.ifNoData)} when an allergen constraint is unknown. Contradicted or missing matches still require approval.`)}
           </dl>
         </section>
@@ -243,7 +238,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
           <h3>Payment terms</h3>
           <dl>
             ${row("Invoice", policyText(limits.paymentTerms.invoice))}
-            ${row("Pay on order", policyText(limits.paymentTerms.pay_on_order))}
+            ${row(ORDER_TERMS.paymentOnOrder, policyText(limits.paymentTerms.pay_on_order))}
           </dl>
         </section>
         <section>
@@ -267,7 +262,9 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
         </section>
         <section>
           <h3>Validity</h3>
-          <dl>${row("Issued", date(mandate.iat))}${row("Expires", date(mandate.exp))}</dl>
+          <dl>
+            ${row("Issued", formatTimestamp(new Date(mandate.iat * 1000).toISOString()))}${row("Expires", formatTimestamp(new Date(mandate.exp * 1000).toISOString()))}
+          </dl>
         </section>
         <p class="secondary">
           This view is read-only. An approver must authorize changes. Unusual quantities and
@@ -276,7 +273,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
         <details>
           <summary>Technical details</summary>
           <dl>
-            ${row("Mandate ID", mandate.mandateId)}${row("Customer", mandate.iss)}${row("Agent", mandate.agent)}${row("Signed by", mandate.signedBy)}${row("Registered", date(Date.parse(record.registeredAt) / 1000))}
+            ${row("Mandate ID", mandate.mandateId)}${row("Customer", mandate.iss)}${row("Agent", mandate.agent)}${row("Signed by", mandate.signedBy)}${row("Registered", formatTimestamp(record.registeredAt))}
           </dl>
         </details>
       </div>

@@ -137,9 +137,9 @@ describe("POST /offers", () => {
     expect(fake.live.calls).toEqual([]);
   });
 
-  test("requote and validate still answer 501 NOT_IMPLEMENTED", async () => {
+  test("validate still answers 501 NOT_IMPLEMENTED", async () => {
     const app = createApi(offers().deps);
-    for (const path of ["requote", "validate"]) {
+    for (const path of ["validate"]) {
       const response = await app.handle(
         new Request(`http://localhost/offers/${path}`, {
           method: "POST",

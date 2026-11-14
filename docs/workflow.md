@@ -8,9 +8,14 @@ Each candidate has its own GitHub Issues and private board. Issues are created u
 4. Inspect task state with `bun scripts/task.ts status <issue>`. The current authenticated user needs project access and scope for board updates. Do not rely on the repository Actions token as a Projects credential.
 5. Integrate changes, run the applicable checks and gate at the integrated end, and smoke the real changed flow. Document actual results, limitations, risk and review evidence in the PR.
 6. The owner runs `bun scripts/ship.ts --risk <risk>` to open or update a PR. The default does not merge. After required evidence and authorization, `bun scripts/ship.ts --risk <risk> --merge` requests the merge. After the merge, it runs step 7 for a `task/<issue>` branch and the worktree cleanup for any other branch. Never force-push or bypass hooks.
+   For an ordinary PR, `bun scripts/ship.ts --risk ordinary --auto` returns at once and leaves a detached `ship --merge` that waits for the gate, merges with the same checks and finishes the task; it prints its log path. GitHub auto-merge is not used: the repository has no required checks, so it would merge before CI.
 7. When the PR merged outside ship, run `bun run task finish <issue> --pr <merged-pr>`. It verifies the PR merged from `task/<issue>` into main and its merge commit is reachable from fetched `origin/main`, closes the issue if open, moves its board item to Done and cleans up the worktree. Ship adds `Closes #<issue>` to task-branch PR bodies while preserving existing closing links.
 
 CI runs the full gate inside an isolated Linux PID and mount namespace. A system helper creates it, then drops to the runner's original user before executing repository code. This keeps protected host processes outside the cleanup tests without changing cleanup permissions or skipping tests.
+
+## Agents draining the backlog
+
+Many agents can work the backlog at once with the `backlog-loop` skill. `bun scripts/backlog.ts next` lists the issues an agent can finish start to end now; `--all` shows why the others wait. `bun scripts/backlog.ts claim <issue>` creates the remote branch `task/<issue>` through the GitHub refs API, which refuses an existing ref, so of two agents that claim at once exactly one wins and is assigned; the other exits 3 and picks the next issue. Unlike assignment, the claim is atomic across machines. An agent that cannot finish runs `bun scripts/backlog.ts release <issue> --reason <text>` when it pushed no work, or opens a draft PR and labels the issue `blocked`.
 
 ## Worktree cleanup after merge
 

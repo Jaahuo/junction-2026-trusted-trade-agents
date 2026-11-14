@@ -46,7 +46,8 @@ class ApprovalView extends ViewElement<ViewEntryOf<"approval-card">> {
       }
       .header .skeleton {
         --shimmer-base: color-mix(in srgb, var(--color-text-on-brand) 18%, transparent);
-        --shimmer-sweep: color-mix(in srgb, var(--color-yellow-aimo-soft) 45%, transparent);
+        --shimmer-sweep: color-mix(in srgb, var(--color-silver) 40%, transparent);
+        --shimmer-edge: color-mix(in srgb, var(--color-pink-soft) 25%, transparent);
         height: 18px;
       }
       .w-60 {

@@ -14,8 +14,11 @@ const tokens = css`
     --color-button-text: #003747;
     --color-light-purple-aimo: #eee8f5;
     --color-yellow-aimo-soft: #fff3b0;
-    /* A lilac between light purple and the Valio sunrise lilac, for the loading bars. */
+    /* Lilacs of the loading shimmer: the skeletons, and the deeper loading bars. */
     --color-lilac-aimo: #e2daf5;
+    --color-lilac-aimo-strong: #d9d2f5;
+    --color-pink-soft: #efd4f2;
+    --color-silver: #f2f2f6;
     --color-text: #23282d;
     --color-text-secondary: #555759;
     --color-text-on-brand: #ffffff;
@@ -195,17 +198,21 @@ export const base = css`
   .message.danger {
     color: var(--color-text-danger);
   }
-  /* Loading: a soft butter sweep over light lilac, no spinners. Always aria-hidden.
+  /* Loading: a silver sheen edged with soft pink sweeps over lilac, no spinners. Always
+     aria-hidden.
      The sweep is fixed to the viewport and repeats, so every shimmer moves in step and the
      loop never jumps. A shimmer on a petrol header sets --shimmer-base to translucent white. */
   .shimmer {
-    --shimmer-base: var(--color-light-purple-aimo);
-    --shimmer-sweep: color-mix(in srgb, var(--color-yellow-aimo-soft) 90%, transparent);
+    --shimmer-base: var(--color-lilac-aimo);
+    --shimmer-sweep: var(--color-silver);
+    --shimmer-edge: color-mix(in srgb, var(--color-pink-soft) 80%, transparent);
     background-color: var(--shimmer-base);
     background-image: linear-gradient(
       90deg,
       transparent 0%,
+      var(--shimmer-edge) 35%,
       var(--shimmer-sweep) 50%,
+      var(--shimmer-edge) 65%,
       transparent 100%
     );
     background-size: 200vw 100%;
@@ -215,7 +222,7 @@ export const base = css`
   }
   /* A shimmer bar along the bottom of a header or strip while something loads. */
   .load-bar {
-    --shimmer-base: var(--color-lilac-aimo);
+    --shimmer-base: var(--color-lilac-aimo-strong);
     display: block;
     height: 6px;
   }

@@ -34,13 +34,16 @@ export interface CatalogProduct {
 
 const MAX_CANDIDATES = 20;
 
-/** Each term as its lower-case words. A request with no word in any term is refused. */
+/**
+ * Each term as its lower-case words, split at spaces and hyphens, so "lactose-free" also matches
+ * names that write "lactose free". A request with no word in any term is refused.
+ */
 export const parseTerms = (terms: readonly string[]): Result<string[][], "EMPTY_TERMS"> => {
   const parsed = terms
     .map((term) =>
       term
         .toLowerCase()
-        .split(/\s+/)
+        .split(/[\s-]+/)
         .filter((word) => word !== ""),
     )
     .filter((words) => words.length > 0);

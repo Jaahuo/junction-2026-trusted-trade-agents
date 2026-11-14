@@ -49,7 +49,7 @@ One service sits in front of a wholesaler's existing systems and adds the order 
 
 **In scope**
 
-- Structured product search over the static product file
+- Structured product search over the static catalogue imported into PostgreSQL
 - Signed offers built from live price and availability
 - Orders checked against the buyer's mandate and the wholesaler's fixed guardrails
 - Human approval, with a reason code on every request
@@ -83,13 +83,13 @@ One service sits in front of a wholesaler's existing systems and adds the order 
 | Demo exception              | Partial stock and substitution chained in one request, on real mock data. If no product fits, the missed cut-off clip replaces it.                              | Decided  |
 | Public URL                  | Hosted demo at https://199-247-4-99.sslip.io on Vultr and Tiger Data (#37, #84).                                                                                | Decided  |
 | Order store                 | Our own store; the mock has no order endpoint                                                                                                                   | Decided  |
-| Offer input                 | `place_order` takes the signed offer tokens                                                                                                                     | Decided  |
+| Offer input                 | `place_order` takes signed offers, each named by its `offerId` or its token; the server looks up the token it issued for an id                                  | Decided  |
 | Reject                      | Two actions: reject and stop, reject and allow alternatives                                                                                                     | Decided  |
 | Unconfirmed stock           | Large orders of unconfirmed-stock products need approval                                                                                                        | Decided  |
 | Buyer limits                | The wholesaler uses them only for enforcement                                                                                                                   | Decided  |
 | Approval                    | Human only, on the approval card or the approval page; no decision tool is visible to the model                                                                 | Decided  |
 | Views                       | All five, in priority order: approval card, offer comparison, order timeline, search results, mandate settings                                                  | Decided  |
-| Hard constraints            | Every GS1 allergen code and free-from claim in the product data. `MAY_CONTAIN` counts as contradicted.                                                          | Proposed |
+| Hard constraints            | Every GS1 allergen code and free-from claim in the product data, and vegan. `MAY_CONTAIN` counts as contradicted.                                               | Proposed |
 | Agent rationale             | The agent may send a `purpose` and a `rationale` per line. The server stores them and shows them on the card and in the audit record. It never parses them.     | Proposed |
 | Trust chain                 | The views and an independent script verify offer signatures against the published keys. A placed order gets a signed receipt. The audit record is hash-chained. | Proposed |
 | Attack demo                 | A chat jailbreak and a rogue-agent script show the guardrails holding. The demo shows only attacks that the first build stops.                                  | Proposed |
@@ -112,7 +112,7 @@ Three roles exist. Through the MCP tools, the agent can never approve its own or
 
 **Demo access**
 
-- The first build has one seeded demo account: the invoice customer with a credit limit and one agent.
+- The first build has one seeded demo account: the invoice customer without a credit check and one agent.
 - It has no authentication on REST or MCP. Every request acts as the demo account.
 - Approver actions are tools that only a view calls. The model does not see them, so the agent cannot approve. A person approves on the approval card or the approval page.
 - Anyone who reaches the demo URL can open the approval page and call the REST API, including decisions. The README says so.
@@ -122,15 +122,16 @@ Three roles exist. Through the MCP tools, the agent can never approve its own or
 
 ## Tools
 
-Ten tools cover the flow: seven the model can call and three that only a view calls. Each tool is also a REST endpoint with the same JSON Schema, published as an OpenAPI document.
+Ten tools cover the flow: seven the model can call and three that only a view calls. Each tool maps to a REST endpoint, published as an OpenAPI document. The MCP binding adds the order retry key before it calls REST (SPEC-003).
 
 | Tool                     | Caller            | Input                                                                                                                                                  | Returns                                                                                                          |
 | ------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | `search_products`        | Agent             | Structured need: terms, hard and soft constraints, quantity with unit, deliver-by date                                                                 | Candidate products with a per-constraint match and the quantity converted to sales units. Uses static data only. |
 | `get_offers`             | Agent             | Product IDs, quantities, deliver-by date, payment terms                                                                                                | One signed offer per product, each with a pre-check result                                                       |
-| `place_order`            | Agent             | One or more signed offer tokens, optional alternative offer tokens, optional original request text, idempotency key                                    | Order with status: placed, pending approval or rejected, plus reason codes                                       |
+| `place_order`            | Agent             | One or more signed offers (offer ids or tokens), optional alternative offers, optional original request text; the system generates the idempotency key | Order with status: placed, pending approval or rejected, plus reason codes                                       |
 | `get_order_status`       | Agent             | Order ID                                                                                                                                               | Current status and the audit record                                                                              |
-| `get_mandate`            | Agent             | None                                                                                                                                                   | The limits currently in force for this agent                                                                     |
+| `get_mandate`            | Agent             | None                                                                                                                                                   | The limits currently in force for this agent, without opening a view during ordering                             |
+| `show_mandate`           | Agent             | None                                                                                                                                                   | The same limits in the mandate settings view, only when the user asks to see them                                |
 | `draft_mandate`          | Agent             | Proposed limits and standing constraints, from the terms the human gave                                                                                | The draft next to the current limits. Nothing is registered: the human registers it in the mandate view          |
 | `register_mandate`       | Approver          | The mandate as JSON; the demo server signs it with the simulated buyer key                                                                             | Mandate ID. The previous mandate is revoked.                                                                     |
 | `revoke_mandate`         | Approver          | Mandate ID                                                                                                                                             | Confirmation                                                                                                     |
@@ -151,7 +152,7 @@ The exact shapes are in [specs](specs.md); the examples below are illustrative.
 
 ### Search request
 
-The host agent fills these fields from the user's sentence. A hard constraint that a product contradicts excludes the product, and one with missing data sends the order to approval. Soft constraints only affect ranking. Standing constraints from the mandate are added by the server. The first build supports one hard constraint attribute, lactose-free, and refuses a request with any other hard constraint.
+The host agent fills these fields from the user's sentence. A hard constraint that a product contradicts excludes the product, and one with missing data sends the order to approval. Soft constraints only affect ranking. Standing constraints from the mandate are added by the server. Hard constraints are the GS1 allergens and free-from claims in the product data, such as gluten-free or egg-free, and vegan. A request with any other hard constraint is refused.
 
 ```json
 {
@@ -304,7 +305,7 @@ The approver sets these in the mandate.
 | ---------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | Spend per order              | Gross total, with VAT and deposits, stays under the maximum    | Offer total. Variable-weight products need a tolerance.                                      |
 | Allowed categories           | The agent may only order from listed categories                | Category codes come without names, so the settings view needs labels.                        |
-| Substitution policy          | Never, ask, or auto within the wholesaler's listed substitutes | The substitution pairs in the product data                                                   |
+| Substitution policy          | Never, ask or auto, plus per-pair rules from the approval card | The substitution pairs in the product data                                                   |
 | New products                 | A product the customer has not ordered before needs approval   | Needs seeded order history in the mock                                                       |
 | Minimum delivery reliability | The product's score must meet the minimum                      | Scores exist for 4,425 products. No data means ask, unless the user chose auto.              |
 | Maximum CO2 per kg           | The product's footprint must be under the maximum              | Category-level estimates for 11,033 products. No data means ask, unless the user chose auto. |
@@ -345,15 +346,17 @@ The list is fixed and part of the open contract, so any agent can act on a resul
 
 An order is always in one of five states, and each exception below has one defined handling.
 
-| State            | Meaning                                                             | Moves to                                                                                                            |
-| ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Pending approval | Waiting for the approver's decision                                 | Placed, declined, awaiting payment, or rejected (the mandate became invalid, or the credit limit fails at approval) |
-| Awaiting payment | Pay-on-order only: waiting for the simulated authorization          | Placed or rejected                                                                                                  |
-| Placed           | Committed at the offer's price and delivery date                    | Final                                                                                                               |
-| Rejected         | A fixed guardrail failed                                            | Final. The agent may start a new request.                                                                           |
-| Declined         | The approver said no, or gave no answer before the delivery cut-off | Final. The order states whether the agent stops or may look for alternatives.                                       |
+| State            | Meaning                                                                                                 | Moves to                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Pending approval | Waiting for the approver's decision                                                                     | Placed, declined, awaiting payment, or rejected (the mandate became invalid, or the credit limit fails at approval) |
+| Awaiting payment | Pay-on-order only: waiting for the simulated authorization                                              | Placed or rejected                                                                                                  |
+| Placed           | Committed at the offer's price and delivery date                                                        | Final                                                                                                               |
+| Rejected         | A fixed guardrail failed                                                                                | Final. The agent may start a new request.                                                                           |
+| Declined         | The approver said no, the delivery cut-off passed, or an accepted proposal explicitly replaces this one | Final. The order states whether the agent stops or may look for alternatives.                                       |
 
 Orders live in our own store, because the mock has no order endpoint.
+
+The pending list contains only proposals that still need a decision. When the buyer changes a pending proposal, the agent explicitly identifies the proposal it replaces. The server closes that proposal only after it accepts the replacement. It keeps unrelated orders open and records the replacement in both audits. Replacement does not approve an order.
 
 ### Offer expires while the order waits
 
@@ -383,6 +386,7 @@ Orders live in our own store, because the mock has no order endpoint.
 - Candidates are ranked good, better, best on soft constraints, price per litre or kilogram, delivery reliability and CO2.
 - The mandate's substitution policy decides the result: never means not offered, ask means approval with `SUBSTITUTION`, auto means placed if every other check passes.
 - Each substitute offer names the product it replaces and states the differences in price, origin and reliability.
+- Trust grows from the human's decisions, with nothing to type. After the human approves the same substitute 3 times, the card asks "Let the agent do this without asking?". Yes saves an auto rule for that pair: later orders skip `SUBSTITUTION` for it, and every other check still applies. After a rejection, the card asks whether the agent should keep suggesting that substitute; **Don't suggest again** saves a never rule: the agent is not offered that substitute again. The human removes either rule in the mandate view.
 
 ### Products that cannot be offered
 
@@ -402,10 +406,13 @@ The card shows the original request, the proposed order lines, the rules that fi
 | Reject and stop                      | The order is declined; the agent stops and tells the user                                           |
 | Reject, allow alternatives           | The order is declined; the agent may look for alternatives                                          |
 | Change quantity or delivery date     | A new signed offer is issued and every check runs again                                             |
+| Reduce to fit the limit              | The card lowers the amounts to fit the order limit; the approver checks them and confirms the edit  |
 | Pick a different offered alternative | Same as above, on the chosen offer                                                                  |
 | Approve and remember                 | Pricing only: the approver registers a new mandate with the raised limit, signed by the demo server |
 
 An edit can never bypass a guardrail, because it always produces a new offer and a new check. Build approve and reject first.
+
+Decided: reducing an over-limit order is the approver's action on the card, not the agent's. "Reduce to fit the limit" fills the amount steppers with whole sales-unit amounts that keep the gross total within the limit and sends nothing; the approver confirms, which sends `edit` on the same pending order (`proposalVersion` + 1). The agent's conduct rule is unchanged: it never lowers a quantity to get around a limit, and it sends the user to the card instead.
 
 ### Views
 
@@ -417,7 +424,7 @@ Each view is an MCP App: a tool declares a `ui://` resource, and the host render
 | 2        | Offer comparison | `get_offers`                                         | Options side by side: price per litre or kilogram, delivery date, reliability, CO2, pre-check result |
 | 3        | Order timeline   | `get_order_status`                                   | The audit record in readable form                                                                    |
 | 4        | Search results   | `search_products`                                    | Candidates, how each matched, and the quantity to order                                              |
-| 5        | Mandate settings | `get_mandate`, `draft_mandate`                       | The limits in force, or the agent's draft with a Register button for the human                       |
+| 5        | Mandate settings | `show_mandate`, `draft_mandate`                      | The limits in force, or the agent's draft with a Register button for the human                       |
 
 - Tools always return structured data and text as well, so hosts without MCP Apps still complete the flow.
 - The card in the chat and the approval page show the same information and call the same decision action. An order pending approval returns its `approvalUrl`, the address of the approval page.
@@ -455,15 +462,16 @@ The contract is vendor-neutral and each wholesaler hosts its own endpoint, with 
 
 ### Adapter for the Valio Aimo mock
 
-| Adapter function  | Source                                                 | What it gives                                                                                      |
-| ----------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `searchCatalog`   | Product data file, downloaded once and indexed locally | Names in Finnish, Swedish and English, allergen classifications, packaging, origin, GTINs          |
-| `getPrices`       | `POST /api/price`, up to 1,000 product IDs             | Price per sales unit with VAT, comparison price per litre or kilogram, validity period, error flag |
-| `getAvailability` | `POST /api/availability`, up to 1,000 product IDs      | Earliest delivery date, amount in sales units, closing time, sales block, stock model              |
-| `getSubstitutes`  | Substitution pairs in the product file                 | Allowed replacements per product                                                                   |
-| `submitOrder`     | None in the mock                                       | Writes to our own order store                                                                      |
+| Adapter function  | Source                                            | What it gives                                                                                      |
+| ----------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `searchCatalog`   | Product data imported once into PostgreSQL        | Names in Finnish, Swedish and English, allergen classifications, packaging, origin, GTINs          |
+| `getPrices`       | `POST /api/price`, up to 1,000 product IDs        | Price per sales unit with VAT, comparison price per litre or kilogram, validity period, error flag |
+| `getAvailability` | `POST /api/availability`, up to 1,000 product IDs | Earliest delivery date, amount in sales units, closing time, sales block, stock model              |
+| `getSubstitutes`  | Imported substitution pairs in PostgreSQL         | Allowed replacements per product                                                                   |
+| `submitOrder`     | None in the mock                                  | Writes to our own order store                                                                      |
 
-- Delivery reliability and CO2 come from two CSV files, joined on product ID.
+- An explicit import preserves the complete product records and both enrichment CSVs in catalogue-owned PostgreSQL tables.
+- Runtime search joins delivery reliability and CO2 on product ID. It never reads source files.
 - All calls send the API key in the `X-API-Key` header.
 - Assumption: Valio Aimo's production API authenticates clients with OAuth2. We do not build that flow because it is out of scope and not relevant to the demo; a production adapter would replace the API key with an OAuth2 access token.
 - Never query all products. Filter on static data first, then send the shortlist in one call. Rate limits are undisclosed, so cache results within their validity.
@@ -495,7 +503,7 @@ Judging weights: working end-to-end demo 30%, solving the user's need 20%, auton
 
 A missed cut-off with a later delivery date is the backup clip.
 
-Proposed: a rogue-agent clip after the scenarios. A chat jailbreak asks the agent to ignore its limits, and the order still goes to approval. A script then sends a changed offer, a reused offer token, an expired offer, an order over the credit limit and an order past the cut-off, and each ends with its reason code. Self-approval and order splitting stay out, because the first build does not stop them.
+Proposed: a rogue-agent clip after the scenarios. A chat jailbreak asks the agent to ignore its limits, and the order still goes to approval. A script then sends a changed offer, a reused offer token, an expired offer and an order past the cut-off, and each ends with its reason code. Self-approval and order splitting stay out, because the first build does not stop them.
 
 The mock returns real dates. The demo sentence must name a deliver-by date after the run day, before that date's cut-off.
 

@@ -1,24 +1,110 @@
 import { z } from "zod";
 import { DateSchema, MatchStateSchema, PaymentTermsSchema, QuantitySchema } from "./common.ts";
 
-/** Attributes with a data mapping (SPEC-004). */
-export const HARD_CONSTRAINT_ATTRIBUTES = ["lactose"] as const;
-export type HardConstraintAttribute = (typeof HARD_CONSTRAINT_ATTRIBUTES)[number];
-export const HARD_CONSTRAINT_VALUES = { lactose: ["free_from"] } as const satisfies Record<
-  HardConstraintAttribute,
-  readonly string[]
->;
-/** Hard constraint attributes gated by `allergenData`. */
-export const ALLERGEN_ATTRIBUTES = ["lactose"] as const;
+export type FreeFromData = {
+  allergen?: string;
+  includes?: readonly string[];
+  claim?: string;
+  low?: string;
+};
 
-export const HardConstraintSchema = z.discriminatedUnion("attribute", [
-  z.strictObject({
-    attribute: z.literal("lactose"),
-    is: z.enum(HARD_CONSTRAINT_VALUES.lactose, {
-      error: "lactose supports only the value free_from",
+/**
+ * Data mapping of each `free_from` attribute (SPEC-004): its GS1 allergen type code, the codes
+ * of allergens it includes, its `nutritionalClaim` code, and a claim that contradicts it.
+ */
+export const FREE_FROM_DATA = {
+  almond: { allergen: "SA" },
+  barley: { allergen: "GB" },
+  beef: { allergen: "BF" },
+  brazilNut: { allergen: "SR" },
+  carrot: { allergen: "NW" },
+  cashew: { allergen: "SC" },
+  celery: { allergen: "BC" },
+  chicken: { allergen: "CM" },
+  cocoa: { allergen: "NC" },
+  coconut: { allergen: "SO" },
+  coriander: { allergen: "NK" },
+  corn: { allergen: "NM" },
+  crustaceans: { allergen: "AC", includes: ["UN"] },
+  egg: { allergen: "AE", claim: "FREE_FROM_EGGS" },
+  fish: { allergen: "AF", includes: ["ABD", "ADQ"] },
+  gluten: { allergen: "AW", includes: ["UW", "NR", "GB", "GS", "GK"], claim: "FREE_FROM_GLUTEN" },
+  hazelnut: { allergen: "SH" },
+  khorasanWheat: { allergen: "GK" },
+  lactose: { allergen: "ML", claim: "FREE_FROM_LACTOSE", low: "LOW_LACTOSE" },
+  linalool: { allergen: "BP" },
+  lupin: { allergen: "NL" },
+  macadamia: { allergen: "SM" },
+  milk: { allergen: "AM", includes: ["ML"] },
+  molluscs: { allergen: "UM", includes: ["UN"] },
+  mustard: { allergen: "BM" },
+  oat: { allergen: "GO" },
+  pea: { allergen: "NE" },
+  peanut: { allergen: "AP" },
+  pecan: { allergen: "SP" },
+  pineNut: { allergen: "PN" },
+  pistachio: { allergen: "ST" },
+  podFruit: { allergen: "NP" },
+  pollock: { allergen: "ADQ" },
+  pork: { allergen: "PO" },
+  rye: { allergen: "NR" },
+  sesame: { allergen: "AS" },
+  shellfish: { allergen: "UN", includes: ["AC", "UM"] },
+  soy: { allergen: "AY", claim: "FREE_FROM_SOY" },
+  spelt: { allergen: "GS" },
+  sulphites: { allergen: "AU" },
+  treeNut: { allergen: "AN", includes: ["SA", "SH", "SW", "SC", "SP", "SR", "ST", "SM"] },
+  tuna: { allergen: "ABD" },
+  walnut: { allergen: "SW" },
+  wheat: { allergen: "UW", includes: ["GS", "GK"], claim: "FREE_FROM_WHEAT" },
+  additives: { claim: "FREE_FROM_ADDITIVES" },
+  artificialSweeteners: { claim: "FREE_FROM_ARTIFICIAL_SWEETENERS" },
+  colouringAgents: { claim: "FREE_FROM_COLOURING_AGENTS" },
+  fat: { claim: "FREE_FROM_FAT", low: "LOW_FAT" },
+  gmo: { claim: "FREE_FROM_GMO" },
+  preservatives: { claim: "FREE_FROM_PRESERVATIVES" },
+  sodiumSalt: { claim: "FREE_FROM_SODIUM_SALT", low: "LOW_SODIUM_SALT" },
+  sweeteners: { claim: "FREE_FROM_SWEETENERS" },
+} as const satisfies Record<string, FreeFromData>;
+type FreeFromAttribute = keyof typeof FREE_FROM_DATA;
+const isFreeFrom = (key: string): key is FreeFromAttribute => key in FREE_FROM_DATA;
+const FREE_FROM_ATTRIBUTES = Object.keys(FREE_FROM_DATA).filter(isFreeFrom);
+
+/** Attributes with a data mapping (SPEC-004): `is` is `free_from`, or `yes` for vegan. */
+export const HARD_CONSTRAINT_ATTRIBUTES = [...FREE_FROM_ATTRIBUTES, "vegan"] as const;
+export type HardConstraintAttribute = (typeof HARD_CONSTRAINT_ATTRIBUTES)[number];
+/** Hard constraint attributes gated by `allergenData`: those with a GS1 allergen code. */
+export const ALLERGEN_ATTRIBUTES = FREE_FROM_ATTRIBUTES.filter(
+  (attribute) => "allergen" in FREE_FROM_DATA[attribute],
+);
+
+const unsupported = (issue: { input?: unknown }) => {
+  const { input } = issue;
+  const attribute =
+    typeof input !== "object" || input === null
+      ? String(input)
+      : "attribute" in input
+        ? String(input.attribute)
+        : "missing";
+  return `unsupported hard constraint attribute "${attribute}"; supported: ${HARD_CONSTRAINT_ATTRIBUTES.join(", ")}`;
+};
+
+export const HardConstraintSchema = z.discriminatedUnion(
+  "attribute",
+  [
+    z.strictObject({
+      attribute: z.enum(FREE_FROM_ATTRIBUTES),
+      is: z.literal("free_from", {
+        error: "allergens and free-from claims support only free_from",
+      }),
     }),
-  }),
-]);
+    z.strictObject({
+      attribute: z.literal("vegan"),
+      is: z.literal("yes", { error: "vegan supports only the value yes" }),
+    }),
+  ],
+  { error: unsupported },
+);
 export type HardConstraint = z.infer<typeof HardConstraintSchema>;
 
 export const SoftConstraintSchema = z.strictObject({ attribute: z.string(), prefer: z.string() });
@@ -61,6 +147,13 @@ export const SearchResultSchema = z.strictObject({
   candidates: z.array(SearchCandidateSchema).max(20),
   constraints: ConstraintsSchema,
   mandate: z.strictObject({ id: z.string(), version: z.number().int() }).nullable(),
+  /**
+   * `checked: true`: every candidate can be delivered on or before `deliverBy`, and `dropped` ranked
+   * matches were left out because they cannot. `checked: false`: live availability was not read.
+   */
+  availability: z
+    .strictObject({ checked: z.boolean(), dropped: z.number().int().min(0) })
+    .optional(),
 });
 export type SearchResult = z.infer<typeof SearchResultSchema>;
 

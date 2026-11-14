@@ -1,16 +1,20 @@
 // Proves demo scenarios 1, 2 and 4 against a running server through the SPEC-003 REST routes.
 // Scenario 4 is the multi-product request (#127): one sentence, one order with three lines.
-// Usage: bun scripts/demo-smoke.ts --scenario 1|2|4 [--base-url <url>] [--no-reset]
-// It prints step names, HTTP statuses, order ids and audit event names only, never product data.
+// Usage: bun scripts/demo-smoke.ts --scenario 1|2|4 [--base-url <url>] [--no-reset] [--database-env NAME]
+// It prints step names, HTTP statuses, order ids, totals and audit event names, never product rows.
+import { readDemoProducts } from "../contexts/catalog/src/api/index.ts";
+import { closeDb, openDb } from "../packages/server-kit/src/index.ts";
 import {
   DecideApprovalRequestSchema,
-  DemoProductsSchema,
   ErrorEnvelopeSchema,
+  FactsRequestSchema,
+  FactsResultSchema,
   OffersRequestSchema,
   OffersResultSchema,
   OrderSchema,
   PendingListSchema,
   PlaceOrderRequestSchema,
+  RegisterMandateRequestSchema,
   SearchRequestSchema,
   SearchResultSchema,
   StoredMandateSchema,
@@ -18,6 +22,7 @@ import {
   type Order,
   type Quantity,
 } from "../packages/contract/src/index.ts";
+import { demoDatabaseUrl } from "./check-demo-data.ts";
 import { loadRuntime } from "./runtime.ts";
 
 type Schema<T> = {
@@ -46,7 +51,7 @@ class StepFailure extends Error {
 
 function usage(message: string): never {
   console.error(
-    `${message}\nUsage: bun scripts/demo-smoke.ts --scenario 1|2|4 [--base-url <url>] [--no-reset]`,
+    `${message}\nUsage: bun scripts/demo-smoke.ts --scenario 1|2|4 [--base-url <url>] [--no-reset] [--database-env NAME]`,
   );
   process.exit(2);
 }
@@ -54,6 +59,7 @@ function usage(message: string): never {
 function parseArgs(args: string[]) {
   let scenario: Scenario | undefined;
   let baseUrl: string | undefined;
+  let databaseEnv: string | undefined;
   let reset = true;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -65,11 +71,18 @@ function parseArgs(args: string[]) {
     } else if (arg === "--base-url") {
       baseUrl = args[++i];
       if (!baseUrl || !/^https?:\/\//.test(baseUrl)) usage("--base-url must be an http(s) URL.");
+    } else if (arg === "--database-env") {
+      databaseEnv = args[++i];
+      if (!databaseEnv) usage("--database-env requires an environment variable name.");
     } else if (arg === "--no-reset") reset = false;
     else usage(`Unknown argument: ${arg}`);
   }
   if (scenario === undefined) usage("Missing --scenario.");
-  return { scenario, baseUrl, reset };
+  if (scenario === 4 && !reset)
+    usage("Scenario 4 requires reset because it registers a tighter test mandate.");
+  if (databaseEnv !== undefined && reset)
+    usage("--database-env requires --no-reset; reset the selected target separately.");
+  return { scenario, baseUrl, reset, databaseEnv };
 }
 
 function issues(error: { issues: { path: PropertyKey[]; message: string }[] }): string {
@@ -206,7 +219,8 @@ async function runScenario(scenario: 1 | 2, call: Call, reset: boolean, demo: De
     return { productId: found.productId, orderQuantity: found.orderQuantity };
   });
 
-  const token = await step("offers", async () => {
+  // Placed by offer ID, as an agent does (SPEC-009): the server looks up the token it issued.
+  const offerId = await step("offers", async () => {
     const body = request(OffersRequestSchema, {
       ...terms,
       lines: [{ productId: candidate.productId, quantity: candidate.orderQuantity }],
@@ -218,12 +232,12 @@ async function runScenario(scenario: 1 | 2, call: Call, reset: boolean, demo: De
       offer !== undefined,
       `no offer for the scenario product (omitted: ${omitted?.reason ?? "no reason"})`,
     );
-    return offer.token;
+    return offer.offerId;
   });
 
   const order = await step("place", async () => {
     const body = request(PlaceOrderRequestSchema, {
-      offers: [token],
+      offers: [offerId],
       idempotencyKey: `demo-smoke-${crypto.randomUUID()}`,
       originalRequest: `scenario ${scenario}: lactose-free milk`,
     });
@@ -286,19 +300,16 @@ async function runScenario(scenario: 1 | 2, call: Call, reset: boolean, demo: De
   });
 }
 
-const S4_REQUEST =
-  "Order lactose-free semi-skimmed milk, lactose-free milk drink and plain soya yoghurt for Monday.";
-
 interface S4Line {
   readonly label: string;
-  readonly terms: string[];
+  readonly name: string;
   readonly productId: string;
   readonly quantity: Quantity;
 }
 
 interface Quoted {
-  readonly tokens: string[];
-  readonly grossByLine: number[];
+  readonly offerIds: string[];
+  readonly lines: { productId: string; quantity: Quantity; gross: number }[];
 }
 
 const fifth = (quantity: Quantity): Quantity => ({
@@ -306,21 +317,39 @@ const fifth = (quantity: Quantity): Quantity => ({
   unit: quantity.unit,
 });
 
-// The three history products of the seed, at the quantities the seed history holds, so each line
-// alone passes every check and only the order total can trip the spend limit.
-function s4Lines(demo: DemoProducts): S4Line[] {
-  const { s3 } = demo;
-  if (s3 === null) throw new StepFailure("setup", "data/demo-products.json has no s3 product");
-  return [
-    { label: "milk", terms: ["milk"], productId: demo.s1.productId, quantity: demo.s1.quantity },
-    {
-      label: "milk drink",
-      terms: ["milk drink"],
-      productId: demo.s2.productId,
-      quantity: fifth(demo.s2.quantity),
-    },
-    { label: "soya", terms: ["soya"], productId: s3.productId, quantity: fifth(s3.quantity) },
+// Use the same quantities as seeded history for each product.
+async function s4Lines(call: Call, demo: DemoProducts): Promise<S4Line[]> {
+  const { s3, s3Substitute } = demo;
+  if (s3 === null || s3Substitute === undefined)
+    throw new StepFailure(
+      "setup",
+      "Scenario 4 needs s3 and s3Substitute in imported demo metadata.",
+    );
+  const inputs = [
+    { label: "s1", productId: demo.s1.productId, quantity: demo.s1.quantity },
+    { label: "s3", productId: s3.productId, quantity: fifth(s3.quantity) },
+    { label: "s3 substitute", productId: s3Substitute.productId, quantity: fifth(s3.quantity) },
   ];
+  if (new Set(inputs.map((line) => line.productId)).size !== 3)
+    throw new StepFailure("setup", "Scenario 4 needs distinct s1, s3 and s3Substitute products.");
+  return step("product facts", async () => {
+    const body = request(FactsRequestSchema, {
+      productIds: inputs.map((line) => line.productId),
+      hard: HARD,
+    });
+    const { data } = await call("POST", "/api/catalog/facts", FactsResultSchema, body);
+    return inputs.map((line) => {
+      const product = data.products.find((item) => item.productId === line.productId);
+      check(product !== undefined, `no catalog facts for ${line.label}`);
+      check(product.name.trim().length > 0, `no searchable name for ${line.label}`);
+      return {
+        label: line.label,
+        name: product.name,
+        productId: line.productId,
+        quantity: line.quantity,
+      };
+    });
+  });
 }
 
 const sameMoney = (a: number, b: number) => Math.abs(a - b) < 0.015;
@@ -357,43 +386,76 @@ async function quote(
       `     line totals ${offers.map((o) => o.claims.total.gross).join(" + ")} EUR gross`,
     );
     return {
-      tokens: offers.map((o) => o.token),
-      grossByLine: offers.map((o) => o.claims.total.gross),
+      offerIds: offers.map((o) => o.offerId),
+      lines: offers.map((o) => ({
+        productId: o.claims.productId,
+        quantity: o.claims.quantity,
+        gross: o.claims.total.gross,
+      })),
     };
   });
 }
 
-async function placeAll(call: Call, name: string, quoted: Quoted): Promise<Order> {
+async function placeAll(
+  call: Call,
+  name: string,
+  quoted: Quoted,
+  originalRequest: string,
+): Promise<Order> {
   return step(name, async () => {
     const body = request(PlaceOrderRequestSchema, {
-      offers: quoted.tokens,
+      offers: quoted.offerIds,
       idempotencyKey: `demo-smoke-${crypto.randomUUID()}`,
-      originalRequest: S4_REQUEST,
+      originalRequest,
     });
     const { status, data } = await call("POST", "/api/orders", OrderSchema, body);
     check(status === 201, `expected HTTP 201, got ${status}`);
-    check(data.lines.length === 3, `expected one order with 3 lines, got ${data.lines.length}`);
-    const sum = quoted.grossByLine.reduce((a, b) => a + b, 0);
+    const validate = (order: Order) => {
+      check(order.lines.length === 3, `expected one order with 3 lines, got ${order.lines.length}`);
+      for (const [index, expected] of quoted.lines.entries()) {
+        const line = order.lines.find((item) => item.offerId === quoted.offerIds[index]);
+        check(line !== undefined, `missing quoted line ${index + 1}`);
+        check(line.claims.productId === expected.productId, `wrong product on line ${index + 1}`);
+        check(
+          line.claims.quantity.value === expected.quantity.value &&
+            line.claims.quantity.unit === expected.quantity.unit,
+          `wrong quantity on line ${index + 1}`,
+        );
+        check(
+          sameMoney(line.claims.total.gross, expected.gross),
+          `wrong total on line ${index + 1}`,
+        );
+      }
+      const sum = quoted.lines.reduce((total, line) => total + line.gross, 0);
+      check(sameMoney(order.total.gross, sum), "order total does not match the quoted lines");
+    };
+    validate(data);
+    const stored = await call(
+      "GET",
+      `/api/orders/${encodeURIComponent(data.orderId)}`,
+      OrderSchema,
+    );
+    validate(stored.data);
+    check(stored.data.status === data.status, "stored order status differs from placement");
     check(
-      sameMoney(data.total.gross, sum),
-      `expected order total ${sum.toFixed(2)} gross, got ${data.total.gross}`,
+      JSON.stringify(stored.data.reasons) === JSON.stringify(data.reasons),
+      "stored order reasons differ from placement",
     );
-    console.log(
-      `     order ${data.orderId} ${data.status}, 3 lines, ${data.total.gross} EUR gross`,
-    );
+    console.log(`     order ${data.orderId} ${data.status}, 3 lines`);
     return data;
   });
 }
 
 async function runScenario4(call: Call, reset: boolean, demo: DemoProducts) {
-  const lines = s4Lines(demo);
   await prepare(call, reset);
+  const lines = await s4Lines(call, demo);
+  const originalRequest = `Order ${lines
+    .map((line) => `${line.quantity.value} ${line.quantity.unit} of ${line.name}`)
+    .join(", ")} for ${demo.requestedDate}.`;
 
-  const limit = await step("mandate", async () => {
+  const mandate = await step("mandate", async () => {
     const { data } = await call("GET", "/api/mandates/current", StoredMandateSchema);
-    const max = data.mandate.limits.maxOrderTotal.value;
-    console.log(`     order limit ${max} EUR gross`);
-    return max;
+    return data.mandate;
   });
 
   const shortlist: { productId: string; quantity: Quantity }[] = [];
@@ -405,9 +467,9 @@ async function runScenario4(call: Call, reset: boolean, demo: DemoProducts) {
           paymentTerms: "invoice",
           hard: HARD,
           soft: [],
-          terms: line.terms,
+          terms: [line.name],
           quantity: line.quantity,
-          originalRequest: S4_REQUEST,
+          originalRequest,
         });
         const { data } = await call("POST", "/api/catalog/search", SearchResultSchema, body);
         const found = data.candidates.find((c) => c.productId === line.productId);
@@ -417,34 +479,84 @@ async function runScenario4(call: Call, reset: boolean, demo: DemoProducts) {
       }),
     );
 
+  const initial = await quote(call, "fixture offers", shortlist, demo);
+  const s1 = lines.find((line) => line.label === "s1");
+  check(s1 !== undefined, "the s1 product is missing");
+  const s1Quote = initial.lines.find((line) => line.productId === s1.productId);
+  check(s1Quote !== undefined, "the s1 quote is missing");
+  const baseTotal = initial.lines.reduce((total, line) => total + line.gross, 0);
+  const limit = Math.floor((baseTotal + s1Quote.gross / 2) * 100) / 100;
+  check(limit > baseTotal, "the s1 increment is too small to set a fixture limit");
+  check(
+    limit < mandate.limits.maxOrderTotal.value,
+    "the fixture limit would not tighten the mandate",
+  );
+  check(
+    initial.lines.every((line) => line.gross < limit),
+    "a base line is not under the fixture limit",
+  );
+  await step("register fixture mandate", async () => {
+    const body = request(RegisterMandateRequestSchema, {
+      limits: {
+        ...mandate.limits,
+        maxOrderTotal: { ...mandate.limits.maxOrderTotal, value: limit },
+      },
+      standingConstraints: mandate.standingConstraints,
+      exp: mandate.exp,
+    });
+    const { status, data } = await call("POST", "/api/mandates", StoredMandateSchema, body);
+    check(status === 201, `expected HTTP 201, got ${status}`);
+    check(data.mandate.limits.maxOrderTotal.value === limit, "fixture limit was not registered");
+    console.log(`     fixture order limit ${limit} EUR gross`);
+  });
+
+  // The new mandate version invalidates the initial offers.
   const quoted = await quote(call, "offers", shortlist, demo);
-  const placed = await placeAll(call, "place", quoted);
+  check(
+    quoted.lines.every((line) => line.gross < limit),
+    "a base line is not under the fixture limit",
+  );
+  check(
+    quoted.lines.reduce((total, line) => total + line.gross, 0) < limit,
+    "the base quoted total is not under the fixture limit",
+  );
+  const placed = await placeAll(call, "place", quoted, originalRequest);
   await step("placed under the limit", async () => {
     check(placed.status === "placed", `expected status placed, got ${placed.status}`);
     check(placed.reasons.length === 0, `expected no reasons, got [${placed.reasons.join(", ")}]`);
-    check(placed.total.gross <= limit, `the order total is over the ${limit} EUR limit`);
+    check(placed.total.gross < limit, `the order total is not under the ${limit} EUR limit`);
   });
 
-  // Scale every line by the same factor: each line stays under the limit, the total goes over it.
-  const sum = quoted.grossByLine.reduce((a, b) => a + b, 0);
-  const factor = Math.floor(limit / sum) + 1;
-  const largest = Math.max(...quoted.grossByLine) * factor;
-  if (largest >= limit)
-    throw new StepFailure(
-      "scale",
-      `a ${factor}x line costs ${largest.toFixed(2)} EUR, not under the ${limit} EUR limit`,
-    );
-  console.log(`     scale every line by ${factor}`);
+  // Keep both limited-stock s3 products unchanged.
+  console.log("     double s1; keep s3 and its substitute unchanged");
   const scaled = await quote(
     call,
     "offers at scale",
     shortlist.map((line) => ({
       productId: line.productId,
-      quantity: { value: line.quantity.value * factor, unit: line.quantity.unit },
+      quantity: {
+        value: line.quantity.value * (line.productId === s1.productId ? 2 : 1),
+        unit: line.quantity.unit,
+      },
     })),
     demo,
   );
-  const pending = await placeAll(call, "place at scale", scaled);
+  check(
+    scaled.lines.every((line) => line.gross < limit),
+    "a scaled line is not under the spend limit",
+  );
+  check(
+    scaled.lines.reduce((total, line) => total + line.gross, 0) > limit,
+    "the scaled quoted total is not over the spend limit",
+  );
+  const scaledRequest = `Order ${scaled.lines
+    .map((line) => {
+      const original = lines.find((item) => item.productId === line.productId);
+      check(original !== undefined, `no original product for ${line.productId}`);
+      return `${line.quantity.value} ${line.quantity.unit} of ${original.name}`;
+    })
+    .join(", ")} for ${demo.requestedDate}.`;
+  const pending = await placeAll(call, "place at scale", scaled, scaledRequest);
   await step("total over the limit", async () => {
     check(
       pending.status === "pending_approval",
@@ -460,13 +572,20 @@ async function runScenario4(call: Call, reset: boolean, demo: DemoProducts) {
 }
 
 async function main() {
-  const { scenario, baseUrl: flag, reset } = parseArgs(process.argv.slice(2));
+  const { scenario, baseUrl: flag, reset, databaseEnv } = parseArgs(process.argv.slice(2));
   let baseUrl = flag ?? Bun.env["PUBLIC_BASE_URL"];
   if (!baseUrl) {
     await loadRuntime();
     baseUrl = `http://127.0.0.1:${process.env["PORT"]}`;
   }
-  const demo = DemoProductsSchema.parse(await Bun.file(`${ROOT}/data/demo-products.json`).json());
+  const db = openDb(await demoDatabaseUrl(baseUrl, databaseEnv));
+  let demo: DemoProducts | null;
+  try {
+    demo = await readDemoProducts(db);
+  } finally {
+    await closeDb(db);
+  }
+  if (!demo) throw new Error("Demo products are not configured in the catalogue database.");
   try {
     const base = baseUrl.replace(/\/$/, "");
     const call = makeClient(base);

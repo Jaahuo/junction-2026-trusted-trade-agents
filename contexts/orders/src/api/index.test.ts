@@ -37,6 +37,63 @@ test("an in-limit offer gives 201 placed with audit order_requested, offer_verif
     expect(await counts(db)).toEqual({ orders: 1, refusals: 0, history: 1 });
   }));
 
+for (const scenario of [
+  { name: "within", unitNet: 50, total: { net: 600, gross: 684 }, status: "placed", reasons: [] },
+  {
+    name: "over",
+    unitNet: 100,
+    total: { net: 1200, gross: 1368 },
+    status: "pending_approval",
+    reasons: ["SPEND_OVER_LIMIT"],
+  },
+] as const) {
+  test(`three distinct products form one order ${scenario.name} the aggregate spend limit`, async () =>
+    withDatabase(async (db) => {
+      const { app, sign } = await mount(db);
+      const products = [
+        { productId: "prod_test_oat", name: "Test oat drink", value: 2 },
+        { productId: "prod_test_soy", name: "Test soy drink", value: 4 },
+        { productId: "prod_test_rice", name: "Test rice drink", value: 6 },
+      ];
+      const tokens = await Promise.all(
+        products.map(({ productId, name, value }) =>
+          sign({
+            productId,
+            product: { ...fixtures.offerClaims.product, name },
+            quantity: { value, unit: "CT" },
+            unitPrice: { net: scenario.unitNet, vatRate: 14, currency: "EUR" },
+            total: { net: scenario.unitNet * value, gross: (scenario.unitNet * value * 114) / 100 },
+          }),
+        ),
+      );
+      const response = await place(app, tokens);
+      expect(response.status).toBe(201);
+      const order = await orderOf(response);
+      expect(order.status).toBe(scenario.status);
+      expect(order.reasons).toEqual([...scenario.reasons]);
+      expect(order.total).toEqual(scenario.total);
+      expect(
+        order.lines.map(({ claims }) => ({
+          productId: claims.productId,
+          quantity: claims.quantity,
+        })),
+      ).toEqual(
+        products.map(({ productId, value }) => ({
+          productId,
+          quantity: { value, unit: "CT" },
+        })),
+      );
+      expect(await counts(db)).toEqual({
+        orders: 1,
+        refusals: 0,
+        history: scenario.status === "placed" ? 3 : 0,
+      });
+      const stored = await orderOf(await call(app, "GET", `/${order.orderId}`));
+      expect(stored.lines).toEqual(order.lines);
+      expect(stored.total).toEqual(scenario.total);
+    }));
+}
+
 test("an over-limit offer gives pending_approval with reasons exactly [SPEND_OVER_LIMIT]; approvalUrl follows PUBLIC_BASE_URL", async () =>
   withDatabase(async (db) => {
     const { app, sign, publicBase } = await mount(db);
@@ -108,6 +165,24 @@ test("a malformed token gives 400 OFFER_INVALID, stores no order and writes one 
       ["order_refused", "OFFER_INVALID"],
       ["order_refused", "OFFER_INVALID"],
     ]);
+  }));
+
+test("a malformed offer in a multi-line request refuses the whole order without consuming a valid offer", async () =>
+  withDatabase(async (db) => {
+    const { app, sign } = await mount(db);
+    const valid = await sign();
+    const response = await place(app, [valid, "not-a-token"]);
+    expect(response.status).toBe(400);
+    expect(await errorOf(response)).toBe("OFFER_INVALID");
+    expect(await counts(db)).toEqual({ orders: 0, refusals: 1, history: 0 });
+
+    const retry = await place(app, [valid]);
+    expect(retry.status).toBe(201);
+    const order = await orderOf(retry);
+    expect(order.status).toBe("placed");
+    expect(order.lines).toHaveLength(1);
+    expect(order.lines[0]?.token).toBe(valid);
+    expect(await counts(db)).toEqual({ orders: 1, refusals: 1, history: 1 });
   }));
 
 test("a repeated token gives 400 OFFER_INVALID", async () =>
@@ -240,6 +315,25 @@ test("two parallel automatic orders that together exceed the creditLimit of 5000
       "check_failed",
       "rejected",
     ]);
+  }));
+
+test("the demo account has no credit check: two orders over 5000 together are both placed", async () =>
+  withDatabase(async (db) => {
+    const { appWith, register, sign } = await mount(db);
+    const app = appWith({ principal: async () => DEMO_ACCOUNT });
+    expect(DEMO_ACCOUNT.creditLimit).toBeNull();
+    const mandate = await register(
+      limitsWith({ maxOrderTotal: { value: 10_000, currency: "EUR", basis: "gross" } }),
+    );
+    const big = {
+      total: { net: 2700, gross: 3000 },
+      mandateId: mandate.mandateId,
+      mandateVersion: mandate.version,
+    };
+    const orders = await Promise.all(
+      [await place(app, [await sign(big)]), await place(app, [await sign(big)])].map(orderOf),
+    );
+    expect(orders.map((order) => order.status)).toEqual(["placed", "placed"]);
   }));
 
 test("an unknown order id gives 404", async () =>

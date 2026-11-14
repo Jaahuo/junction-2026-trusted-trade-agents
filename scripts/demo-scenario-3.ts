@@ -1,20 +1,22 @@
-import { env, selfBaseUrl } from "../packages/server-kit/src/index.ts";
+import { readDemoProducts } from "../contexts/catalog/src/api/index.ts";
+import { closeDb, env, openDb, selfBaseUrl } from "../packages/server-kit/src/index.ts";
 import {
   DEMO_ACCOUNT,
-  DemoProductsSchema,
   OffersRequestSchema,
   OffersResultSchema,
   OrderRefSchema,
   OrderSchema,
   PlaceOrderRequestSchema,
 } from "../packages/contract/src/index.ts";
+import { demoDatabaseUrl } from "./check-demo-data.ts";
 
-const USAGE = `Usage: bun scripts/demo-scenario-3.ts
+const USAGE = `Usage: bun scripts/demo-scenario-3.ts [--database-env NAME]
 
 Set INTERNAL_BASE_URL or PORT to the running application server. The server must
 use WHOLESALER_LIVE=mock with its live wholesaler API key configured. Reads
-s3 and requestedDate from data/demo-products.json at runtime. This creates a
-real order; a human must approve it at the displayed URL. The script waits up
+s3 and requestedDate from the catalogue database. Use --database-env NAME
+to select a different database explicitly. This creates a real order; a human must approve
+it at the displayed URL. The script waits up
 to five minutes for placement. Maximum: 63 application HTTP requests (one
 offers request, one placement, one initial status, and 60 status polls).
 WHOLESALER_LIVE=fixture is not supported by the server.`;
@@ -56,18 +58,23 @@ async function main() {
     console.log(USAGE);
     return;
   }
-  requireCondition(args.length === 0, USAGE);
+  requireCondition(args.length === 0 || (args.length === 2 && args[0] === "--database-env"), USAGE);
   requireCondition(
     env("WHOLESALER_LIVE") !== "fixture",
     "WHOLESALER_LIVE=fixture is not supported by the server; use the live mock adapter",
   );
 
   stage = "demo configuration";
-  const demo = DemoProductsSchema.parse(
-    await Bun.file(new URL("../data/demo-products.json", import.meta.url)).json(),
-  );
+  const db = openDb(await demoDatabaseUrl(selfBaseUrl(), args[1]));
+  let demo;
+  try {
+    demo = await readDemoProducts(db);
+  } finally {
+    await closeDb(db);
+  }
+  requireCondition(demo, "Demo products are not configured in the catalogue database");
   const s3 = demo.s3;
-  requireCondition(s3, "No s3 scenario is configured in data/demo-products.json");
+  requireCondition(s3, "No s3 scenario is configured in the catalogue database");
   const input = OffersRequestSchema.parse({
     lines: [s3],
     deliverBy: demo.requestedDate,

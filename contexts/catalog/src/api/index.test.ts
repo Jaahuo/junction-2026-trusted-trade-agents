@@ -1,20 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { SearchResultSchema } from "@app/contract";
+import { type HardConstraint, SearchResultSchema } from "@app/contract";
 import { err, ok, type Result } from "@app/kernel";
 import { Elysia } from "elysia";
 import {
+  type AvailabilitySource,
   type CatalogDeps,
   type CurrentMandate,
   lazyCatalog,
   type MandateSource,
+  SEARCH_POOL,
 } from "../application/catalog.ts";
 import { type CatalogProduct, createCatalog } from "../domain/catalog.ts";
 import { MAX_QUANTITY } from "../domain/quantity.ts";
 import { edenMandateSource } from "../infra/mandate-client.ts";
-import { DATA_FILES, loadProductFile } from "../infra/product-file.ts";
 import { createApi } from "./index.ts";
 
 const product = (overrides: Partial<CatalogProduct> & { productId: string }): CatalogProduct => ({
@@ -58,15 +56,30 @@ const fakeMandate = (value: Result<CurrentMandate | null, "UPSTREAM_FAILED">): M
   current: async () => value,
 });
 
+const allDeliverable: AvailabilitySource = {
+  deliverable: async (_deliverBy, productIds) => ok(new Set(productIds)),
+};
+const onlyDeliverable = (...deliverable: string[]) => {
+  const calls: { deliverBy: string; productIds: readonly string[] }[] = [];
+  const source: AvailabilitySource = {
+    deliverable: async (deliverBy, productIds) => {
+      calls.push({ deliverBy, productIds });
+      return ok(new Set(deliverable));
+    },
+  };
+  return { source, calls };
+};
+
 const deps = (overrides: Partial<CatalogDeps> = {}): CatalogDeps => ({
   catalog: async () => ok(createCatalog(products)),
   mandates: noMandate,
+  availability: allDeliverable,
   ...overrides,
 });
 
 const searchBody = {
   terms: ["milk"],
-  hard: [] as { attribute: "lactose"; is: "free_from" }[],
+  hard: [] as HardConstraint[],
   soft: [] as { attribute: string; prefer: string }[],
   quantity: { value: 1000, unit: "LTR" },
   deliverBy: "2026-11-16",
@@ -102,6 +115,72 @@ const inProcess = (app: { handle: (request: Request) => Promise<Response> }) =>
     async (input: RequestInfo | URL, init?: RequestInit) => app.handle(new Request(input, init)),
     { preconnect: fetch.preconnect },
   );
+
+describe("POST /catalog/search availability", () => {
+  test("a product that cannot be delivered by deliverBy is not a candidate, and dropped counts it", async () => {
+    const { source, calls } = onlyDeliverable("free", "plain");
+    const { status, body } = await post(
+      createApi(deps({ availability: source })),
+      "/search",
+      searchBody,
+    );
+    expect(status).toBe(200);
+    expect(ids(body)).toEqual(["free", "plain"]);
+    expect(SearchResultSchema.parse(body).availability).toEqual({ checked: true, dropped: 1 });
+    expect(calls).toEqual([{ deliverBy: "2026-11-16", productIds: ["free", "low", "plain"] }]);
+  });
+
+  test("when nothing is deliverable the candidates are empty and dropped counts every match", async () => {
+    const { source } = onlyDeliverable();
+    const { body } = await post(createApi(deps({ availability: source })), "/search", searchBody);
+    expect(SearchResultSchema.parse(body)).toMatchObject({
+      candidates: [],
+      availability: { checked: true, dropped: 3 },
+    });
+  });
+
+  test("a failed availability read answers 200 with the unfiltered candidates and checked false", async () => {
+    const failing: AvailabilitySource = { deliverable: async () => err("UPSTREAM_FAILED") };
+    const { status, body } = await post(
+      createApi(deps({ availability: failing })),
+      "/search",
+      searchBody,
+    );
+    expect(status).toBe(200);
+    expect(ids(body)).toEqual(["free", "low", "plain"]);
+    expect(SearchResultSchema.parse(body).availability).toEqual({ checked: false, dropped: 0 });
+  });
+
+  test("a search with no match does not read availability", async () => {
+    const { source, calls } = onlyDeliverable();
+    const { body } = await post(createApi(deps({ availability: source })), "/search", {
+      ...searchBody,
+      terms: ["T-NO-SUCH-WORD"],
+    });
+    expect(SearchResultSchema.parse(body)).toMatchObject({
+      candidates: [],
+      availability: { checked: true, dropped: 0 },
+    });
+    expect(calls).toEqual([]);
+  });
+
+  test("lower-ranked matches fill the 20 places that undeliverable matches leave, from a pool of SEARCH_POOL", async () => {
+    const many = Array.from({ length: SEARCH_POOL + 5 }, (_, index) =>
+      product({ productId: `m${String(index).padStart(3, "0")}` }),
+    );
+    const ranked = many.map((entry) => entry.productId);
+    // The 25 best matches cannot be delivered; the next 35 of the pool can.
+    const { source, calls } = onlyDeliverable(...ranked.slice(25));
+    const { body } = await post(
+      createApi(deps({ catalog: async () => ok(createCatalog(many)), availability: source })),
+      "/search",
+      searchBody,
+    );
+    expect(calls[0]?.productIds).toEqual(ranked.slice(0, SEARCH_POOL));
+    expect(ids(body)).toEqual(ranked.slice(25, 45));
+    expect(SearchResultSchema.parse(body).availability).toEqual({ checked: true, dropped: 25 });
+  });
+});
 
 describe("POST /catalog/search", () => {
   test("search merges the mandate's standing constraints and returns them and the mandate id and version", async () => {
@@ -336,6 +415,7 @@ describe("POST /catalog/search", () => {
       ],
       constraints: { hard: [{ attribute: "lactose", is: "free_from" }], soft: [] },
       mandate: null,
+      availability: { checked: true, dropped: 0 },
     });
   });
 
@@ -386,42 +466,6 @@ describe("POST /catalog/search", () => {
     expect(loads).toBe(3);
   });
 
-  test("a product file with no valid record answers 502 and loads once it is repaired", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "catalog-repair-"));
-    try {
-      await Bun.write(join(dir, DATA_FILES.reliability), "productId,deliveryReliability\r\n");
-      await Bun.write(join(dir, DATA_FILES.co2), "productId,AVG kg CO2-eq/kg\r\n");
-      await Bun.write(join(dir, DATA_FILES.products), JSON.stringify([{ id: "T-BAD" }]));
-      const app = createApi(
-        deps({ catalog: lazyCatalog(async () => createCatalog(await loadProductFile(dir))) }),
-      );
-      const broken = await post(app, "/search", searchBody);
-      expect(broken).toEqual({
-        status: 502,
-        body: {
-          error: { code: "UPSTREAM_FAILED", message: "The product index could not be loaded." },
-        },
-      });
-      const repaired = {
-        id: "T-GOOD",
-        salesUnit: "ST",
-        baseUnit: "ST",
-        category: "T-CAT",
-        allowedLotSize: 1,
-        units: [{ unitId: "ST", sizeInBaseUnits: 1 }],
-        synkkaData: { names: [{ value: "Test milk", language: "en" }] },
-      };
-      await Bun.write(join(dir, DATA_FILES.products), JSON.stringify([repaired]));
-      const fixed = await post(app, "/search", searchBody);
-      expect({ status: fixed.status, ids: ids(fixed.body) }).toEqual({
-        status: 200,
-        ids: ["T-GOOD"],
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
   test("empty terms gives 400", async () => {
     let loads = 0;
     const app = createApi(
@@ -469,15 +513,43 @@ describe("POST /catalog/search", () => {
     expect(await source.current()).toEqual(err("UPSTREAM_FAILED"));
   });
 
-  test("an unsupported hard constraint gives 400 naming the attribute", async () => {
-    const { status, body } = await post(createApi(deps()), "/search", {
-      ...searchBody,
-      hard: [{ attribute: "gluten", is: "free_from" }],
-    });
-    expect({ status, body }).toMatchObject({
-      status: 400,
-      body: { error: { code: "BAD_REQUEST" } },
-    });
+  test("an unknown allergen code gives 400 naming the attribute", async () => {
+    for (const attribute of ["unicorn", "AE"]) {
+      const { status, body } = await post(createApi(deps()), "/search", {
+        ...searchBody,
+        hard: [{ attribute, is: "free_from" }],
+      });
+      expect({ status, body }).toMatchObject({
+        status: 400,
+        body: {
+          error: {
+            code: "BAD_REQUEST",
+            message: expect.stringContaining(
+              `unsupported hard constraint attribute "${attribute}"`,
+            ),
+          },
+        },
+      });
+    }
+  });
+
+  test("an allergen CONTAINS or MAY_CONTAIN is excluded, FREE_FROM is confirmed, no data is unknown", async () => {
+    const eggs = [
+      product({ productId: "egg-free", claims: new Set(["FREE_FROM:AE"]) }),
+      product({ productId: "egg", claims: new Set(["CONTAINS:AE"]) }),
+      product({ productId: "egg-traces", claims: new Set(["MAY_CONTAIN:AE"]) }),
+      product({ productId: "egg-no-data", claims: new Set() }),
+    ];
+    const { status, body } = await post(
+      createApi(deps({ catalog: async () => ok(createCatalog(eggs)) })),
+      "/search",
+      { ...searchBody, hard: [{ attribute: "egg", is: "free_from" }] },
+    );
+    expect(status).toBe(200);
+    expect(SearchResultSchema.parse(body).candidates.map((c) => [c.productId, c.match])).toEqual([
+      ["egg-free", { egg: "confirmed" }],
+      ["egg-no-data", { egg: "unknown" }],
+    ]);
   });
 });
 

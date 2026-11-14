@@ -56,14 +56,25 @@ describe("fsSkillPack", () => {
 });
 
 describe("the trusted-trade-ordering skill text", () => {
-  test("names the multi-product path: one search per product, one get_offers, one place_order", async () => {
+  test("names the multi-product path: one search per product, batched quotes, one order", async () => {
     const text = await skillText();
-    expect(text).toContain("Call `search_products` once per product the user names");
+    expect(text).toContain("Call `find_products` once per product the user names");
+    expect(text).toContain("the same full request for every product");
+    expect(text).toContain("Call `quote_offers` once with the shortlist for every product");
     expect(text).toContain(
-      "Call `get_offers` once, with one line per shortlisted candidate of every product",
+      "Call `place_order` once, with `offers` (one chosen `offerId` per product, up to 20 chosen offers",
     );
-    expect(text).toContain("Call `place_order` once, with `offers` (one token per product");
     expect(text).toContain("Never place one order per product");
+    expect(text).toContain("rather than silently placing a partial order");
+    expect(text).toContain("`search_products` and `get_offers` only when the user asks");
+    expect(text).toContain("The server generates the idempotency key");
+    expect(text).toContain(
+      "select up to 20 unchosen offers as `alternatives` across the entire order",
+    );
+    expect(text).toContain("up to 20 alternatives across the entire order");
+    expect(text).toContain(
+      "The two limits are separate: retain the chosen offer for every requested product",
+    );
   });
 
   test("states the choice rule in order: pre-check, price per standard unit, delivery date", async () => {
@@ -73,5 +84,8 @@ describe("the trusted-trade-ordering skill text", () => {
     );
     expect(order.every((at) => at >= 0)).toBe(true);
     expect(order).toEqual(order.toSorted((a, b) => a - b));
+    expect(text).toContain("`claims.pricePerStandardUnit.gross`");
+    expect(text).toContain("Compare only offers with the same `unit`");
+    expect(text).toContain("When it is `null`, do not compute one");
   });
 });

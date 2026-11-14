@@ -1,4 +1,9 @@
-import type { MandateDraft, StoredMandate } from "@app/contract";
+import {
+  type MandateDraft,
+  samePair,
+  type StoredMandate,
+  type SubstitutePair,
+} from "@app/contract";
 import { brand } from "@app/ui/brand";
 import { formatMoney, formatTimestamp, ORDER_WORDING } from "@app/ui/format";
 import { css, html, nothing } from "lit";
@@ -11,6 +16,8 @@ import {
   viewEntry,
 } from "../../shared/bridge.ts";
 import { lang, pick } from "../../shared/locale.ts";
+import { saveRules } from "../../shared/substitution-rules.ts";
+import { required } from "../../shared/constraints.ts";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { loadMandate } from "./loader.ts";
@@ -47,6 +54,8 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     registering: { state: true },
     registerError: { state: true },
     currentUnknown: { state: true },
+    revoking: { state: true },
+    revokeFailed: { state: true },
   };
 
   static override styles = [
@@ -143,6 +152,20 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
         flex-wrap: wrap;
         gap: var(--spacing-sm);
       }
+      .rules {
+        display: grid;
+        gap: var(--spacing-md);
+        padding: 0;
+        list-style: none;
+      }
+      .rules li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing-md);
+        border-bottom: var(--border-width-default) solid var(--color-border);
+        padding-bottom: var(--spacing-sm);
+      }
       @media (max-width: 400px) {
         .row {
           grid-template-columns: 1fr;
@@ -162,12 +185,17 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
   declare private currentUnknown: boolean;
   /** Created at the first Register of a draft and kept, so a retry is a replay (SPEC-008). */
   private operationId: string | null = null;
+  /** True while a substitution rule is being removed. */
+  declare private revoking: boolean;
+  declare private revokeFailed: boolean;
 
   constructor() {
     super();
     this.registering = false;
     this.registerError = null;
     this.currentUnknown = false;
+    this.revoking = false;
+    this.revokeFailed = false;
   }
 
   override connectedCallback() {
@@ -241,6 +269,55 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
     this.currentUnknown = false;
     this.state = { kind: "done", data: stored };
     void source.context?.(registeredContext(stored));
+  }
+
+  /** Registers the current mandate again without the rule for `pair`, then shows the new version. */
+  private async revoke(pair: SubstitutePair) {
+    const source = this.source;
+    if (source === null) return;
+    this.revoking = true;
+    const saved = await saveRules(source, (rules) => rules.filter((rule) => !samePair(rule, pair)));
+    this.revoking = false;
+    this.revokeFailed = saved.kind !== "done";
+    if (saved.kind === "done") this.registered(source, saved.data);
+  }
+
+  private rules(record: StoredMandate, active: boolean) {
+    const rules = record.mandate.limits.substitutionRules ?? [];
+    if (rules.length === 0) return nothing;
+    const text = pick(MANDATE);
+    const l = lang();
+    return html`<section part="substitution-rules">
+      <h3>${text.substitutionRules}</h3>
+      <p class="secondary">${text.substitutionRulesNote}</p>
+      <ul class="rules">
+        ${rules.map((rule) => {
+          const since = formatTimestamp(rule.decidedAt, l);
+          return html`<li>
+            <div>
+              <p class="strong">
+                ${text.rule(rule.productName ?? rule.productId, rule.replacesName ?? rule.replaces)}
+              </p>
+              <p class="secondary">
+                ${rule.policy === "auto" ? text.ruleAuto(since) : text.ruleNever(since)}
+              </p>
+            </div>
+            ${
+              active
+                ? html`<button
+                    class="btn secondary"
+                    ?disabled=${this.revoking}
+                    @click=${() => this.revoke(rule)}
+                  >
+                    ${text.revoke}
+                  </button>`
+                : nothing
+            }
+          </li>`;
+        })}
+      </ul>
+      ${this.revokeFailed ? html`<p class="message danger" role="alert">${text.revokeFailed}</p>` : nothing}
+    </section>`;
   }
 
   private header() {
@@ -389,6 +466,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
             ${row(text.newProducts, policyText(limits.newProducts))}
           </dl>
         </section>
+        ${this.rules(record, status === "active")}
         <section>
           <h3>${text.productData}</h3>
           <dl>
@@ -411,7 +489,7 @@ export class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">
             hard.length === 0
               ? html`<p>${text.none}</p>`
               : html`<ul>
-                  ${hard.map(() => html`<li>${text.freeFromLactose}</li>`)}
+                  ${hard.map((item) => html`<li>${required(item.attribute)}</li>`)}
                 </ul>`
           }
           <p class="strong">${text.preferred}</p>

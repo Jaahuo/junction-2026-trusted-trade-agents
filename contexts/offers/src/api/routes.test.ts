@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import {
+  AvailabilityResultSchema,
   DEMO_ACCOUNT,
   ErrorEnvelopeSchema,
   OffersResultSchema,
@@ -43,14 +44,15 @@ const offers = (): FakeOffers =>
     },
   });
 
-const post = (app: AnyElysia, body: object) =>
+const postTo = (app: AnyElysia, path: string, body: object) =>
   app.handle(
-    new Request("http://localhost/offers", {
+    new Request(`http://localhost${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
   );
+const post = (app: AnyElysia, body: object) => postTo(app, "/offers", body);
 
 const errorOf = async (response: Response) => ({
   status: response.status,
@@ -105,7 +107,7 @@ describe("POST /offers", () => {
     const fake = offers();
     const response = await post(
       createApi(fake.deps),
-      request({ hard: [{ attribute: "gluten", is: "free_from" }] }),
+      request({ hard: [{ attribute: "unicorn", is: "free_from" }] }),
     );
     const { status, body } = await errorOf(response);
     expect(status).toBe(400);
@@ -137,9 +139,56 @@ describe("POST /offers", () => {
     expect(fake.live.calls).toEqual([]);
   });
 
-  test("requote and validate still answer 501 NOT_IMPLEMENTED", async () => {
+  test("POST /offers/availability returns the products deliverable by the date, from one live read for the principal's customer", async () => {
+    const LATE = "prod_test_late";
+    const BLOCKED = "prod_test_blocked";
+    const fake = fakeOffersDeps({
+      live: {
+        [OAT]: { availability: { "*": fakeAvailability(OAT) }, prices: {} },
+        [LATE]: {
+          availability: { "*": fakeAvailability(LATE, { availableDate: "2026-11-21" }) },
+          prices: {},
+        },
+        [BLOCKED]: {
+          availability: { "*": fakeAvailability(BLOCKED, { salesBlocked: true }) },
+          prices: {},
+        },
+      },
+    });
+    const response = await postTo(createApi(fake.deps), "/offers/availability", {
+      deliverBy: "2026-11-20",
+      productIds: [OAT, LATE, BLOCKED, "prod_test_unknown", OAT],
+    });
+    expect(response.status).toBe(200);
+    expect(AvailabilityResultSchema.parse(await response.json())).toEqual({ deliverable: [OAT] });
+    expect(fake.live.calls).toEqual([
+      {
+        kind: "availability",
+        query: {
+          customer: DEMO_ACCOUNT.customer,
+          requestedDate: "2026-11-20",
+          productIds: [OAT, LATE, BLOCKED, "prod_test_unknown"],
+        },
+      },
+    ]);
+  });
+
+  test("POST /offers/availability answers 502 when the live read fails or no live source is configured", async () => {
+    const failing = offers();
+    failing.live.failWith(true);
+    const body = { deliverBy: "2026-11-20", productIds: [OAT] };
+    for (const deps of [failing.deps, { ...offers().deps, live: null }]) {
+      const { status, body: envelope } = await errorOf(
+        await postTo(createApi(deps), "/offers/availability", body),
+      );
+      expect(status).toBe(502);
+      expect(envelope.error.code).toBe("UPSTREAM_FAILED");
+    }
+  });
+
+  test("validate still answers 501 NOT_IMPLEMENTED", async () => {
     const app = createApi(offers().deps);
-    for (const path of ["requote", "validate"]) {
+    for (const path of ["validate"]) {
       const response = await app.handle(
         new Request(`http://localhost/offers/${path}`, {
           method: "POST",

@@ -17,9 +17,18 @@ const reasons = (codes: readonly ReasonCode[]): string[] =>
   codes.map((code) => `- ${code}: ${REASON_TEXT[code]}`);
 const lines = (...parts: (string | string[])[]): string => parts.flat().join("\n");
 
+const availabilityNote = (availability: SearchResult["availability"]): string[] => {
+  if (availability === undefined) return [];
+  if (!availability.checked) return ["Live availability was not read."];
+  return availability.dropped === 0
+    ? []
+    : [`${availability.dropped} matches left out: they cannot be delivered by the requested date.`];
+};
+
 export const searchSummary = (result: SearchResult): string =>
   lines(
     `${result.candidates.length} candidate products.`,
+    availabilityNote(result.availability),
     result.candidates.map(
       (candidate) =>
         `- ${candidate.productId}: ${candidate.name}` +

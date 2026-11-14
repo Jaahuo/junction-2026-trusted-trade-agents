@@ -8,14 +8,13 @@ export const httpViewPages = (
   fetcher: typeof fetch = fetch,
 ): ViewPages => ({
   html: async (view) => {
-    let response: Response;
     try {
-      response = await fetcher(`${baseUrl()}/views/${encodeURIComponent(view)}`);
+      const response = await fetcher(`${baseUrl()}/views/${encodeURIComponent(view)}`);
+      if (response.status === 404) return err("NOT_FOUND");
+      if (!response.ok) return err("UPSTREAM_FAILED");
+      return ok(await response.text());
     } catch {
       return err("UPSTREAM_FAILED");
     }
-    if (response.status === 404) return err("NOT_FOUND");
-    if (!response.ok) return err("UPSTREAM_FAILED");
-    return ok(await response.text());
   },
 });

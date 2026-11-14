@@ -74,10 +74,13 @@ PRD: [Tools](prd.md#tools).
 ```ts
 export const MODEL_TOOLS = [
   "search_products",
+  "find_products",
   "get_offers",
+  "quote_offers",
   "place_order",
   "get_order_status",
   "get_mandate",
+  "show_mandate",
   "draft_mandate",
   "list_pending_approvals",
 ] as const; // the model sees these
@@ -129,10 +132,13 @@ export interface DecideApprovalInput {
 }
 export const TOOL_INPUT = {
   search_products: SearchRequestSchema,
+  find_products: SearchRequestSchema,
   get_offers: OffersRequestSchema,
+  quote_offers: OffersRequestSchema,
   place_order: PlaceOrderRequestSchema,
   get_order_status: OrderRefSchema,
   get_mandate: EmptySchema,
+  show_mandate: EmptySchema,
   draft_mandate: DraftMandateRequestSchema,
   list_pending_approvals: EmptySchema,
   decide_approval: DecideApprovalInputSchema,
@@ -141,28 +147,31 @@ export const TOOL_INPUT = {
 } as const; // EmptySchema = strict {}
 ```
 
-| Key      | Tool                   | Method and path                      | Context   | Tool input → REST                                                     | Body → 2xx response                                        |
-| -------- | ---------------------- | ------------------------------------ | --------- | --------------------------------------------------------------------- | ---------------------------------------------------------- |
-| search   | search_products        | POST /api/catalog/search             | catalog   | input = body                                                          | SearchRequest → SearchResult                               |
-| offers   | get_offers             | POST /api/offers                     | offers    | input = body                                                          | OffersRequest → OffersResult                               |
-| place    | place_order            | POST /api/orders                     | orders    | input = body                                                          | PlaceOrderRequest → 201 Order (200 on replay)              |
-| status   | get_order_status       | GET /api/orders/:orderId             | orders    | `orderId` → path                                                      | → Order                                                    |
-| mandate  | get_mandate            | GET /api/mandates/current            | mandates  | none                                                                  | → StoredMandate                                            |
-| draft    | draft_mandate          | POST /api/mandates/drafts            | mandates  | input = body                                                          | DraftMandateRequest → MandateDraft                         |
-| pending  | list_pending_approvals | GET /api/orders/pending              | orders    | none                                                                  | → PendingList                                              |
-| decide   | decide_approval        | POST /api/orders/:orderId/decision   | orders    | `orderId` → path; the rest → body as DecideApprovalRequest (SPEC-011) | DecideApprovalRequest → Order                              |
-| register | register_mandate       | POST /api/mandates                   | mandates  | input = body                                                          | RegisterMandateRequest → 201 StoredMandate (200 on replay) |
-| revoke   | revoke_mandate         | POST /api/mandates/:mandateId/revoke | mandates  | `mandateId` → path                                                    | → StoredMandate                                            |
-| facts    | —                      | POST /api/catalog/facts              | catalog   | —                                                                     | FactsRequest → FactsResult                                 |
-| precheck | —                      | POST /api/orders/precheck            | orders    | —                                                                     | PrecheckRequest → Precheck                                 |
-| requote  | —                      | POST /api/offers/requote             | offers    | —                                                                     | RequoteRequest → OffersResult                              |
-| validate | —                      | POST /api/offers/validate            | offers    | —                                                                     | ValidateRequest → ValidateResult                           |
-| account  | —                      | GET /api/accounts/current            | accounts  | —                                                                     | → Account                                                  |
-| openapi  | —                      | GET /api/discovery/openapi.json      | discovery | —                                                                     | → OpenAPI 3.1                                              |
+| Key          | Tool                   | Method and path                      | Context   | Tool input → REST                                                     | Body → 2xx response                                        |
+| ------------ | ---------------------- | ------------------------------------ | --------- | --------------------------------------------------------------------- | ---------------------------------------------------------- |
+| search       | search_products        | POST /api/catalog/search             | catalog   | input = body                                                          | SearchRequest → SearchResult                               |
+| offers       | get_offers             | POST /api/offers                     | offers    | input = body                                                          | OffersRequest → OffersResult                               |
+| place        | place_order            | POST /api/orders                     | orders    | input + server-generated idempotencyKey = body                        | PlaceOrderRequest → 201 Order (200 on replay)              |
+| status       | get_order_status       | GET /api/orders/:orderId             | orders    | `orderId` → path                                                      | → Order                                                    |
+| mandate      | get_mandate            | GET /api/mandates/current            | mandates  | none                                                                  | → StoredMandate                                            |
+| draft        | draft_mandate          | POST /api/mandates/drafts            | mandates  | input = body                                                          | DraftMandateRequest → MandateDraft                         |
+| pending      | list_pending_approvals | GET /api/orders/pending              | orders    | none                                                                  | → PendingList                                              |
+| decide       | decide_approval        | POST /api/orders/:orderId/decision   | orders    | `orderId` → path; the rest → body as DecideApprovalRequest (SPEC-011) | DecideApprovalRequest → Order                              |
+| register     | register_mandate       | POST /api/mandates                   | mandates  | input = body                                                          | RegisterMandateRequest → 201 StoredMandate (200 on replay) |
+| revoke       | revoke_mandate         | POST /api/mandates/:mandateId/revoke | mandates  | `mandateId` → path                                                    | → StoredMandate                                            |
+| facts        | —                      | POST /api/catalog/facts              | catalog   | —                                                                     | FactsRequest → FactsResult                                 |
+| precheck     | —                      | POST /api/orders/precheck            | orders    | —                                                                     | PrecheckRequest → Precheck                                 |
+| requote      | —                      | POST /api/offers/requote             | offers    | —                                                                     | RequoteRequest → OffersResult                              |
+| issued       | —                      | POST /api/offers/issued              | offers    | —                                                                     | IssuedOffersRequest → IssuedOffers                         |
+| availability | —                      | POST /api/offers/availability        | offers    | —                                                                     | AvailabilityRequest → AvailabilityResult                   |
+| validate     | —                      | POST /api/offers/validate            | offers    | —                                                                     | ValidateRequest → ValidateResult                           |
+| account      | —                      | GET /api/accounts/current            | accounts  | —                                                                     | → Account                                                  |
+| openapi      | —                      | GET /api/discovery/openapi.json      | discovery | —                                                                     | → OpenAPI 3.1                                              |
 
 - `DecideApprovalInput` is flat because a tool input schema is one object. The MCP binding drops `orderId`, keeps the fields that belong to `decision`, and the REST route validates the result as `DecideApprovalRequest`; a field that does not belong to the decision → 400.
+- MCP `place_order` omits `idempotencyKey` from its advertised input and rejects caller-supplied keys. It adds `mcp-order-v1-` plus the SHA-256 hex digest of the JSON array `[offers, alternatives ?? [], supersedes?.orderId ?? null, supersedes?.proposalVersion ?? null]`. Array order and offer text are preserved, matching SPEC-009 R2. The key is stable across retries and server restarts; language and original request text do not change it. A new offer selection or replacement reference changes it. The REST contract and its customer-scoped uniqueness stay unchanged.
 - No tool input has a customer, account, agent, password or passcode field.
-- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not in `HARD_CONSTRAINT_VALUES` for that attribute, → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` and `draft_mandate` (`standingConstraints.hard`) and the `facts` route.
+- Hard constraints: a `hard` entry whose `attribute` is not in `HARD_CONSTRAINT_ATTRIBUTES`, or whose `is` value is not the one for that attribute (`yes` for `vegan`, `free_from` for every other), → `400 BAD_REQUEST` with a message that names the attribute. This applies to `search_products`, `get_offers`, `register_mandate` and `draft_mandate` (`standingConstraints.hard`) and the `facts` route.
 - Root routes: `GET /.well-known/jwks.json` (offers), `ALL /mcp` (mcp), `GET /views/:view` and `GET /views/harness` (views), `GET /.well-known/trusted-trade.json` and `GET /skills/trusted-trade-ordering/:file` (discovery). An unknown order or mandate id → `404`. All of `ROUTES` is exported as data: `{ key, tool, method, path, context, input, output }`.
 
 Verification: a contract test that `ROUTES` keys, tools, `TOOL_INPUT` and `TOOL_OUTPUT` match this table and that every `TOOL_INPUT` schema is a JSON object schema.
@@ -177,16 +186,21 @@ export interface Quantity {
   unit: string;
 }
 export type MatchState = "confirmed" | "contradicted" | "unknown";
-export const HARD_CONSTRAINT_ATTRIBUTES = ["lactose"] as const; // attributes with a data mapping below
+// Data mapping per free_from attribute: GS1 allergen type code, included allergen codes, nutritionalClaim code, contradicting claim.
+export const FREE_FROM_DATA = {
+  egg: { allergen: "AE", claim: "FREE_FROM_EGGS" },
+  gluten: { allergen: "AW", includes: ["UW", "NR", "GB", "GS", "GK"], claim: "FREE_FROM_GLUTEN" },
+  lactose: { allergen: "ML", claim: "FREE_FROM_LACTOSE", low: "LOW_LACTOSE" },
+  peanut: { allergen: "AP" },
+  fat: { claim: "FREE_FROM_FAT", low: "LOW_FAT" },
+  // … every GS1 allergen code and FREE_FROM_* claim in the product data; the full table is in @app/contract
+} as const;
+type FreeFromAttribute = keyof typeof FREE_FROM_DATA;
+export const HARD_CONSTRAINT_ATTRIBUTES: readonly [...FreeFromAttribute[], "vegan"]; // attributes with a data mapping below
 export type HardConstraintAttribute = (typeof HARD_CONSTRAINT_ATTRIBUTES)[number];
-export const HARD_CONSTRAINT_VALUES = { lactose: ["free_from"] } as const satisfies Record<
-  HardConstraintAttribute,
-  readonly string[]
->;
-export interface HardConstraint {
-  attribute: HardConstraintAttribute;
-  is: (typeof HARD_CONSTRAINT_VALUES)[HardConstraintAttribute][number];
-} // { attribute: "lactose", is: "free_from" }
+export type HardConstraint =
+  | { attribute: FreeFromAttribute; is: "free_from" } // { attribute: "gluten", is: "free_from" }
+  | { attribute: "vegan"; is: "yes" };
 export interface SoftConstraint {
   attribute: string;
   prefer: string;
@@ -217,6 +231,7 @@ export interface SearchResult {
   candidates: SearchCandidate[];
   constraints: { hard: HardConstraint[]; soft: SoftConstraint[] };
   mandate: { id: string; version: number } | null;
+  availability?: { checked: boolean; dropped: number }; // the availability filter below
 }
 export interface FactsRequest {
   productIds: string[];
@@ -240,18 +255,22 @@ export interface FactsResult {
   products: ProductFacts[];
   unknown: string[];
 }
-export const ALLERGEN_ATTRIBUTES = ["lactose"] as const; // hard constraint attributes gated by allergenData
+export const ALLERGEN_ATTRIBUTES: FreeFromAttribute[]; // the FREE_FROM_DATA keys with a GS1 allergen code; gated by allergenData
 ```
 
 - The server merges the mandate's standing constraints into the request: hard = request ∪ mandate, soft = request ∪ mandate. `SearchResult.constraints` returns the merged set.
-- Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the values in `HARD_CONSTRAINT_VALUES`. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
-- Lactose: classification `nutritionalClaim` value `FREE_FROM_LACTOSE` → `confirmed` for `free_from`; `LOW_LACTOSE` → `contradicted` for `free_from`; neither → `unknown`. Missing data is never `confirmed`.
+- Supported hard constraints: only the attributes in `HARD_CONSTRAINT_ATTRIBUTES` with the `is` value of their `HardConstraint` branch. Another attribute or value is refused with 400 (SPEC-003). A further attribute is added only through a change of this section (team rules R-08), together with its data mapping and its approval rule in SPEC-009.
+- `free_from`, from `FREE_FROM_DATA`: the allergen code or a code in its `includes` (wheat, rye, barley, spelt and khorasan wheat for gluten) with unit `CONTAINS` or `MAY_CONTAIN` in classification `allergen`, or the `low` claim in `nutritionalClaim` → `contradicted`; else the allergen code with unit `FREE_FROM` in `nonAllergen`, or the `claim` in `nutritionalClaim` → `confirmed`; else `unknown`, including `UNDECLARED` and allergen data on other codes only. Contradiction wins over a free-from claim. Attribute names are camelCase English; GS1 codes such as `AW` and other cases are refused.
+- `vegan` `yes`: `CONTAINS` of an allergen of animal origin (`AC`, `AE`, `AF`, `AM`, `BF`, `CM`, `ML`, `PO`, `UM`, `UN`, `ABD`, `ADQ`) → `contradicted`; else `nutritionalClaim` `VEGAN` → `confirmed`; else `unknown`. `MAY_CONTAIN` traces do not contradict vegan.
+- Missing data is never `confirmed`.
 - A supported hard constraint with missing data has the match `unknown`. The product stays a candidate, and its offer carries the `unknown` match in `product.match` (SPEC-006); SPEC-009 sends the order to approval.
 - Search matches Unicode words after case and hyphen normalization. The whole words `maito` and `milk` are equivalent; no other translation aliases apply. Every word of a term must match one name in one language. Terms are alternatives. Compound words do not match their substrings. A negated occurrence, such as `milk-free` or `free from milk`, does not match `milk`; `lactose-free milk` does.
+- Availability: search reads its 60 best ranked matches and asks `availability` (SPEC-006) for them in one request. A match that cannot be delivered on or before `deliverBy` is not a candidate; the best 20 that remain are returned. `SearchResult.availability` is `{ checked: true, dropped }`, where `dropped` counts the matches left out. When `availability` fails, search still answers 200 with the unfiltered best 20 and `{ checked: false, dropped: 0 }`: the offers step reads availability again. A search with no match does not call `availability`.
 - A candidate with any `contradicted` hard constraint is excluded. At most 20 candidates, ranked by confirmed hard constraints, soft matches, name relevance, successful quantity conversion, matched terms, reliability, then product id. A head noun ranks above a modifier; milk chocolate and milk powder rank below milk.
 - Supported search soft attributes are `countryOfOrigin` and `category`, compared case-insensitively. An unsupported request or merged standing soft attribute gives 400. Each matched preference adds a `confirmed` entry to candidate `match`, with key `soft:<attribute>:<encoded-preference>`; the preference is lowercase and URI-component encoded. These entries do not affect hard filtering or hard-confirmation counts. Facts and offer product matches remain hard-only.
 - Quantity uses structured sales-unit volume or consumer-unit volume times consumer units per sales unit. `GRM` converts to `KGM`. Count sales units round up to a whole number compatible with `allowedLotSize`; weight sales units retain fractional lots. No supported conversion gives null `orderQuantity` and `equals`, with a `quantityReason` explanation. Successful conversions omit `quantityReason`.
-- The index loads once per process; parallel first requests share one load.
+- The index loads once per injected database; parallel first requests share one load. PostgreSQL is the only catalogue source.
+- An explicit private-directory import preserves complete product records, enrichments and source metadata atomically. Identical inputs are safe to repeat. Conflicting inputs are refused. See [catalogue import](catalogue-import.md).
 
 Data meaning:
 
@@ -309,7 +328,7 @@ export interface WholesalerCatalog {
 - `nextDeliveryDate` = the first schedule line date later than `availableDate`. When the response has none, the adapter makes one further availability query with the requested date set to `availableDate` + 1 day, at most one per product per call, and takes its `availableDate`. A failed or empty further query gives `null`.
 - `logisticModel: "Terminal"` (supplied from the supplier's warehouse, amount unknown) means `stock: "unconfirmed"`; an amount of `999999` with no `logisticModel` also does. A `Stock` product is `confirmed` at any amount, including the large amounts the mock returns for plentiful stock. Order submission is the order store itself (SPEC-010).
 - Deposits: the price response has no deposit amount, and the product data names deposit materials without a price, so the mock adapter sets `deposit: 0` and `depositKnown: false`.
-- Live adapter choice for offers: `WHOLESALER_LIVE=mock`, with the wholesaler API key set. With any other value or no API key, `get_offers` returns HTTP 200 and omits every line with reason `NO_PRICE`. The omission detail states that no live price source is configured. No offer is signed, and offers never invent a price. Catalog choice: `WHOLESALER_CATALOG=file|json`; `json` is the second, portable catalog adapter. Each context selects its adapters in one file, `src/api/adapters.ts`.
+- Live adapter choice for offers: `WHOLESALER_LIVE=mock`, with the wholesaler API key set, or `WHOLESALER_LIVE=fixture`. The fixture replays one live response recorded through the mock adapter, with an invented customer id, through the same mapping. Its dates move by the days between the recording day and today in Helsinki, and the API logs at start that its prices are recorded, not live. With any other value, or `mock` with no API key, `get_offers` returns HTTP 200 and omits every line with reason `NO_PRICE`. The omission detail states that no live price source is configured. No offer is signed, and offers never invent a price. Catalogue search and facts use PostgreSQL. Each context selects its adapters in `src/api/adapters.ts`.
 - Prices are cached per customer, pricing date and product until the earliest of `validTo`, `cutoffAt` and 5 minutes after the lookup. Availability is never cached: every `get_offers` and every `validate` sends a fresh availability request.
 
 Failure paths: transport error or non-2xx upstream → `UPSTREAM_FAILED` (route answers 502).
@@ -372,7 +391,9 @@ Steps of `get_offers`:
 - Totals: gross = (net × (1 + vatRate/100) + deposit) × quantity value, rounded to cents. `depositsIncluded: false` when the price quote has `depositKnown: false`: the total then leaves deposits out.
 - `pricePerStandardUnit`: gross price (VAT, no deposit) per `LTR` or `KGM`, rounded to cents. The wholesaler's comparison price wins; without it, the unit price divided by `product.perSalesUnit` when that is in litres or kilograms; otherwise `null`.
 - Keys: `OFFER_SIGNING_JWK` (private ES256 JWK) and `OFFER_SIGNING_KID`. With both set, a restart keeps every issued offer valid. When they are unset and `NODE_ENV` is not `production`, `offerSigningKeyFromEnv` generates a key for the process and logs one warning; in `production` it throws and the server does not start. `GET /.well-known/jwks.json` publishes the public key only.
+- `issued`: the offers service keeps every token it signs (by `get_offers` or `requote`) in process memory until the token's `exp`. `POST /api/offers/issued` with `{ offerIds }` (1 to 40) returns `{ offers: { offerId, token }[] }` for the IDs it issued to the principal's customer and agent and that have not expired; another ID is left out. A restart forgets the IDs; the agent then sends the token or requests new offers. This lets an agent name an offer by its short `offerId`, so a model never has to copy a token (#162). The store is per process, so the demo runs one API instance. Internal calls carry no principal, so orders also checks the owner in the verified token (SPEC-009 R3).
 - `requote`: re-issues offers for the same product, quantity and date (or the given changes) of the given tokens, under the current mandate of the token's `agentId`.
+- `availability`: `POST /api/offers/availability` with `{ deliverBy, productIds }` (1 to 1000) makes one live availability request (SPEC-005) for the principal's customer and returns `{ deliverable: productId[] }`. A product is deliverable when it has a quote, is not blocked from sale, has an `availableDate` on or before `deliverBy`, and its `cutoffAt` is null or later than now. Stock is not checked: a product with partial stock still gets an offer with a shortfall. A failed live read, or no configured live source, → `502 UPSTREAM_FAILED`. Search is its consumer (SPEC-004).
 - `validate`: re-reads live availability of the tokens' products with a fresh availability request (SPEC-005) and reports a sales block, a lost date or a passed cut-off. It also reports the live confirmed amount per product in `products[].liveAmount`, `null` when stock is unconfirmed.
 - Live-amount rule: when the live amount of a product is lower than the summed order quantity of that product (SPEC-009), the offers are stale. At `place_order` the request is refused with `409 STALE_OFFER` and the agent requests new offers (SPEC-009 R6). At approval the order goes through the re-quote path (SPEC-011).
 
@@ -383,7 +404,7 @@ Failure paths: upstream down → 502 `UPSTREAM_FAILED`. A body field `customer` 
 PRD: [Partial stock](prd.md#partial-stock), [Substitution](prd.md#substitution).
 
 - Confirmed amount below the request: floor the available amount to a multiple of `allowedLotSize`. A result of 0 → omitted `INSUFFICIENT_STOCK`. Otherwise one offer for the floored amount, with `shortfall` = request − floored amount, in std units; when `perSalesUnit` is null, in the sales unit.
-- For the shortfall, substitute candidates come from the product's substitution pairs. Mandate `substitutions: "never"` → no substitute offers. A substitute with a `contradicted` merged hard constraint is excluded. A substitute quantity rounds up to its own lot size.
+- For the shortfall, substitute candidates come from the product's substitution pairs. Mandate `substitutions: "never"` → no substitute offers. A substitution rule with `policy: "never"` for the pair → no offer of that substitute. A substitute with a `contradicted` merged hard constraint is excluded. A substitute quantity rounds up to its own lot size.
 - Rank: best first, by soft matches, then price per std unit, then reliability, then CO2. Up to 3 substitute offers, each covering the shortfall, with `replaces`, `rank` and `comparison`.
 - Unconfirmed stock: the offer says so and carries the reliability score.
 
@@ -396,7 +417,11 @@ export type Policy = "auto" | "ask";
 export interface MandateLimits { maxOrderTotal: { value: number; currency: "EUR"; basis: "gross" };
   categories: string[] | null /* null = all */; substitutions: "never" | "ask" | "auto"; newProducts: Policy;
   minDeliveryReliability: { value: number; ifNoData: Policy } | null; maxCo2PerKg: { value: number; ifNoData: Policy } | null;
-  allergenData: { ifNoData: Policy }; paymentTerms: Record<PaymentTerms, Policy> }
+  allergenData: { ifNoData: Policy }; paymentTerms: Record<PaymentTerms, Policy>;
+  substitutionRules?: SubstitutionRule[] /* absent = none */ }
+export interface SubstitutePair { replaces: string; productId: string }
+export interface SubstitutionRule extends SubstitutePair { policy: "auto" | "never";
+  productName?: string; replacesName?: string /* display only */; decidedAt: string }
 export interface Mandate { iss: string /* customer */; mandateId: string; version: number; agent: string /* agentId */;
   signedBy: string /* accountId */; limits: MandateLimits; standingConstraints: { hard: HardConstraint[]; soft: SoftConstraint[] };
   iat: number; exp: number }
@@ -442,10 +467,11 @@ export type Evaluate = (input: { claims: OfferClaims[]; mandate: Mandate | null;
 
 Precedence for `place_order` (one list; the first matching step R1-R7 ends the request):
 
-- R1. The body fails its schema, or holds 0 or more than 20 tokens → `400 BAD_REQUEST`. No record.
-- R2. The idempotency key is known: same tokens → `200` with the stored order; other tokens → `409 CONFLICT`.
-- R3. A token fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
-- R4. Tokens differ in `customer` or `paymentTerms`, or the customer is not the principal's → `400 BAD_REQUEST`.
+- Each entry of `offers` and `alternatives` (and of the `precheck` body) names an offer by its `offerId` (`off_` followed by letters, digits, `_` or `-`) or by its full token. The server replaces each `offerId` with its token through `issued` (SPEC-006) before R3; the stored order keeps the tokens. The rules below say "token" for the offer after this step.
+- R1. The body fails its schema, or holds 0 or more than 20 offers, or more than 20 alternatives → `400 BAD_REQUEST`. No record.
+- R2. The idempotency key is known: the same `offers` and `alternatives` as sent (IDs and tokens compared as text) → `200` with the stored order; others → `409 CONFLICT`.
+- R3. An `offerId` that `issued` does not return (unknown or expired), or whose verified token names another customer or agent, a token that fails verification (malformed, bad signature, wrong `alg`, `typ` or `kid`), or the request repeats a token or verified offer ID → `400 OFFER_INVALID`.
+- R4. Tokens differ in `customer` or `paymentTerms`, a token's `paymentTerms` is not the account's (alternatives included), or the customer is not the principal's → `400 BAD_REQUEST`.
 - R5. A current mandate exists and a token's `agentId`, `mandateId` or `mandateVersion` differs from it → `409 STALE_OFFER` ("request new offers").
 - R6. `validate` reports a live amount below the summed quantity of a product → `409 STALE_OFFER` (live-amount rule, SPEC-006).
 - R7. After validation and the transactional idempotency-key recheck, a selected offer ID already belongs to an order for this customer → `400 OFFER_INVALID`. This check runs under the customer's placement lock, before placement side effects.
@@ -461,7 +487,7 @@ Then the order is stored with every reason collected:
 1. No current mandate for the principal's agent → `MANDATE_INVALID`.
 2. Expiry: `cutoffAt` passed → `CUTOFF_PASSED` with `nextDeliveryDate`; else `exp` passed → `OFFER_EXPIRED`. Cut-off takes precedence.
 3. Fixed guardrails: a sales block or lost date from `validate` → `SALES_BLOCKED` or `CUTOFF_PASSED`. The summed quantity of a product over 10 × the median of that product's order history (sales units, SPEC-010) or, with no history, over 2000 std units (no conversion → over) → `QUANTITY_UNUSUAL`. Unconfirmed stock over 500 std units for a product (no conversion → over) → `UNCONFIRMED_STOCK`.
-4. Buyer limits: order gross total over `maxOrderTotal` → `SPEND_OVER_LIMIT`; category not listed → `CATEGORY_NOT_ALLOWED`; `replaces` set and policy not `auto` → `SUBSTITUTION`; no order history row for the product (SPEC-010) and `newProducts: ask` → `NEW_PRODUCT`; reliability below minimum → `RELIABILITY_BELOW_MIN`, missing with `ifNoData: ask` → `UNCONFIRMED_DATA`; CO2 above maximum → `CO2_ABOVE_MAX`, missing with ask → `UNCONFIRMED_DATA`; a merged hard constraint on an attribute in `ALLERGEN_ATTRIBUTES` whose match in the offer is `unknown` and `allergenData.ifNoData: ask` → `UNCONFIRMED_ALLERGEN`; a merged hard constraint whose match is `contradicted` or missing → `UNCONFIRMED_ALLERGEN` whatever the setting; terms policy `ask` → `PAYMENT_TERMS`; `deliveryDate` after `requestedDate` or `shortfall` set → `AVAILABILITY_DIFFERS`.
+4. Buyer limits: order gross total over `maxOrderTotal` → `SPEND_OVER_LIMIT`; category not listed → `CATEGORY_NOT_ALLOWED`; `replaces` set and policy not `auto` → `SUBSTITUTION`, except policy `ask` with an `auto` substitution rule for the pair (`samePair`), which also adds a `check_passed` audit event with the `productId`; no order history row for the product (SPEC-010) and `newProducts: ask` → `NEW_PRODUCT`; reliability below minimum → `RELIABILITY_BELOW_MIN`, missing with `ifNoData: ask` → `UNCONFIRMED_DATA`; CO2 above maximum → `CO2_ABOVE_MAX`, missing with ask → `UNCONFIRMED_DATA`; a merged hard constraint on an attribute in `ALLERGEN_ATTRIBUTES` whose match in the offer is `unknown` and `allergenData.ifNoData: ask` → `UNCONFIRMED_ALLERGEN`; a merged hard constraint whose match is `contradicted` or missing → `UNCONFIRMED_ALLERGEN` whatever the setting; terms policy `ask` → `PAYMENT_TERMS`; `deliveryDate` after `requestedDate` or `shortfall` set → `AVAILABILITY_DIFFERS`.
 5. Result: any reject reason → `rejected`; else any approval reason → `pending_approval`; else `commitPlacement` (SPEC-010), which checks credit.
 
 - Invariant: an order with any hard-constraint match that is not `confirmed` is never placed automatically, except an `unknown` match under `allergenData.ifNoData: auto`.
@@ -564,6 +590,7 @@ export interface Order {
   offerSignature?: { state: "verified" | "expired" | "invalid"; validUntil: string };
   receiptSignature?: { state: "verified" | "pending" | "invalid"; signedAt: string | null };
   auditIntegrity?: "intact" | "unverified" | "broken";
+  standingOffer?: SubstitutePair & { timesApproved: number; replacesName?: string };
 }
 export interface PendingList {
   orders: Order[];
@@ -572,6 +599,7 @@ export interface PlaceOrderRequest {
   offers: string[];
   alternatives?: string[];
   originalRequest?: string;
+  supersedes?: { orderId: string; proposalVersion: number };
   idempotencyKey: string;
 }
 export interface PrecheckRequest {
@@ -579,8 +607,10 @@ export interface PrecheckRequest {
 }
 ```
 
-- `place_order` takes signed offer tokens only. `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
+- `place_order` takes signed offers only, each named by its `offerId` or its token (SPEC-009). `alternatives` are verified tokens of offers the agent did not choose; they are shown on the approval card and do not count in the total.
 - Idempotency: unique (customer, idempotencyKey). See SPEC-009 R2.
+- Replacement: when the buyer changes a pending proposal, `supersedes` identifies that exact order and proposal version. The server requires the same customer, account and agent, pending status and matching version under the customer lock; otherwise `409 CONFLICT`. Only an accepted replacement (`pending_approval`, `placed` or `awaiting_payment`) closes the predecessor as `declined`, with `decision.next: "stop"` and server identity. Rejected or failed replacements leave it open. Both audits identify the other order. The transaction preserves unrelated orders and rolls back both writes on failure. Idempotency includes the replacement reference; changing or omitting it with the same key gives `409 CONFLICT`. Replacement is not a human approval and never places the predecessor.
+- `standingOffer` is set only on the approve response, never stored: policy `ask`, the order has `SUBSTITUTION`, a substitute line has no rule yet, and the customer has approved that pair 3 or more times, this order included. The approval card then offers to save an `auto` rule; after a rejection it offers a `never` rule. The view saves either with `register_mandate`.
 - Trust and rationale fields (optional; the views hide each part when it is absent): `purpose` and line `rationale` come from the agent; line `allergens` with their `status` are computed by the server from the buyer's hard rules; `offerSignature` and `receiptSignature` report the wholesaler's signature checks; `auditIntegrity` and `integrityOk` report the audit signature or hash-chain check, per log and per entry. An `invalid` offer signature or an `error` allergen must be refused at approval by the server; the views only report them.
 - `approvalUrl` is computed when the order is read: `${publicBaseUrl()}/approvals/<orderId>` while pending, else null. It is not stored. It points to the approval page (SPEC-013), the one plain page with the approval actions.
 - Order history: a table owned by the orders context, with rows `{ productId, quantity /* sales units */, placedAt }`. A placed order adds one row per line. The demo seed adds rows directly; they are not orders and use no credit. `QUANTITY_UNUSUAL` compares sales units with the median of that product's rows; `NEW_PRODUCT` means the product has no row.
@@ -643,7 +673,9 @@ export type DecideApprovalRequest = { proposalVersion: number } & (
 - Approve: load the current mandate of the order's `agentId`; none → `rejected MANDATE_INVALID`. Lines whose `mandateId` or `mandateVersion` differ from it, whose offers expired, or whose product breaks the live-amount rule of SPEC-006, are re-quoted under it through `requote`. Same or lower price, same date and amount, no new reason → replace the lines, write `requoted`, continue. Else add `PRICE_CHANGED` or `AVAILABILITY_DIFFERS` (or the new rule's reason), append a `Requote`, increase `proposalVersion`, keep pending, return 200 with the order. Then `commitPlacement`. Until `requote` exists: a differing mandate → `409 STALE_OFFER`, an expired offer → `409 OFFER_EXPIRED`, and the order stays pending.
 - Reject: `declined`, `decision.next` = `stop` (the agent stops and tells the user) or `alternatives` (the agent may look for alternatives).
 - Edit and pick_alternative: new offers through `requote` (or the chosen alternative), every check of SPEC-009 again.
-- Cut-off job: every 60 seconds, and through `runCutoffJob()` in tests, every pending order whose earliest `cutoffAt` has passed becomes `declined` with `next: "alternatives"`, actor `server`, filtered on status.
+- Cut-off job: at startup, every 60 seconds, and through `runCutoffJob()` in tests, every pending order whose earliest `cutoffAt` is at or before server time becomes `declined` with `next: "alternatives"`, actor `server`. The job rechecks status and proposal version under the customer lock. Pending-list reads also run customer-scoped cleanup. Decisions recheck the cut-off under the same lock, so an elapsed proposal cannot be approved or edited before the next scheduled run. Declines preserve the audit chain and do not issue placement receipts.
+- A corrupt audit prevents that order's automatic transition. Cleanup logs the failure and continues with other orders. Pending-list reads still return valid, non-expired proposals; they do not repair or expose the corrupt expired proposal as actionable.
+- Automatic declines are not human preference decisions. They neither count toward standing substitution approvals nor show the card's offer to stop suggesting a substitute.
 
 Approve and remember: the approver raises the mandate's order limit and approves the order in one action. The first build answers this decision with `501 NOT_IMPLEMENTED`. The sequence of mandate change, re-quote and approval, its behaviour under concurrent decisions and its retry rule are not part of this contract yet. The hardening issue that builds it adds them through a SPEC change, with a review, before the work starts.
 
@@ -654,7 +686,9 @@ PRD: [Tools](prd.md#tools), [Views](prd.md#views), [Skill](prd.md#skill).
 - `ALL /mcp`: stateless streamable HTTP, a new server and transport per request, JSON responses. No authentication in the first build (SPEC-002).
 - Every tool of SPEC-003 is registered with `inputSchema` = `TOOL_INPUT[tool]` and `outputSchema` = `TOOL_OUTPUT[tool]`. The result has `content` (a text summary) and `structuredContent` (the REST 2xx body). Text of a pending order includes its `approvalUrl`. A REST error, or input that `TOOL_INPUT[tool]` refuses (`BAD_REQUEST`), → `isError: true` and no `structuredContent`; the text has the error code, the message and the envelope as JSON. Reason: an MCP SDK client validates any `structuredContent` against `outputSchema`, also when `isError` is set. So every result with `structuredContent` parses with `TOOL_OUTPUT[tool]`. Hosts without Apps complete the flow from text, structured content and the approval page.
 - View tools (`VIEW_TOOLS`) carry the MCP Apps visibility for app-only tools, so the model does not see them. `MCP_VIEW_TOOLS=app` (default) registers them that way; `MCP_VIEW_TOOLS=off` does not register them. Use `off` on a host that shows app-only tools to the model; the approval card then links to the approval page.
-- Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`.
+- Each tool in `VIEWS` declares the MCP Apps resource link (`_meta.ui.resourceUri`), except the tools of a view not shown in the chat yet (`VIEWS_NOT_IN_CHAT`: `offer-comparison` until #22, so repeated `get_offers` calls add no empty cards). `resources/read` of a `ui://` URI returns the HTML of `GET /views/<view>`; SPEC-013 defines the versioned URI.
+- Quiet twins: `find_products` and `quote_offers` are `search_products` and `get_offers` without a view. Same `TOOL_INPUT`, `TOOL_OUTPUT`, REST route and handler; no `_meta.ui` and no `language` input; `ROUTES` keeps the name of the tool with the view. A host opens a view for every call of a tool that declares one, so the agent uses the quiet twins while it prepares or places an order the user asked for, and the chat shows only the approval card. It uses `search_products` and `get_offers` when the user asks to see the products or compare offers.
+- Mandate lookup: `get_mandate` returns the limits without a view or `language` input. `show_mandate` has the same `TOOL_INPUT`, `TOOL_OUTPUT`, REST route and handler, but opens mandate settings and accepts `language`. The agent uses `get_mandate` during ordering and `show_mandate` only when the user asks to see the limits or settings. `ROUTES` keeps `get_mandate`.
 - Each tool whose view is shown in the chat also lists an optional `language` input (a BCP 47 tag): the language the user writes in. Only the view reads it, from the tool input; the server drops it before the REST call, so it is not part of `TOOL_INPUT` or any route.
 - Skills: the files of `skills/trusted-trade-ordering/` are served as the MCP Skills extension defines (https://skills.extensions.modelcontextprotocol.io/specification/beta/skills): the server declares `io.modelcontextprotocol/skills` (value `{}`) in `capabilities.extensions` of `server/discover`, together with the `resources` capability; it answers `skills/list` and `skills/get` with one entry (`uri` `skill://trusted-trade-ordering/SKILL.md`, `frontmatter`, and a complete `resources` manifest of `uri`, `digest` `sha256:<hex>`, and `size` that includes SKILL.md); and it serves each file through `resources/read`. Hosts without the extension download the same two files from `GET /skills/trusted-trade-ordering/:file` (`SKILL.md`, `reason-codes.md`). docs/host-support.md has the details.
 
@@ -665,10 +699,13 @@ PRD: [Approval and user-facing views](prd.md#approval-and-user-facing-views).
 ```ts
 export const TOOL_OUTPUT = {
   search_products: SearchResultSchema,
+  find_products: SearchResultSchema,
   get_offers: OffersResultSchema,
+  quote_offers: OffersResultSchema,
   place_order: OrderSchema,
   get_order_status: OrderSchema,
   get_mandate: StoredMandateSchema,
+  show_mandate: StoredMandateSchema,
   draft_mandate: MandateDraftSchema,
   list_pending_approvals: PendingListSchema,
   decide_approval: OrderSchema,
@@ -715,7 +752,7 @@ export const VIEWS = [
   {
     view: "mandate-settings",
     uri: "ui://trusted-trade/mandate-settings",
-    tools: ["get_mandate", "draft_mandate"],
+    tools: ["show_mandate", "draft_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
     plainList: null,
@@ -724,11 +761,14 @@ export const VIEWS = [
 ] as const; // priority order
 ```
 
+- `VIEWS.uri` is the base URI. The MCP server appends `/<version>` when it announces a view: `ui://trusted-trade/<view>/<version>` in `_meta.ui.resourceUri`, the flat `ui/resourceUri` key and `resources/list`. `<version>` is the first 12 hex characters of the SHA-256 of the view HTML (`GET /views/<view>`), so it changes only when that view changes, and a host that caches HTML by URI loads the new view after a deploy. The server computes it once per process and view. A view it cannot fetch keeps the base URI and is not cached, so `tools/list` does not fail.
+- `resources/read` accepts the base URI and `ui://trusted-trade/<view>/<any version>` of a known view, and returns the current HTML under the requested URI. An unknown view gives `-32602`; a view that `GET /views/<view>` cannot serve gives `-32002` (not found) or `-32603`.
+
 - The `structuredContent` of a tool is the only input of its view. A view parses it with `TOOL_OUTPUT`; a failed parse, or a result with `isError: true` and no `structuredContent` (SPEC-012), shows the error state.
 - Host mode: the view reads the tool result through the MCP Apps bridge and calls an action with the bridge's server-tool call. A failed action call shows the error state with a link to the plain page.
 - Plain mode (`/views/<view>?order=<id>`, for a view with a `plainQuery`): the view loads `plainLoad` over REST and calls the action's REST route. No token is needed in the first build. Without the query, a view with a `plainList` route loads that list instead (`/views/approval-card` lists the open orders). The approval card's plain page `/views/approval-card?order=<id>` is the order page: the same web component as in the chat, loading the order with `GET /api/orders/:orderId` and deciding through the decision route; agent help is hidden there (no chat).
 - The approval card shows a link to `approvalUrl` in every pending state.
-- Mandate settings: a `get_mandate` result shows the limits in force. A `draft_mandate` result shows the proposed limits next to the current ones and a Register button. Register calls `register_mandate` with the draft and an `operationId` the view creates once per draft, so a retry after a failed or lost call returns the stored mandate (SPEC-008). The view then shows the registered mandate. A failed call keeps the draft and shows the error next to the button.
+- Mandate settings: a `show_mandate` result shows the limits in force. A `draft_mandate` result shows the proposed limits next to the current ones and a Register button. Register calls `register_mandate` with the draft and an `operationId` the view creates once per draft, so a retry after a failed or lost call returns the stored mandate (SPEC-008). The view then shows the registered mandate. A failed call keeps the draft and shows the error next to the button.
 - Each view is one self-contained HTML file with no external asset. States: loading, empty, error, pending, done, where they apply.
 - Views are framework-agnostic Lit web components (`<tt-approval-card>` and others), so any host page or framework can render them. They use the view styles and tokens in `contexts/views/src/shared/styles.ts`, named as the Figma variables of the design file; a later restyle changes no data contract.
 - Language: a view shows English or Finnish. In a host it takes the tool input's `language`, else the host context `locale`, else the browser language; on the plain page and in the harness the browser language. Any other language gives English. `?lang=` on the view URL overrides both, for the harness and screenshots.
@@ -753,13 +793,14 @@ export interface DemoProducts {
   s2: { productId: string; quantity: Quantity };
   s3: { productId: string; quantity: Quantity } | null /* null = no product found */;
   late: { productId: string } | null;
+  s3Substitute?: { productId: string } /* the wholesaler's substitute for s3 */;
   triedForS3: { productId: string; quantity: Quantity }[];
 }
 ```
 
-- `DEMO_ACCOUNT`: `{ accountId: "acct_demo", label: "Demo kitchen (invoice)", customer: "cust_invoice_01", agentId: "agent_demo", paymentTerms: "invoice", creditLimit: 5000 }`.
+- `DEMO_ACCOUNT`: `{ accountId: "acct_demo", label: "Demo kitchen (invoice)", customer: "cust_invoice_01", agentId: "agent_demo", paymentTerms: "invoice", creditLimit: null }`.
 - Later (SPEC-002): `acct_pay` (customer `cust_pay_01`, agent `agent_pay`, pay-on-order, creditLimit null).
 - Mandate: maxOrderTotal 1000 EUR gross; categories null; substitutions ask; newProducts ask; reliability 0.9 with ifNoData auto; CO2 3.0 with ifNoData auto; allergenData ifNoData ask; payment terms invoice auto, pay_on_order ask; standing soft constraint countryOfOrigin fi. Demo users may change every value.
-- Demo products: the tracked file `data/demo-products.json`, parsed with `DemoProductsSchema`. It holds product ids, quantities, observation time and scenario status only, as the one allowed exception to the dataset rule in [team rules](team-rules.md) R-23. Seeds and scripts read it; when it is absent, seeds add no history and log one warning.
-- Order history rows (SPEC-010), in sales units derived from the demo file: S1 product, 3 rows of `s1.quantity`; S2 product, 3 rows of `s2.quantity` / 5, rounded up to a whole sales unit; S3 product (when `s3` is set), 3 rows of `s3.quantity` / 5, rounded up. Scenario 1 (`s1.quantity`) gives no reason; scenario 2 (`s2.quantity`, the 1000 LTR request, gross above 1000 EUR) gives exactly `SPEND_OVER_LIMIT`.
-- Credit: placed orders use up the 5000 EUR credit. `bun run db:reset` restores it; run it before each rehearsal.
+- Demo products: optional imported metadata, parsed with `DemoProductsSchema` and stored with the catalogue import. It holds product ids, quantities, observation time and scenario status only. Reset orchestration reads PostgreSQL and passes this metadata to seeds. Without imported metadata, seeds add no history and log one warning. Demo scripts require imported metadata.
+- Order history rows (SPEC-010), derived from imported demo metadata: S1 product, 3 rows of `s1.quantity`; S2 product, 3 rows of `s2.quantity` / 5, rounded up to a whole sales unit; S3 product (when `s3` is set), 3 rows of `s3.quantity` / 5, rounded up. With `s3Substitute` also set: 2 rows of the same amount for the substitute and 2 approved, placed orders of the substitute alone (`replaces` the S3 product), so the demo's approval of the pair is the third. Scenario 1 (`s1.quantity`) gives no reason; scenario 2 (`s2.quantity`, the 1000 LTR request, gross above 1000 EUR) gives exactly `SPEND_OVER_LIMIT`.
+- Credit: the demo account has no credit check (`creditLimit: null`), so placed orders never use up credit.

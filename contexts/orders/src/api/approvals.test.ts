@@ -223,23 +223,16 @@ test("approve with another mandateId or version gives 409 STALE_OFFER and the or
     );
   }));
 
-test("edit, pick_alternative and approve_and_remember give 501", async () =>
+test("approve_and_remember gives 501", async () =>
   withDatabase(async (db) => {
     const { app, sign } = await mount(db);
     const pending = await pendingOrder(app, sign(overLimit));
-    const bodies = [
-      {
-        decision: "edit",
-        changes: [{ productId: fixtures.offerClaims.productId, deliverBy: "2026-11-21" }],
-      },
-      { decision: "pick_alternative", offerId: "off_other" },
-      { decision: "approve_and_remember", maxOrderTotal: 2000 },
-    ];
-    for (const body of bodies) {
-      const response = await decide(app, pending, body);
-      expect(response.status).toBe(501);
-      expect(await errorOf(response)).toBe("NOT_IMPLEMENTED");
-    }
+    const response = await decide(app, pending, {
+      decision: "approve_and_remember",
+      maxOrderTotal: 2000,
+    });
+    expect(response.status).toBe(501);
+    expect(await errorOf(response)).toBe("NOT_IMPLEMENTED");
     const unknown = await decide(app, pending, { decision: "approve", extra: true });
     expect(unknown.status).toBe(400);
     expect((await orderOf(await call(app, "GET", `/${pending.orderId}`))).status).toBe(
@@ -291,5 +284,79 @@ test("a mandates failure gives 502 UPSTREAM_FAILED: no order, no refusal record,
     expect(await counts(db)).toEqual({ orders: 1, refusals: 0, history: 0 });
     expect((await orderOf(await call(app, "GET", `/${pending.orderId}`))).status).toBe(
       "pending_approval",
+    );
+  }));
+
+const substitute = { replaces: "prod_test_requested" };
+
+test("the third approval of one substitute pair offers to stop asking", async () =>
+  withDatabase(async (db) => {
+    const { app, sign } = await mount(db);
+    const approveOne = async () => {
+      const pending = await pendingOrder(app, sign(substitute));
+      expect(pending.reasons).toEqual(["SUBSTITUTION"]);
+      return orderOf(await decide(app, pending, { decision: "approve" }));
+    };
+    expect((await approveOne()).standingOffer).toBeUndefined();
+    expect((await approveOne()).standingOffer).toBeUndefined();
+    const third = await approveOne();
+    expect(third.status).toBe("placed");
+    expect(third.standingOffer).toEqual({
+      replaces: substitute.replaces,
+      productId: fixtures.offerClaims.productId,
+      timesApproved: 3,
+    });
+    // The offer is not stored: a later read does not repeat it.
+    const read = await orderOf(await call(app, "GET", `/${third.orderId}`));
+    expect(read.standingOffer).toBeUndefined();
+  }));
+
+test("rejected substitutes do not count, and a reject never offers", async () =>
+  withDatabase(async (db) => {
+    const { app, sign } = await mount(db);
+    for (const _ of [1, 2, 3]) {
+      const pending = await pendingOrder(app, sign(substitute));
+      const declined = await orderOf(
+        await decide(app, pending, { decision: "reject", next: "stop" }),
+      );
+      expect(declined.standingOffer).toBeUndefined();
+    }
+    const pending = await pendingOrder(app, sign(substitute));
+    expect(
+      (await orderOf(await decide(app, pending, { decision: "approve" }))).standingOffer,
+    ).toBeUndefined();
+  }));
+
+test("an auto rule places the substitute without asking and says why in the audit", async () =>
+  withDatabase(async (db) => {
+    const { app, register, sign } = await mount(db);
+    const mandate = await register(
+      limitsWith({
+        substitutionRules: [
+          {
+            ...substitute,
+            productId: fixtures.offerClaims.productId,
+            policy: "auto",
+            decidedAt: "2026-11-14T10:00:00+00:00",
+          },
+        ],
+      }),
+    );
+    const order = await orderOf(
+      await place(app, [
+        await sign({
+          ...substitute,
+          mandateId: mandate.mandateId,
+          mandateVersion: mandate.version,
+        }),
+      ]),
+    );
+    expect(order).toMatchObject({ status: "placed", reasons: [] });
+    expect(order.audit).toContainEqual(
+      expect.objectContaining({
+        event: "check_passed",
+        productId: fixtures.offerClaims.productId,
+        detail: "Substitute allowed without asking: standing approval given 2026-11-14.",
+      }),
     );
   }));

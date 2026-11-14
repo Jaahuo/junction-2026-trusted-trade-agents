@@ -36,14 +36,14 @@ The OpenAPI document covers every `/api` route; its paths are relative to the pu
 
 ## Standards
 
-| Implemented                                                                                                                                                                      | Mapped in docs                                                                          | Next step                                                                                                                                           |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Offer [ES256 JWS signing and JWKS](contexts/offers/src/infra/offer-signer.ts); [public key endpoint](contexts/offers/src/api/routes.ts)                                          | —                                                                                       | Independent public-URL verification script ([#69](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/69)).                         |
-| [OpenAPI 3.1 and JSON Schema](contexts/discovery/src/api/openapi.ts); [MCP tool JSON Schema](contexts/mcp/src/api/mcp-server.ts)                                                 | —                                                                                       | —                                                                                                                                                   |
-| [MCP and MCP Apps resources and tools](contexts/mcp/src/api/mcp-server.ts)                                                                                                       | —                                                                                       | Measure the full approval flow in the chosen host ([#19](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19)).                  |
-| [Nullable GTIN on search candidates](contexts/catalog/src/infra/product-file.ts); [unit codes including UN/CEFACT codes where supplied](contexts/catalog/src/domain/quantity.ts) | —                                                                                       | Data does not always provide a GTIN or a usable unit conversion.                                                                                    |
-| [AP2-style signed mandate](contexts/mandates/src/infra/buyer-key.ts), with server-simulated buyer custody                                                                        | —                                                                                       | Buyer-side key custody and mandate signature verification on use ([#123](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/123)). |
-| [Internal order statuses only](contexts/orders/src/infra/schema.ts)                                                                                                              | [Peppol/UBL status mapping](docs/specs.md#peppolubl-status-mapping), documentation only | Implement an interoperable exchange if needed; no Peppol or UBL exchange is implemented.                                                            |
+| Implemented                                                                                                                                                                    | Mapped in docs                                                                          | Next step                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Offer [ES256 JWS signing and JWKS](contexts/offers/src/infra/offer-signer.ts); [public key endpoint](contexts/offers/src/api/routes.ts)                                        | —                                                                                       | Independent public-URL verification script ([#69](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/69)).                         |
+| [OpenAPI 3.1 and JSON Schema](contexts/discovery/src/api/openapi.ts); [MCP tool JSON Schema](contexts/mcp/src/api/mcp-server.ts)                                               | —                                                                                       | —                                                                                                                                                   |
+| [MCP and MCP Apps resources and tools](contexts/mcp/src/api/mcp-server.ts)                                                                                                     | —                                                                                       | Measure the full approval flow in the chosen host ([#19](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19)).                  |
+| [Nullable GTIN on search candidates](contexts/catalog/src/infra/projection.ts); [unit codes including UN/CEFACT codes where supplied](contexts/catalog/src/domain/quantity.ts) | —                                                                                       | Data does not always provide a GTIN or a usable unit conversion.                                                                                    |
+| [AP2-style signed mandate](contexts/mandates/src/infra/buyer-key.ts), with server-simulated buyer custody                                                                      | —                                                                                       | Buyer-side key custody and mandate signature verification on use ([#123](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/123)). |
+| [Internal order statuses only](contexts/orders/src/infra/schema.ts)                                                                                                            | [Peppol/UBL status mapping](docs/specs.md#peppolubl-status-mapping), documentation only | Implement an interoperable exchange if needed; no Peppol or UBL exchange is implemented.                                                            |
 
 ## Verify an offer
 
@@ -67,7 +67,7 @@ The server publishes the offer signing key set at `/.well-known/jwks.json`.
 
 ## Known limits of the first build
 
-- **No authentication in the first build.** There is one demo account, the invoice customer with a credit limit and one agent, and every REST and MCP request acts as it. Accounts, a second pay-on-order account and the MCP authorize step (OAuth, as MCP specifies) are planned; see [SPEC-002 "Later"](docs/specs.md#later-accounts-and-authorization).
+- **No authentication in the first build.** There is one demo account, the invoice customer without a credit check and one agent, and every REST and MCP request acts as it. Accounts, a second pay-on-order account and the MCP authorize step (OAuth, as MCP specifies) are planned; see [SPEC-002 "Later"](docs/specs.md#later-accounts-and-authorization).
 - **Anyone with the demo URL can open the approval page** (`/approvals/<orderId>`) and call every REST route, including the approval decision.
 - **The model sees no decision tool.** The decision, mandate registration and revoke tools are view-only: the MCP server marks them with app-only visibility (`MCP_VIEW_TOOLS=off` removes them), so a host hides them from the model and the agent cannot approve its own order. A human decides on the approval card or the approval page. A direct REST or MCP client can still call the decision until accounts arrive.
 - **The wholesaler uses the buyer's limits only to enforce them.** It returns them only to the buyer's own account.
@@ -78,6 +78,11 @@ The server publishes the offer signing key set at `/.well-known/jwks.json`.
 - **Count sales units are whole units.** Search rounds cases, pieces and packs up to whole sales units and preserves lot multiples. The dataset's fractional `allowedLotSize` values do not establish that customers may split a case; mentor confirmation is pending ([#76](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/76)).
 
 ## Demo host
+
+Open [the hosted chat](https://chat.199-247-4-99.sslip.io) and sign in as `chef@localhost.invalid`.
+Ask the operator for the password. Select Acme Kitchens or Acme Bakery.
+The Chef account is a restricted buyer, not an administrator.
+See [Open WebUI setup](docs/openwebui.md) for account provisioning.
 
 The owner chose Open WebUI with voice for the demo, with human approval on the in-chat card and the phone approval page as fallback ([#44](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/44)).
 In a historical Open WebUI 0.13.3 spike, voice called `search_products` and the search view rendered. The approval link was not tested in that run.
@@ -100,7 +105,7 @@ These results do not establish support in other hosts or for the complete curren
 - Add the first Valio Aimo skin as a wholesaler theme when [#73](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/73) is complete.
 - Harden offers: add comparison prices and deposits, identify unconfirmed stock, and refresh availability ([#120](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/120)).
 - Consider the proposed trust chain: verify signatures in views ([#68](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/68)), and add signed receipts and a hash-chained audit record ([#70](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/70)).
-- Consider the proposed support for all GS1 allergens and free-from claims ([#71](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/71)) and agent rationale on order lines ([#72](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/72)).
+- Consider agent rationale on order lines ([#72](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/72)).
 - Demonstrate only attacks the first build stops; measure the host flow and rogue-agent scenarios ([#19](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/19)).
 
 ## Setup
@@ -123,14 +128,13 @@ Read the [challenge brief](docs/challenge.md) for requirements, scope and judgin
 
 Use the supplied [OpenAPI specification](docs/open_api.json) for mock API endpoints, request/response schemas and `X-API-Key` authentication. Use the [resource portal](https://junction26.valioaimo.fi/) for access instructions and updates. Keep credentials in ignored `.env`, not in documentation.
 
-The API specification is `docs/open_api.json`. The `data/` directory contains four original datasets:
+The API specification is `docs/open_api.json`. Keep the supplied product JSON, schema and enrichment CSVs in a private directory outside Git.
+Import them once into PostgreSQL with the [catalogue import procedure](docs/catalogue-import.md).
+Runtime search, facts and demo tools read PostgreSQL. They do not read or synchronize source files.
+Builds and CI use fictional fixtures and do not need the challenge dataset.
 
-- [Delivery reliability](data/valio_aimo_junction26_delivery_reliability.csv)
-- [Carbon footprint](data/valio_aimo_junction26_carbon_footprint.csv)
-- [Product data schema](data/valio_aimo_junction26_product_data_schema.json)
-- [Product data](data/valio_aimo_junction26_product_data.json)
-
-The four dataset files remain byte-for-byte unchanged. Formatting excludes `data/` and `docs/open_api.json` to preserve the source files. The product dataset contains 17,546 records. Narrow the product selection with static data before querying dynamic prices and availability; do not repeatedly query the full catalog. The template's MIT license and attribution remain unchanged; this project does not assign that license to the supplied challenge resources.
+Narrow the product selection before querying dynamic prices and availability. Do not repeatedly query the full catalogue.
+The template's MIT license and attribution remain unchanged. This project does not assign that license to the challenge resources.
 
 ## Commands
 

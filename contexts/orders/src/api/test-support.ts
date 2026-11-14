@@ -1,4 +1,5 @@
 import {
+  DEMO_ACCOUNT,
   ErrorEnvelopeSchema,
   fixtures,
   type MandateLimits,
@@ -13,6 +14,7 @@ import {
   signOfferToken,
   signOrderReceipt,
 } from "@app/contract/server";
+import { ok } from "@app/kernel";
 import { type Db, mountContext } from "@app/server-kit";
 import { context as mandatesContext, createApi as createMandatesApi } from "@ctx/mandates/api";
 import type { AnyElysia } from "elysia";
@@ -21,6 +23,9 @@ import { offerVerifier } from "../infra/offer-verifier.ts";
 import { type ApiDeps, context, createApi } from "./index.ts";
 
 const now = new Date("2026-11-16T08:00:00Z");
+
+/** The demo account with a 5000 EUR credit limit, so route tests can prove the credit rule. */
+const CREDIT_ACCOUNT = { ...DEMO_ACCOUNT, creditLimit: 5000 };
 export const inMinutes = (minutes: number) => new Date(now.getTime() + minutes * 60_000);
 
 const testKey = async (): Promise<OfferSigningKey> => {
@@ -51,14 +56,28 @@ export const mount = async (db: Db) => {
   const publicBase = { url: "https://orders.test" };
   // The orders clock; a test moves it to act later on stored orders.
   const clock = { now };
+  // Stands in for the offers service's issued tokens (SPEC-006 `issued`): offer ID → token.
+  const issued = new Map<string, string>();
   const appWith = (changes: Partial<ApiDeps> = {}) =>
     createApi(db, {
       verifyOffer: offerVerifier(async () => keys),
+      issuedOffers: {
+        issued: async (offerIds) =>
+          ok(
+            new Map(
+              offerIds.flatMap((id) => {
+                const token = issued.get(id);
+                return token === undefined ? [] : [[id, token] as const];
+              }),
+            ),
+          ),
+      },
       signReceipt: ({ idempotencyKey: _key, requested: _requested, ...order }) =>
         signOrderReceipt({ ...order, approvalUrl: null }, key, publicBase.url),
       mandates: mandateClient(mandates),
       now: () => clock.now,
       publicBaseUrl: () => publicBase.url,
+      principal: async () => CREDIT_ACCOUNT,
       ...changes,
     });
   const app = appWith();
@@ -87,7 +106,20 @@ export const mount = async (db: Db) => {
       exp,
     );
   };
-  return { app, appWith, clock, mandates, mandate, register, sign, publicBase, key, keys, jwks };
+  return {
+    app,
+    appWith,
+    clock,
+    issued,
+    mandates,
+    mandate,
+    register,
+    sign,
+    publicBase,
+    key,
+    keys,
+    jwks,
+  };
 };
 
 export const call = (app: AnyElysia, method: string, path: string, body?: object) =>

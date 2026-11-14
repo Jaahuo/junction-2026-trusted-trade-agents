@@ -39,7 +39,7 @@ export const VIEWS = [
   {
     view: "mandate-settings",
     uri: "ui://trusted-trade/mandate-settings",
-    tools: ["get_mandate", "draft_mandate"],
+    tools: ["show_mandate", "draft_mandate"],
     plainQuery: null,
     plainLoad: "mandate",
     plainList: null,

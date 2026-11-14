@@ -72,6 +72,63 @@ test("a line inside every limit is auto with no reasons", () => {
   expect(run([claim()])).toEqual({ decision: "auto", reasons: [] });
 });
 
+describe("orders with three distinct products", () => {
+  const lines = [
+    claim(
+      { offerId: "off_test_oat", productId: "prod_test_oat", total: { net: 30, gross: 30 } },
+      { deliveryReliability: 0.9, co2PerKg: 1 },
+    ),
+    claim(
+      { offerId: "off_test_rye", productId: "prod_test_rye", total: { net: 30, gross: 30 } },
+      { deliveryReliability: 0.8, co2PerKg: 2 },
+    ),
+    claim(
+      { offerId: "off_test_bean", productId: "prod_test_bean", total: { net: 30, gross: 30 } },
+      { deliveryReliability: 0.7, co2PerKg: 3 },
+    ),
+  ];
+  const history = lines.map(({ productId, quantity }) => ({ productId, quantity }));
+  const withLimit = (value: number) => ({
+    history,
+    mandate: mandateWith({ maxOrderTotal: { value, currency: "EUR", basis: "gross" } }),
+  });
+
+  test("the combined spend exceeds the limit although each chosen line is below it", () => {
+    const options = withLimit(80);
+    for (const line of lines) {
+      expect(run([line], options)).toEqual({ decision: "auto", reasons: [] });
+    }
+    expect(run(lines, options)).toEqual({
+      decision: "needs_approval",
+      reasons: ["SPEND_OVER_LIMIT"],
+    });
+  });
+
+  test("spend exactly at the limit is automatic; an unchosen alternative is not input", () => {
+    const alternative = claim({
+      offerId: "off_test_alternative",
+      productId: "prod_test_alternative",
+      total: { net: 30, gross: 30 },
+    });
+    const options = withLimit(90);
+    expect(run(lines, options)).toEqual({ decision: "auto", reasons: [] });
+    expect(run([...lines, alternative], options)).toEqual({
+      decision: "needs_approval",
+      reasons: ["SPEND_OVER_LIMIT"],
+    });
+  });
+
+  test("one product below the reliability guardrail sends the whole order to approval", () => {
+    const unreliable = lines.map((line, index) =>
+      index === 1 ? claim({ ...line }, { deliveryReliability: 0.4 }) : line,
+    );
+    expect(run(unreliable, withLimit(90))).toEqual({
+      decision: "needs_approval",
+      reasons: ["RELIABILITY_BELOW_MIN"],
+    });
+  });
+});
+
 const approvalCases: [ReasonCode, () => ReturnType<typeof run>][] = [
   [
     "SPEND_OVER_LIMIT",
@@ -331,5 +388,57 @@ describe("rejections", () => {
       products: [],
     };
     expect(run([claim()], { live: lost }).reasons).toEqual(["CUTOFF_PASSED"]);
+  });
+});
+
+const rule = (policy: "auto" | "never", productId = fixtures.offerClaims.productId) => ({
+  replaces: "prod_test_requested",
+  productId,
+  policy,
+  decidedAt: "2026-11-14T10:00:00+00:00",
+});
+
+describe("substitution rules", () => {
+  const substitute = claim({ replaces: "prod_test_requested" });
+
+  test("an auto rule for the pair places the substitute without asking", () => {
+    const mandate = mandateWith({ substitutions: "ask", substitutionRules: [rule("auto")] });
+    expect(run([substitute], { mandate })).toEqual({ decision: "auto", reasons: [] });
+  });
+
+  test("an auto rule for another pair still asks", () => {
+    const mandate = mandateWith({
+      substitutions: "ask",
+      substitutionRules: [rule("auto", "prod_test_other")],
+    });
+    expect(run([substitute], { mandate }).reasons).toEqual(["SUBSTITUTION"]);
+  });
+
+  test("a never rule or substitutions never still asks", () => {
+    for (const mandate of [
+      mandateWith({ substitutions: "ask", substitutionRules: [rule("never")] }),
+      mandateWith({ substitutions: "never", substitutionRules: [rule("auto")] }),
+    ])
+      expect(run([substitute], { mandate }).reasons).toEqual(["SUBSTITUTION"]);
+  });
+
+  test("an auto rule removes only SUBSTITUTION", () => {
+    const mandate = mandateWith({
+      substitutions: "ask",
+      substitutionRules: [rule("auto")],
+      newProducts: "ask",
+      allergenData: { ifNoData: "ask" },
+      maxOrderTotal: { value: 50, currency: "EUR", basis: "gross" },
+    });
+    const result = run(
+      [claim({ replaces: "prod_test_requested" }, { match: { lactose: "unknown" } })],
+      {
+        mandate,
+        history: [],
+      },
+    );
+    expect(result.reasons.toSorted()).toEqual(
+      (["NEW_PRODUCT", "SPEND_OVER_LIMIT", "UNCONFIRMED_ALLERGEN"] as ReasonCode[]).toSorted(),
+    );
   });
 });

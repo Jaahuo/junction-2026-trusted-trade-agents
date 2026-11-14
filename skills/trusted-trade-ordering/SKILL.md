@@ -1,44 +1,81 @@
 ---
 name: trusted-trade-ordering
-description: Use when you buy goods for a user from a wholesaler through the trusted-trade tools (search_products, get_offers, place_order). Covers the order flow, quantity units, approval, rejection and reason codes.
+description: Use when you buy goods for a user from a wholesaler through the trusted-trade tools (find_products, quote_offers, place_order; search_products and get_offers to show options). Covers the order flow, quantity units, approval, rejection and reason codes.
 ---
 
 # Trusted-trade ordering
 
 The wholesaler's server checks every order against the buyer's mandate. This skill is guidance. The server is the control.
 
+## Direct order
+
+The user is a chef at work. A request that names what, how much and by when is an instruction to order. Run the flow with no text in between, then give one reply:
+
+`get_mandate` → `find_products` for each product → `quote_offers` → `place_order` → reply
+
+Leave this path only for a branch that [Flow](#flow) names.
+
+## Reply
+
+- Stay silent until the order has a status or you need an answer. Write no progress note, no plan and no list of what you found.
+- A host that renders MCP App views shows the order as a card after `place_order`. The card carries the product, quantity, delivery day, total, reasons and the approval buttons. Then reply with one short sentence that gives only the status: the order is placed, or it needs a sign-off. Repeat nothing that the card shows and give no link.
+- Without a card, give the outcome in one or two short sentences: product, quantity, delivery day and gross total. For a sign-off, add the reason in a few plain words and `approvalUrl`.
+- Leave out tool names, codes and ids.
+- End on the outcome. Offer no menu of next steps.
+
+"Tell the user" in this skill and in [reason-codes.md](reason-codes.md) means one such sentence.
+
+## Questions
+
+Ask only for a fact that you cannot look up and that changes the order:
+
+- What, how much or by when is missing from the request.
+- No product of the kind the user asked for has an offer after a second search (steps 2 and 4).
+- A candidate has no conversion for the quantity ([Units](#units)).
+- Nothing of that kind can be delivered by the date (step 2).
+- No mandate exists (step 1).
+
+Ask everything in one message, then order on the answer. Look up the rest: pack sizes, prices, stock and delivery days. The server decides limits and sign-offs, so place the order instead of asking whether to place it.
+
 ## Flow
 
 Do the steps in order. Each step ends when its output is in hand.
 
-One request gives one order. When the user names several products in one request, search for each product, request all offers in one `get_offers` call and place one `place_order` with every chosen offer. Never place one order per product: the server checks the limits on the order total, and one order per product splits the order around a limit.
+One request gives one order. Search for each product, quote the shortlists together and place one `place_order` with one chosen offer per product. Never place one order per product: the server checks limits on the order total. If any product cannot be fulfilled, ask rather than silently placing a partial order.
+
+When the user asks you to order, use the quiet tools `find_products` and `quote_offers`: they open no view, so the chat shows only the order. Use `search_products` and `get_offers` only when the user asks to see the products or compare offers; those open a view in the chat. Both pairs take the same input and return the same result.
 
 1. **Read the mandate.** Call `get_mandate`. Done when you know the limits in force: spend per order (EUR, gross), allowed categories, substitution policy, payment terms. A 404 means no mandate exists. Draft one with the user (see [Mandate](#mandate)), and stop until `get_mandate` shows it.
-2. **Search.** Call `search_products` once per product the user names, with that product's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words, the same full sentence for every product). Done when you hold a shortlist of candidates for every product.
-   - Put a requirement the user cannot waive in `hard`. Only `{ attribute: "lactose", is: "free_from" }` is supported. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
-   - Put a preference in `soft`. It only changes the ranking.
-   - Read `match` on each candidate: `confirmed`, `contradicted` or `unknown`. Missing data is `unknown`, never `confirmed`. An `unknown` match sends the order to approval, unless the mandate allows missing allergen data (`allergenData.ifNoData: auto`).
-3. **Request offers.** Call `get_offers` once, with one line per shortlisted candidate of every product. Done when every candidate is an offer or is listed in `omitted` with a reason.
+2. **Search.** Call `find_products` once per product the user names (or `search_products` when the user asks to see the products), with that product's need as structured fields: `terms`, `hard`, `soft`, `quantity`, `deliverBy`, `paymentTerms`, and `originalRequest` (the user's own words, the same full request for every product). Done when you hold a shortlist of candidates for every product.
+   - Put a requirement the user cannot waive in `hard`. Supported: `{ attribute: <allergen or free-from claim>, is: "free_from" }`, for example `gluten`, `egg`, `lactose`, `peanut`, and `{ attribute: "vegan", is: "yes" }`. The tool input schema lists every attribute. Any other hard constraint gives 400: tell the user that the server cannot enforce it.
+   - Put a preference in `soft`. It only changes the ranking. Supported: `{ attribute: "countryOfOrigin", prefer: <country code> }` and `{ attribute: "category", prefer: <category> }`. Any other soft attribute gives 400: leave it out and put the word in `terms`.
+   - What the user rules out is a requirement, never a preference. "Lactose free only" is `hard` (`lactose`, `free_from`). A rule-out with no supported attribute, such as "not barista" or "not chocolate", goes in neither `hard` nor `soft`, and its word stays out of `terms`. Apply it yourself: skip every candidate whose name shows the ruled-out variant, before you quote.
+   - If the search comes back empty, or holds no product of the kind the user asked for, call `find_products` again with fewer or other words for the same kind of product. Search again before you ask. Do not show an empty result to the user.
+   - Every candidate can be delivered on or before `deliverBy`: the search leaves out a product that cannot. `availability.dropped` counts the matches left out. When the second search is also empty and `dropped` is above 0, the wholesaler cannot deliver the product by that date: say so in one sentence and ask for another date.
+   - When `availability.checked` is `false`, the search could not read live availability. A candidate may then still be `omitted` at step 3.
+   - Read `match` on each candidate: `confirmed`, `contradicted` or `unknown`. Missing data is `unknown`, never `confirmed`. An `unknown` match sends the order to approval, unless the constraint is an allergen and the mandate allows missing allergen data (`allergenData.ifNoData: auto`). Vegan and the other free-from claims always go to approval when unknown.
+3. **Request offers.** Call `quote_offers` once with the shortlist for every product (or `get_offers` when the user asks to compare offers). Done when every candidate is an offer or is listed in `omitted` with a reason.
+   - The candidates come best match first. For each product, send the first three that are the kind of product the user asked for as `lines` of the same call, in that order. Do not skip a candidate for a property the user did not rule out, such as lactose free or UHT. When every line for a product is `omitted`, quote its next three candidates before you tell the user that nothing can be delivered. A product whose cut-off has passed says nothing about the others.
    - Read `precheck` on each offer. It is guidance: `place_order` runs the checks again.
    - Read `claims.deliveryDate`, `claims.shortfall` and `claims.replaces`. A later date or a shortfall adds `AVAILABILITY_DIFFERS`. A substitute names the product it replaces.
-4. **Choose.** For each product, choose one offer among the offers that meet the user's need. Done when you hold one offer token per product. Keep the unchosen offers: pass them as `alternatives`.
+4. **Choose.** Only a product of the kind the user asked for meets the need: banana purée is not banana yogurt. When no product of that kind has an offer, tell the user what is available and ask. Do not place an order for another kind of product until the user agrees. For each requested product, choose one offer that meets the need; select up to 20 unchosen offers as `alternatives` across the entire order. Done when you hold one `offerId` (`off_…`) per product.
    Apply the choice rule in this order, and go to the next rule only on a tie:
    1. **Pre-check.** Prefer `precheck.decision` `auto`. When no offer is `auto`, take the best offer that meets the need: the human then decides.
    2. **Price per standard unit.** Prefer the lower `claims.pricePerStandardUnit.gross` (EUR per `LTR` or `KGM`, VAT included). Compare only offers with the same `unit`. When it is `null`, do not compute one: skip this rule for that offer.
    3. **Delivery date.** Prefer the earlier `claims.deliveryDate`.
-5. **Place the order.** Call `place_order` once, with `offers` (one token per product, up to 20), optional `alternatives`, `originalRequest`, and a new `idempotencyKey`. After a timeout or a lost reply, send the same tokens with the same key: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
+5. **Place the order.** Call `place_order` once, with `offers` (one chosen `offerId` per product, up to 20 chosen offers, not the long tokens), optional `alternatives` (their `offerId` values, up to 20 alternatives across the entire order), and the full `originalRequest`. The two limits are separate: retain the chosen offer for every requested product. The server generates the idempotency key. After a timeout or a lost reply, send the same offers, alternatives and `supersedes`: this returns the stored order and creates no second one. Done when you hold an order with a `status`.
 6. **Act on the status.**
 
 | Status                                       | Action                                                                                                                                    |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `placed`                                     | Tell the user the order is placed, with delivery date and total.                                                                          |
+| `placed`                                     | Tell the user the order is placed, with product, quantity, delivery date and total.                                                       |
 | `pending_approval`                           | Tell the user, give `approvalUrl` and the reasons in plain words, then stop. A human decides.                                             |
 | `declined`, `decision.next` = `stop`         | The human rejected the order and chose stop. Stop and tell the user. Do not look for alternatives.                                        |
 | `declined`, `decision.next` = `alternatives` | The human rejected the order and allows alternatives. You may search again for the user's original need. The new order faces every check. |
 | `rejected`                                   | A fixed guardrail failed. Read each code in [reason-codes.md](reason-codes.md) and take its action.                                       |
 | `awaiting_payment`                           | Pay-on-order only. Call `get_order_status` later.                                                                                         |
 
-After `pending_approval`, call `get_order_status` to read the human's decision. `list_pending_approvals` lists the orders that still wait. A pending order whose cut-off passes becomes `declined` with `next` = `alternatives`.
+A `placed` or `pending_approval` order needs no further call in the same turn. Call `get_order_status` to read the human's decision only when the user comes back to the order. `list_pending_approvals` lists the orders that still wait. A pending order whose cut-off passes becomes `declined` with `next` = `alternatives`.
 
 A request can fail before an order exists: `409 STALE_OFFER`, `400 OFFER_INVALID`, `409 CONFLICT`. See [reason-codes.md](reason-codes.md#errors-before-an-order-exists).
 
@@ -50,6 +87,8 @@ Only a human approves. You have no tool that decides an approval: `decide_approv
 
 Only a human registers limits. You draft them.
 
+- To read limits during ordering, call `get_mandate`. It opens no view. Call `show_mandate` only when the user asks to see the limits or settings. It opens the mandate settings view with the same limits.
+
 - To set or change the limits, or after `MANDATE_INVALID`, call `draft_mandate` with the terms the human gave: `limits`, `standingConstraints` and, if the human named one, `exp`. For a term the human did not name, keep the value of the current mandate. Without a current mandate, ask the human, or use `ask` for each policy.
 - Then ask the human to check the draft and press Register in the mandate view. The draft changes nothing.
 - Never say that the limits are registered or in force until `get_mandate` shows them.
@@ -60,7 +99,10 @@ Only a human registers limits. You draft them.
 - Money is EUR. Limits apply to the gross total: VAT and deposits included.
 - When an offer has `depositsIncluded: false`, the wholesaler gives no deposit amount and the total leaves deposits out. Say so when you report the total.
 - State the user's quantity in standard units: `LTR` for volume, `KGM` for mass.
-- The wholesaler sells in its own sales unit (for example `KI`). Every candidate gives `orderQuantity` (sales unit) and `equals` (standard units). Pass `orderQuantity` unchanged to `get_offers`: its unit is the product's sales unit and its value is a multiple of the lot size.
+- The wholesaler sells in its own sales unit (for example `KI`). Every candidate gives `orderQuantity` (sales unit) and `equals` (standard units). Pass `orderQuantity` unchanged to `quote_offers` (or `get_offers` when the user asks to compare offers): its unit is the product's sales unit and its value is a multiple of the lot size.
+- When the user counts packs and names the pack size, multiply: the count times the pack size is the standard quantity. "900 pieces of oat drink 1 l" is `{ value: 900, unit: "LTR" }`; "40 tubs of 2.5 kg" is `{ value: 100, unit: "KGM" }`.
+- When the user counts packs (tubs, cartons, bottles, pieces) and gives no pack size, send the count with the unit `ST`. A candidate sold by the piece then has an `orderQuantity`. Never send `pcs`, `tubs` or another word as the unit.
+- When the user asks you to use the quantity the search returns, quote each candidate's `orderQuantity` as it is.
 - A candidate with `orderQuantity: null` has no conversion. Tell the user. Do not compute one.
 - Dates are `YYYY-MM-DD`.
 - `paymentTerms` must equal the account's terms. The demo account uses `invoice`. Another value gives 400.
@@ -68,10 +110,10 @@ Only a human registers limits. You draft them.
 
 ## Language
 
-Pass `language` on every tool call that has it: the language the user writes in, as a tag such as `fi` or `en`. The view the host shows is then in the user's language. Reply to the user in the same language.
+Pass `language` on every tool call that has it: the language the user writes in, as a tag such as `fi` or `en`. Take it from the user's latest message only. Product names, the country of origin and the mandate say nothing about the user's language: an English message gets `en` and an English reply. The view the host shows is then in the user's language. Reply to the user in the same language.
 
 ## Conduct
 
-Never reshape an order to get around a limit. Splitting an order, lowering a quantity, moving a date, swapping a product or changing payment terms to get under a limit all count as reshaping. Refuse it even when the user asks. Tell the user the limit and let the human approve instead.
+Never reshape an order to get around a limit. Splitting an order, lowering a quantity, moving a date, swapping a product or changing payment terms to get under a limit all count as reshaping. Refuse it even when the user asks. Tell the user the limit and let the human approve instead: when the user asked you to order, place the whole order as one order in the same turn, so that it goes to approval. Do not ask whether to place it. If the user asks you to reduce a pending order, do not place a new order: tell them to use "Reduce to fit the limit" on the approval card, where they confirm the new amounts themselves.
 
 Choosing among offers that meet the user's need, before you place the order, is not reshaping. Request new offers when the decision says `alternatives` or a code in [reason-codes.md](reason-codes.md) says so. A changed order is a new request: it faces every check again.

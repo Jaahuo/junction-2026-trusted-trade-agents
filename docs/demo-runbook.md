@@ -1,6 +1,6 @@
 # Demo runbook
 
-This how-to guide gets the demo server onto a public quick tunnel, connects the test host to it, and proves scenarios 1 and 2 before each rehearsal and recording.
+This how-to guide gets the demo server onto a public quick tunnel, connects the test host to it, and proves scenarios 1, 2 and 4 before each rehearsal and recording.
 The scenarios are in the PRD section [Demo and build order](prd.md#demo-and-build-order).
 The REST routes are in [SPEC-003](specs.md#spec-003-tools-routes-and-errors), and the MCP endpoint is in SPEC-012.
 
@@ -93,6 +93,8 @@ Open WebUI 0.13.3 also works as a host against `/mcp` (voice spike #45).
 ## 6. Before each rehearsal and recording
 
 Run these from the worktree that serves the demo, in order:
+Import the private catalogue bundle first with the [catalogue import procedure](catalogue-import.md). Include its demo metadata.
+Resets preserve that import. Scripts read PostgreSQL, not the source directory.
 
 1. Reset the database to the demo state:
 
@@ -103,7 +105,7 @@ Run these from the worktree that serves the demo, in order:
    It resets only this worktree's database, so run it in the worktree whose server the host reaches.
 
 2. Before a recording, check that the demo products still fit the live data.
-   Use the `requestedDate` of `data/demo-products.json`, or the deliver-by date that the demo sentence names:
+   Use the requested date from imported demo metadata, or the deliver-by date that the demo sentence names:
 
    ```sh
    bun scripts/check-demo-data.ts --date <YYYY-MM-DD>
@@ -112,7 +114,7 @@ Run these from the worktree that serves the demo, in order:
    It ends with `S1 ok` and `S2 ok`.
    If a line says `not ok`, pick new products before you record.
 
-3. Prove both scenarios end to end:
+3. Prove the three scenarios end to end:
 
    ```sh
    bun scripts/demo-smoke.ts --scenario 1
@@ -120,18 +122,45 @@ Run these from the worktree that serves the demo, in order:
    bun scripts/demo-smoke.ts --scenario 4
    ```
 
-   Each run starts with `bun run db:reset`, so repeated runs never use up the credit limit.
+   Each run starts with `bun run db:reset`.
    Each step prints `ok <step>`; a failure prints `FAIL step <step>` with the HTTP status and error code, and exits 1.
-   The run leaves a placed order, so run `bun run db:reset` once more before you record.
+   The runs leave placed orders, and scenario 4 also leaves a pending order.
+   Scenario 4 registers a tighter test mandate and leaves it active, even if a later step fails.
+   Run `bun run db:reset` once more before you record to restore the demo mandate.
    Wait a few seconds between smoke scripts and before the first chat request to avoid upstream rate limits.
+
+### Trust that grows: the substitute beats
+
+`bun run db:reset` seeds two approved orders of the scenario 3 substitute (`s3Substitute` in imported demo metadata), so the next approval of that pair is the third.
+
+1. Ask for the scenario 3 product. The original is short, so the agent offers the substitute for the rest, and the order waits for approval with `SUBSTITUTION`.
+2. Approve it. The confirmation asks "✦ You've approved … 3 times. Let the agent do this without asking?". Press **Yes, automatically**.
+3. Ask for the scenario 3 product again, and have the agent place the substitute's offer as its own order. It is placed without asking, and the order log says "Substitute allowed without asking: standing approval given …". The short original still asks, because its amount differs from the request.
+4. Show the rule in the agent limits view, and remove it there.
+
+The reject beat: reject a substitute and press **Don't suggest again** on the declined card. The next request for the scenario 3 product gets no offer of that substitute.
+
+Run `bun run db:reset` between takes: a saved rule lasts until the reset, and a new mandate version makes open orders stale.
 
 ### Smoke script options
 
-| Option               | Effect                                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--scenario 1\|2\|4` | Scenario 1: search, offers, place (`placed`, no reasons), audit record. Scenario 2: place (`pending_approval`, `SPEND_OVER_LIMIT`), pending list, approve, `placed`. Scenario 4: one search per product, one offers call, one three-line order (`placed`); then the same lines scaled so each line stays under the limit and the total goes over it (`pending_approval`, `SPEND_OVER_LIMIT`). |
-| `--base-url <url>`   | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                                                                                                                                                                                                                                               |
-| `--no-reset`         | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset.                                                                                                                                                                                                                                                                                                       |
+| Option                | Effect                                                                                                                                                                                                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--scenario 1\|2\|4`  | Scenario 1 places an order and checks its audit. Scenario 2 checks spend approval and approves the order. Scenario 4 places one three-line order under the limit, then checks a second three-line order whose individual lines are under the limit but whose total requires approval. |
+| `--base-url <url>`    | The server to test. Default: `PUBLIC_BASE_URL`, else `http://127.0.0.1:$PORT` of this worktree.                                                                                                                                                                                       |
+| `--no-reset`          | Skip `bun run db:reset`, for a hosted server whose database this worktree cannot reset. Not available for scenario 4.                                                                                                                                                                 |
+| `--database-env NAME` | Read imported demo metadata from the database URL in environment variable `NAME`. Required for another application target. Also requires `--no-reset`.                                                                                                                                |
+
+Scenario 4 uses `s1`, `s3` and `s3Substitute` from the imported demo metadata.
+These products must be distinct and have catalog facts and seeded history.
+The script searches for each product by its catalog name.
+It uses the `s1` quantity and one fifth of the `s3` quantity, rounded up, for each `s3` product.
+The script quotes the base quantities and registers a test mandate with a tighter order limit derived from those prices.
+It preserves the other mandate limits, standing constraints and expiry.
+It then quotes all lines again because the mandate version changed.
+For the second order, the script doubles `s1` and keeps `s3` and `s3Substitute` unchanged.
+Their current prices, stock and quantities must allow both orders to meet the checks.
+If they do not, the script stops rather than changing the delivery date or making additional quote attempts.
 
 The server, not the script, reads `WHOLESALER_LIVE`; start it with `WHOLESALER_LIVE=mock`.
 If `offers` fails with `omitted: NO_PRICE`, the server has no live price source: check `WHOLESALER_LIVE` and `VALIO_AIMO_API_KEY`.

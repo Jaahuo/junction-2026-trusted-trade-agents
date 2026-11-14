@@ -22,12 +22,7 @@ export function PageHeader({
 }
 
 export function Card({ className, ...props }: ComponentProps<"section">) {
-  return (
-    <section
-      {...props}
-      className={cn("rounded-xl border border-border bg-surface p-5 shadow-sm", className)}
-    />
-  );
+  return <section {...props} className={cn("border border-border bg-surface p-5", className)} />;
 }
 
 export function CardTitle({ className, ...props }: ComponentProps<"h2">) {
@@ -35,11 +30,11 @@ export function CardTitle({ className, ...props }: ComponentProps<"h2">) {
 }
 
 const badgeTones = {
-  neutral: "bg-border/60 text-foreground",
-  info: "bg-primary/10 text-primary",
-  success: "bg-success/15 text-success",
-  warning: "bg-warning/20 text-foreground",
-  danger: "bg-danger/10 text-danger",
+  neutral: "neutral",
+  info: "info",
+  success: "success",
+  warning: "warning",
+  danger: "danger",
 } as const;
 
 export function Badge({
@@ -49,11 +44,5 @@ export function Badge({
   tone?: keyof typeof badgeTones;
   children: ReactNode;
 }) {
-  return (
-    <span
-      className={cn("inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium", badgeTones[tone])}
-    >
-      {children}
-    </span>
-  );
+  return <span className={cn("pill", badgeTones[tone])}>{children}</span>;
 }

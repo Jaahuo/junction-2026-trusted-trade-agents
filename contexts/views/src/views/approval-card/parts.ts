@@ -1,8 +1,8 @@
 import type { OfferClaims } from "@app/contract";
+import { brand } from "@app/ui/brand";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import attention16 from "../../shared/icons/attention-16.svg?raw";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 
 // Parts that the card and the view share: the petrol header, the card frame and
 // the formatters. Figma: Junction 2026 › Screens › "Approval request — v8".
@@ -89,7 +89,7 @@ export const brandHeader = (
 ) =>
   html`<header class="header" part="header">
     <div class="eyebrow-row ${pill ? "spread" : ""}">
-      ${icon(logo, "Valio Aimo")}
+      <img src=${brand.logo} alt=${brand.name} />
       ${
         pill
           ? html`<span class="pill" part="status">${icon(attention16)}${eyebrow}</span>`
@@ -151,20 +151,6 @@ export const cardStyles = css`
   /* v17 dev notes: logo left, status pill right. */
   .eyebrow-row.spread {
     justify-content: space-between;
-  }
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-xs) var(--spacing-md) var(--spacing-xs) var(--spacing-sm);
-    border-radius: var(--radius-full);
-    background: var(--color-yellow-aimo-soft);
-    color: var(--color-text);
-    font-size: var(--font-size-2xs);
-    font-weight: 700;
-    line-height: 1.25;
-    letter-spacing: 0.2px;
-    white-space: nowrap;
   }
   .divider {
     width: 1px;

@@ -1,8 +1,7 @@
+import { brand } from "@app/ui/brand";
 import { formatMoney, formatQuantity, formatTimestamp, ORDER_TERMS } from "@app/ui/format";
 import { css, html } from "lit";
-import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import { plainPageUrl, type ViewData, type ViewEntryOf, viewEntry } from "../../shared/bridge.ts";
-import logo from "../../shared/icons/logo-valio-aimo.svg?raw";
 import { base } from "../../shared/styles.ts";
 import { defineView, ViewElement } from "../../shared/view-element.ts";
 import { loadMandate } from "./loader.ts";
@@ -152,8 +151,7 @@ class MandateSettings extends ViewElement<ViewEntryOf<"mandate-settings">> {
   private header() {
     return html`<header class="header" part="header">
       <div class="brand">
-        <span class="logo" role="img" aria-label="Valio Aimo">${unsafeSVG(logo)}</span
-        ><span>Agent settings</span>
+        <img class="logo" src=${brand.logo} alt=${brand.name} /><span>Agent settings</span>
       </div>
       <h2 class="title">Agent limits</h2>
     </header>`;

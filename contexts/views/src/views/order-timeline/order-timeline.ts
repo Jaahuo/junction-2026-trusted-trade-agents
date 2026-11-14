@@ -81,7 +81,7 @@ export function renderOrderTimeline(order: Order): TemplateResult {
                     <p class="secondary body-small">${words.actors[event.actor]}</p>
                     ${event.reason ? html`<p>${text.reason[event.reason]}</p>` : nothing}
                     ${event.rule ? html`<span class="body-small" title=${event.rule}>${text.supportRule}</span>` : nothing}
-                    ${event.detail ? html`<p class="body-small">${event.detail}</p>` : nothing}
+                    ${event.detail && (!event.reason || event.detail !== text.reason[event.reason]) ? html`<p class="body-small">${event.detail}</p>` : nothing}
                   </li>`,
               )}
             </ol>`

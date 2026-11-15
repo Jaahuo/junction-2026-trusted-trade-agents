@@ -9,6 +9,7 @@ concurrency:
 jobs:
   gate:
     name: gate
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, junction-ci]
     timeout-minutes: 20
     services:

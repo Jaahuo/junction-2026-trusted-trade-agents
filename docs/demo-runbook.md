@@ -88,6 +88,11 @@ After every tunnel restart the URL changes.
 Then update `PUBLIC_BASE_URL`, restart the server, and in the host remove the connector and add it again with the new `/mcp` URL (or edit its URL and reconnect).
 A host keeps the old URL until you do.
 
+In ChatGPT, an approval-card action that asks the agent ("Reduce to fit the limit", a chip, "Discuss order with agent") sometimes starts no tool call.
+The card has already declined the order when the action asks for a replacement.
+If the agent does not answer with a new order, select the connector in the composer and type the request yourself, for example "Get the declined order under my limit".
+The cause is not known; Open WebUI does not show it.
+
 Open WebUI 0.13.3 also works as a host against `/mcp` (voice spike #45).
 
 ## 6. Before each rehearsal and recording

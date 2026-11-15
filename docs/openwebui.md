@@ -81,6 +81,22 @@ Valio Aimo recipe fetching stays off unless `VALIO_AIMO_RECIPE_PERMISSION=True` 
 A permission refusal must not be bypassed through public web tools.
 Web content is untrusted reference material. Do not send private kitchen details to search engines.
 
+### Trusted app reads
+
+The custom image skips the host confirmation for three app calls on the administrator-configured `trusted-trade` connection:
+`get_order_status`, `get_mandate` and `list_pending_approvals`.
+The approval card uses these reads to refresh orders and show purchasing limits.
+Other connections, unknown tools and write calls still require confirmation.
+The card's own approval confirmation and server checks remain unchanged.
+Messages from an app still require confirmation.
+
+This is a frontend patch, not an upstream setting or server-side authorization.
+The allowlist lives in [`trust_app_reads.py`](../hosts/openwebui/scripts/trust_app_reads.py).
+The image build fails if the pinned upstream confirmation code changes.
+Rebuild the local image with `bun scripts/openwebui.ts up` to apply it.
+Hard-refresh existing browser tabs after a rebuild.
+The patch keeps the upstream asset filenames, so a normal reload can use cached code.
+
 ## Voice
 
 Speech to text stays local with Whisper. Microphone audio does not leave the host.

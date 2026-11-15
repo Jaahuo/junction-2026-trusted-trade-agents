@@ -128,6 +128,9 @@ A version before v0.13.0 shows only the text and structured result of a tool, no
 Open WebUI needs a stable `WEBUI_SECRET_KEY` for MCP Apps.
 Set it in the container environment so that a restart does not change it.
 
+Our custom image skips confirmation for selected read-only calls on `trusted-trade`.
+Other calls retain the upstream dialog. See [Trusted app reads](openwebui.md#trusted-app-reads).
+
 The app frame can reach only the sites that the server declares.
 Inside a host, the views call tools through the MCP Apps bridge and do not fetch the REST API directly (`contexts/views/src/shared/source.ts`), so they need no extra domains.
 

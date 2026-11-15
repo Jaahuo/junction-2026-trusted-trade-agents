@@ -9,3 +9,4 @@ COPY hosts/openwebui/agent/ /opt/trusted-trade/hosts/openwebui/agent/
 COPY hosts/openwebui/scripts/ /opt/trusted-trade/hosts/openwebui/scripts/
 COPY skills/trusted-trade-ordering/ /opt/trusted-trade/skills/trusted-trade-ordering/
 RUN python3 /opt/trusted-trade/hosts/openwebui/scripts/keep_suggestions.py /app/build/_app/immutable/chunks
+RUN python3 /opt/trusted-trade/hosts/openwebui/scripts/trust_app_reads.py /app/build/_app/immutable/chunks

@@ -26,7 +26,12 @@ The cards show invented products from the view fixtures.
 | Wholesaler activity     | [/activity](https://199-247-4-99.sslip.io/activity)                      |
 | MCP endpoint            | `https://199-247-4-99.sslip.io/mcp` (streamable HTTP, no authentication) |
 
-In the chat, sign in as `chef@localhost.invalid` (ask the team for the password) and select Acme Kitchens or Acme Bakery.
+Sign in to the chat with the public demo credentials:
+
+- Email: `chef@localhost.invalid`
+- Password: `junction2026`
+
+Select Acme Kitchens or Acme Bakery.
 Then ask for an order, for example "1,000 litres of lactose-free milk by Monday".
 Any other MCP client can connect to the MCP endpoint.
 

@@ -8,6 +8,14 @@ Built for the Valio Aimo challenge at Junction 2026 ([challenge brief](docs/chal
 
 **Pitch video:** [link added at submission](docs/submission.md#links-and-release-record) · **Deck:** [slides (PDF)](docs/trusted-trade-agents-slides.pdf)
 
+![The buyer chat start screen for Acme Kitchens, with suggested purchases](docs/screenshots/chat-start.png)
+
+| A person decides the exception                                                                                           | The wholesaler signs the confirmation                                                       |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| ![Approval card for an order over the limit, with approve, reject and agent actions](docs/screenshots/approval-card.png) | ![Order card after approval, with the signed confirmation](docs/screenshots/order-sent.png) |
+
+The cards show invented products from the view fixtures.
+
 ## Try it
 
 | What                    | Where                                                                    |

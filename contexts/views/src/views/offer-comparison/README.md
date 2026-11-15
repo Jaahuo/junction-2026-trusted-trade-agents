@@ -15,6 +15,4 @@ The order limit comes from `get_mandate`, as on the approval card, and is used o
 
 With the app running, open `/views/harness?view=offer-comparison` to inspect the fixture states: `loading`, `empty`, `error`, `offers` and `substitutes`. The fixtures use invented products.
 
-Screenshots (400 px, chat width): `screenshots/offers-*.png`. `offers-open-fi.png` is the same state in Finnish.
-
 Every text this view owns is in `strings.ts`, in English and Finnish; reason sentences come from the approval card's strings, units from its parts, and the loading, empty and error states from the shell. The view follows the language the shared shell picks (the tool input, the host, then the browser); in the harness, `?lang=fi` overrides it.

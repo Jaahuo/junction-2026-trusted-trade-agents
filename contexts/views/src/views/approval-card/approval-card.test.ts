@@ -603,3 +603,18 @@ test("Finnish renders the product row and its details", () => {
     setLang("en");
   }
 });
+
+test("no agent prompt promises approval of the replacement order", () => {
+  for (const text of [CARD.en, CARD.fi]) {
+    const prompts = [
+      text.reducePrompt("ord_test"),
+      text.findPrompt("Test milk", "out of stock"),
+      text.shortPrompt(2, 5, "Test milk", "Monday"),
+      text.latePrompt("Test milk", "Monday", "Tuesday"),
+    ];
+    for (const prompt of prompts) {
+      expect(prompt).not.toMatch(/for approval|to approve|hyväksyttäväksi/);
+      expect(prompt).toMatch(/only if a rule asks|vain, jos jokin sääntö vaatii/);
+    }
+  }
+});

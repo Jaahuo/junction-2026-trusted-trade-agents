@@ -8,7 +8,7 @@ This page prepares those artifacts; it is not a submission receipt.
 
 | Item        | Link                                                               | Status                                                                                                                              |
 | ----------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Pitch video | Not uploaded                                                       | Not recorded; maximum 2:00                                                                                                          |
+| Pitch video | https://www.youtube.com/watch?v=DtxJx4MbsQQ                        | Uploaded                                                                                                                            |
 | Deck PDF    | [trusted-trade-agents-slides.pdf](trusted-trade-agents-slides.pdf) | Exported and in the repository; upload it with the submission                                                                       |
 | Live demo   | https://199-247-4-99.sslip.io                                      | `/` and `/api/health` returned HTTP 200 on November 15; check again before submission and throughout judging                        |
 | Source      | https://github.com/Jaahuo/junction-2026-trusted-trade-agents       | **Public** since November 15; the page opened without a login. The history of `main` was rewritten without the challenge data files |

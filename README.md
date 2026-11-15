@@ -6,7 +6,7 @@ The buyer's mandate sets the limits, the wholesaler's server checks them on ever
 
 Built for the Valio Aimo challenge at Junction 2026 ([challenge brief](docs/challenge.md)).
 
-**Pitch video:** [link added at submission](docs/submission.md#links-and-release-record) · **Deck:** [slides (PDF)](docs/trusted-trade-agents-slides.pdf)
+**Pitch video:** [YouTube](https://www.youtube.com/watch?v=DtxJx4MbsQQ) · **Deck:** [slides (PDF)](docs/trusted-trade-agents-slides.pdf)
 
 ![The buyer chat start screen for Acme Kitchens, with suggested purchases](docs/screenshots/chat-start.png)
 
@@ -73,7 +73,7 @@ The demo mandate:
 
 - **Fix it instead of rejecting it.** Change amounts or products, or trim the order to the limit. The server checks it again.
 - **When stock runs short.** Part from stock plus a ranked substitute, or a split delivery.
-- **The agent shows its work.** The card shows why the agent picked each product and which rules it hit.
+- **The card shows the rules.** The card names each rule the order hit and what it asks the person to check.
 
 ### The buyer's answers become rules
 

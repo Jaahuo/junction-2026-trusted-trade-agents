@@ -6,18 +6,18 @@ This page prepares those artifacts; it is not a submission receipt.
 
 ## Links and release record
 
-| Item        | Link                                                         | Status                                                                                                       |
-| ----------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| Pitch video | Not uploaded                                                 | Not recorded; maximum 2:00                                                                                   |
-| Deck PDF    | Not uploaded                                                 | Not exported                                                                                                 |
-| Live demo   | https://199-247-4-99.sslip.io                                | `/` and `/api/health` returned HTTP 200 on November 15; check again before submission and throughout judging |
-| Source      | https://github.com/Jaahuo/junction-2026-trusted-trade-agents | **Private**; not accessible to judges without login                                                          |
+| Item        | Link                                                               | Status                                                                                                                              |
+| ----------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Pitch video | Not uploaded                                                       | Not recorded; maximum 2:00                                                                                                          |
+| Deck PDF    | [trusted-trade-agents-slides.pdf](trusted-trade-agents-slides.pdf) | Exported and in the repository; upload it with the submission                                                                       |
+| Live demo   | https://199-247-4-99.sslip.io                                      | `/` and `/api/health` returned HTTP 200 on November 15; check again before submission and throughout judging                        |
+| Source      | https://github.com/Jaahuo/junction-2026-trusted-trade-agents       | **Public** since November 15; the page opened without a login. The history of `main` was rewritten without the challenge data files |
 
 After recording, state the actual video length alongside the uploaded file and record the commit of the build shown.
 Before submitting, open each artifact and the demo without a login.
 The source must be public and open without a login.
-Issue [#299](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/299) owns cleanup and the source-publication decision. The closure of #38 and #63 did not authorize publication.
-The source link is not yet submission-ready.
+Issue [#299](https://github.com/Jaahuo/junction-2026-trusted-trade-agents/issues/299) records the cleanup and the publication decision: this repository goes public after the history rewrite.
+The rewrite and the public switch are done. The source link is submission-ready.
 The person submitting must add the actual video and deck links here and paste the submission receipt in issue #35 before the deadline.
 The submission form URL is not recorded here.
 

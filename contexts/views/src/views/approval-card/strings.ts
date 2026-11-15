@@ -98,7 +98,7 @@ export const VIEW = {
         `${name} approved. It goes to ${brand} when the payment is confirmed.`,
       notPlaced: (name: string, reasons: string) => `${name} was not placed: ${reasons}`,
       alternatives: (name: string) =>
-        `${name} rejected. Look for alternatives and send me a new order to approve.`,
+        `${name} rejected. Look for alternatives and place a new order. I approve it only if a rule asks.`,
       stop: (name: string) =>
         `${name} rejected. Order nothing for it, and do not ask again unless I ask for a new order.`,
     },
@@ -148,7 +148,7 @@ export const VIEW = {
         `Hyväksyin: ${name}. Se lähtee toimittajalle ${brand}, kun maksu on vahvistettu.`,
       notPlaced: (name: string, reasons: string) => `${name} ei mennyt läpi: ${reasons}`,
       alternatives: (name: string) =>
-        `Hylkäsin: ${name}. Etsi vaihtoehtoja ja lähetä minulle uusi tilaus hyväksyttäväksi.`,
+        `Hylkäsin: ${name}. Etsi vaihtoehtoja ja tee uusi tilaus. Hyväksyn sen vain, jos jokin sääntö vaatii.`,
       stop: (name: string) =>
         `Hylkäsin: ${name}. Älä tilaa sitä äläkä kysy uudelleen, ellen pyydä uutta tilausta.`,
     },

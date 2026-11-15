@@ -397,7 +397,7 @@ Approver request: ${order.decision?.note ?? "unknown"}.
 Original order request: ${order.originalRequest ?? "unknown"}.
 Gross total including VAT: ${order.total.gross.toFixed(2)} EUR. Mandate order limit including VAT: ${this.orderLimit === null ? "unknown" : `${this.orderLimit.toFixed(2)} EUR`}.
 Held order lines:\n${lines}
-${order.status === "declined" && order.decision?.next === "alternatives" ? "The approver REJECTED this order and asks for a NEW OFFER. Use get_order_status if needed, then search, get_offers and place_order to submit a replacement for approval." : ""}`;
+${order.status === "declined" && order.decision?.next === "alternatives" ? "The approver REJECTED this order and asks for a NEW OFFER. Use get_order_status if needed, then search, get_offers and place_order to submit a replacement. The server checks it and asks the approver only when a rule requires approval." : ""}`;
     await this.source?.context?.(text).catch(() => undefined);
     if (order.status === "declined" && order.decision?.next === "alternatives")
       await this.source?.message?.(text).catch(() => undefined);
@@ -459,7 +459,7 @@ Original order request: ${order.originalRequest ?? "unknown"}.
 Gross total including VAT: ${order.total.gross.toFixed(2)} EUR. Mandate order limit including VAT: ${this.orderLimit === null ? "unknown" : `${this.orderLimit.toFixed(2)} EUR`}.
 Held order lines:\n${descriptions.slice(0, order.lines.length).join("\n")}
 Available alternatives (not held order lines):\n${descriptions.slice(order.lines.length).join("\n") || "none"}
-${update ? "The approver REJECTED this order and asks for a NEW OFFER. Use get_order_status if needed, then search, get_offers and place_order to submit a replacement for approval." : ""}`;
+${update ? "The approver REJECTED this order and asks for a NEW OFFER. Use get_order_status if needed, then search, get_offers and place_order to submit a replacement. The server checks it and asks the approver only when a rule requires approval." : ""}`;
     await source.context?.(enriched).catch(() => undefined);
     try {
       await message(enriched);

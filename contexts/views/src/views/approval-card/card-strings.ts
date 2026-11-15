@@ -72,11 +72,11 @@ const en = {
   totalInclVat: "Total incl. VAT",
   reduceToFit: "Reduce to fit the limit",
   reducePrompt: (orderId: string) =>
-    `Get order ${orderId} under my order limit. Keep the products we need most. Send me a new offer for approval; use get_order_status if needed, then search, get_offers and place_order.`,
+    `Get order ${orderId} under my order limit. Keep the products we need most. Place a new order. The server checks it, and I approve it only if a rule asks. Use get_order_status if needed, then search, get_offers and place_order.`,
   reduceChips: ["Drop the items I need least", "Switch to cheaper brands", "Lower every quantity"],
   letAgentFind: "Let the agent find another",
   findPrompt: (name: string, outOfStock: string) =>
-    `${name} is ${outOfStock}. Find the best replacement and send me a new offer for approval; use get_order_status if needed, then search, get_offers and place_order.`,
+    `${name} is ${outOfStock}. Find the best replacement, then place a new order. The server checks it, and I approve it only if a rule asks. Use get_order_status if needed, then search, get_offers and place_order.`,
   sameBrand: "Find one from the same brand",
   cheapest: "Pick the cheapest match",
   waitUntil: (day: string) => `Deliver it ${day} instead`,
@@ -98,12 +98,12 @@ const en = {
   otherChoices: (count: number) => `Other choices (${count})`,
   letAgentSort: "Let the agent sort it out",
   shortPrompt: (arriving: number, all: number, name: string, weekday: string) =>
-    `Only ${arriving} of ${all} ${name} packs arrive on ${weekday}. Find the best way to get all ${all} and send me a new offer for approval; use get_order_status if needed, then search, get_offers and place_order.`,
+    `Only ${arriving} of ${all} ${name} packs arrive on ${weekday}. Find the best way to get all ${all}, then place a new order. The server checks it, and I approve it only if a rule asks. Use get_order_status if needed, then search, get_offers and place_order.`,
   allOnWeekday: (weekday: string) => `All on ${weekday}`,
   onlyPacks: (packs: string) => `Only ${packs}`,
   anotherProduct: "Another product",
   latePrompt: (name: string, asked: string, day: string) =>
-    `${name} arrives ${day}, but I need it by ${asked}. Find an offer that arrives on time and send me a new offer for approval; use get_order_status if needed, then search, get_offers and place_order.`,
+    `${name} arrives ${day}, but I need it by ${asked}. Find an offer that arrives on time, then place a new order. The server checks it, and I approve it only if a rule asks. Use get_order_status if needed, then search, get_offers and place_order.`,
   remove: (name: string) => `Remove ${name}`,
   showFewerProducts: "Show fewer products",
   showMoreProducts: (count: number) => `Show ${count} more product${count === 1 ? "" : "s"}`,
@@ -272,7 +272,7 @@ const fi: typeof en = {
   totalInclVat: "Yhteensä sis. ALV",
   reduceToFit: "Pienennä tilausrajaan",
   reducePrompt: (orderId) =>
-    `Pienennä tilaus ${orderId} tilausrajani alle. Pidä tärkeimmät tuotteet. Lähetä minulle uusi tarjous hyväksyttäväksi; käytä tarvittaessa get_order_status, sitten search, get_offers ja place_order.`,
+    `Pienennä tilaus ${orderId} tilausrajani alle. Pidä tärkeimmät tuotteet. Tee uusi tilaus. Palvelin tarkistaa sen, ja hyväksyn sen vain, jos jokin sääntö vaatii. Käytä tarvittaessa get_order_status, sitten search, get_offers ja place_order.`,
   reduceChips: [
     "Poista vähiten tarvitut tuotteet",
     "Vaihda edullisempiin merkkeihin",
@@ -280,7 +280,7 @@ const fi: typeof en = {
   ],
   letAgentFind: "Anna agentin etsiä toinen",
   findPrompt: (name, outOfStock) =>
-    `${name} on ${outOfStock}. Etsi paras korvaava tuote ja lähetä minulle uusi tarjous hyväksyttäväksi; käytä tarvittaessa get_order_status, sitten search, get_offers ja place_order.`,
+    `${name} on ${outOfStock}. Etsi paras korvaava tuote ja tee sitten uusi tilaus. Palvelin tarkistaa sen, ja hyväksyn sen vain, jos jokin sääntö vaatii. Käytä tarvittaessa get_order_status, sitten search, get_offers ja place_order.`,
   sameBrand: "Etsi saman merkin tuote",
   cheapest: "Valitse edullisin vastaava",
   waitUntil: (day) => `Toimita vasta ${day}`,
@@ -303,12 +303,12 @@ const fi: typeof en = {
   letAgentSort: "Anna agentin hoitaa",
   // The weekday takes the essive: "maanantai" → "maanantaina".
   shortPrompt: (arriving, all, name, weekday) =>
-    `${weekday}na saapuu vain ${arriving}/${all} pakkausta tuotetta ${name}. Etsi paras tapa saada kaikki ${all} ja lähetä minulle uusi tarjous hyväksyttäväksi; käytä tarvittaessa get_order_status, sitten search, get_offers ja place_order.`,
+    `${weekday}na saapuu vain ${arriving}/${all} pakkausta tuotetta ${name}. Etsi paras tapa saada kaikki ${all} ja tee sitten uusi tilaus. Palvelin tarkistaa sen, ja hyväksyn sen vain, jos jokin sääntö vaatii. Käytä tarvittaessa get_order_status, sitten search, get_offers ja place_order.`,
   allOnWeekday: (weekday) => `Kaikki ${weekday}na`,
   onlyPacks: (packs) => `Vain ${packs}`,
   anotherProduct: "Toinen tuote",
   latePrompt: (name, asked, day) =>
-    `${name} saapuu ${day}, mutta tarvitsen sen ${asked} mennessä. Etsi ajoissa saapuva tarjous ja lähetä minulle uusi tarjous hyväksyttäväksi; käytä tarvittaessa get_order_status, sitten search, get_offers ja place_order.`,
+    `${name} saapuu ${day}, mutta tarvitsen sen ${asked} mennessä. Etsi ajoissa saapuva tarjous ja tee sitten uusi tilaus. Palvelin tarkistaa sen, ja hyväksyn sen vain, jos jokin sääntö vaatii. Käytä tarvittaessa get_order_status, sitten search, get_offers ja place_order.`,
   remove: (name) => `Poista ${name}`,
   showFewerProducts: "Näytä vähemmän tuotteita",
   showMoreProducts: (count) => `Näytä ${count} tuotetta lisää`,
